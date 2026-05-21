@@ -98,3 +98,8 @@ CLAUDE.md
 .vscode/extensions.json
 local.conf
 local.env
+
+# ===== Generated Index Files (vexp, etc) =====
+edevcomP*
+edevcomP*.rs
+edevcomP*/

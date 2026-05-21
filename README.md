@@ -40,7 +40,7 @@ comP is a free alternative to Vexp that enables Claude Code, Cursor, Cline, and 
 ### From GitHub (Development)
 
 ```bash
-git clone https://github.com/comp-dev/comP.git
+git clone https://github.com/tsucky230/comP.git
 cd comP
 
 # Install dependencies
@@ -200,7 +200,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 ```bash
 # Clone and install
-git clone https://github.com/comp-dev/comP.git
+git clone https://github.com/tsucky230/comP.git
 cd comP
 npm install
 
@@ -243,17 +243,28 @@ comP is inspired by [Vexp](https://vexp.dev) and brings its powerful context-eng
 
 ## Resources
 
-- **GitHub**: <https://github.com/comp-dev/comP>
-- **Issues**: <https://github.com/comp-dev/comP/issues>
-- **Discussions**: <https://github.com/comp-dev/comP/discussions>
+- **GitHub**: <https://github.com/tsucky230/comP>
+- **Issues**: <https://github.com/tsucky230/comP/issues>
+- **Discussions**: <https://github.com/tsucky230/comP/discussions>
 - **Architecture Docs**: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - **API Reference**: [docs/API.md](docs/API.md)
+
+---
+
+## Support This Project
+
+comP is free and open-source. If you find it valuable, consider supporting development:
+
+- ☕ **[GitHub Sponsors](https://github.com/sponsors/tsucky230)** — Support ongoing development (coming soon)
+- 💖 **Star this repository** — Help others discover comP
+
+Your support enables faster development, better maintenance, and new features. Thank you! 🙏
 
 ---
 
 ## Questions?
 
 - 📖 **Read the Docs**: [docs/](docs/)
-- 🐛 **Found a Bug**: [Open an Issue](https://github.com/comp-dev/comP/issues/new)
-- 💬 **Have Ideas**: [Start a Discussion](https://github.com/comp-dev/comP/discussions/new)
+- 🐛 **Found a Bug**: [Open an Issue](https://github.com/tsucky230/comP/issues/new)
+- 💬 **Have Ideas**: [Start a Discussion](https://github.com/tsucky230/comP/discussions/new)
 - 👥 **Want to Help**: [CONTRIBUTING.md](CONTRIBUTING.md)

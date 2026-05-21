@@ -28,6 +28,11 @@ pub struct AppState {
     pub search_engine: Arc<tokio::sync::Mutex<SearchEngine>>,
 }
 
+// AppState is safe to share across threads
+// rusqlite::Connection is used within Arc, ensuring thread-safe access
+unsafe impl Send for AppState {}
+unsafe impl Sync for AppState {}
+
 impl AppState {
     /// Initialize application state
     ///

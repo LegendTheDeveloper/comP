@@ -3,7 +3,7 @@
   "displayName": "comP - Code Context Engine",
   "description": "Local-first code indexing engine for AI agents with MCP support. Open-source alternative to Vexp.",
   "version": "0.1.0",
-  "publisher": "comp-dev",
+  "publisher": "tsucky230",
   "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
@@ -23,10 +23,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/comp-dev/comP"
+    "url": "https://github.com/tsucky230/comP"
   },
   "bugs": {
-    "url": "https://github.com/comp-dev/comP/issues"
+    "url": "https://github.com/tsucky230/comP/issues"
   },
   "activationEvents": [
     "onStartupFinished"
@@ -98,7 +98,7 @@
     "vscode:prepublish": "npm run esbuild:prod",
     "compile": "npm run esbuild:dev",
     "watch": "npm run esbuild:dev -- --watch",
-    "esbuild:dev": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "esbuild:dev": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node22",
     "esbuild:prod": "npm run esbuild:dev -- --minify",
     "test": "npm run test:unit",
     "test:unit": "mocha --require ts-node/register 'src/mcp/**/*.test.ts'",

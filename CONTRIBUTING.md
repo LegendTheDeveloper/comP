@@ -14,7 +14,7 @@ comP is committed to providing a welcoming and inclusive community. Please treat
 
 If you discover a bug, please report it by creating a GitHub Issue:
 
-1. Go to [GitHub Issues](https://github.com/comp-dev/comP/issues)
+1. Go to [GitHub Issues](https://github.com/tsucky230/comP/issues)
 2. Click **New Issue** → **Bug Report**
 3. Provide:
    - **Title**: Brief description of the bug
@@ -35,7 +35,7 @@ If you discover a bug, please report it by creating a GitHub Issue:
 
 Have a feature idea? Create a Feature Request:
 
-1. Go to [GitHub Discussions](https://github.com/comp-dev/comP/discussions)
+1. Go to [GitHub Discussions](https://github.com/tsucky230/comP/discussions)
 2. Create a **New Discussion** with category "Ideas"
 3. Describe:
    - **What problem does this solve?**
@@ -60,7 +60,7 @@ Feature requests are reviewed by maintainers and may be added to the Roadmap.
 
 ```bash
 # Clone the repository
-git clone https://github.com/comp-dev/comP.git
+git clone https://github.com/tsucky230/comP.git
 cd comP
 
 # Install npm dependencies
@@ -264,8 +264,8 @@ All contributions should include documentation updates:
 ## Getting Help
 
 - 📖 **Documentation**: [docs/](docs/)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/comp-dev/comP/discussions)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/comp-dev/comP/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/tsucky230/comP/discussions)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/tsucky230/comP/issues)
 
 ---
 
