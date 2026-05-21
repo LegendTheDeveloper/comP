@@ -52,7 +52,7 @@ tsconfig.tsbuildinfo
 *.log
 *.log.*
 tmp/
-# temp/ — development documentation (removed from git tracking)
+temp/
 
 # ===== OS-Specific =====
 Thumbs.db
@@ -83,6 +83,7 @@ lcov.info
 .claude/
 .vexp/
 .cache/
+CLAUDE.md
 .eslintcache
 .stylelintcache
 .prettierignore

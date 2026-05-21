@@ -1,0 +1,199 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.4",
+  "serialNumber": "urn:uuid:comP-daemon-0.1.0",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-05-21T00:00:00Z",
+    "tools": [
+      {
+        "vendor": "Anthropic",
+        "name": "Claude Code",
+        "version": "4.5"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "comP Daemon",
+      "version": "0.1.0",
+      "description": "Local-first code indexing daemon for AI agents",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "tokio",
+      "version": "1.35",
+      "description": "Async runtime for Rust",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/tokio@1.35"
+    },
+    {
+      "type": "library",
+      "name": "tree-sitter",
+      "version": "0.20",
+      "description": "Incremental parsing library",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/tree-sitter@0.20"
+    },
+    {
+      "type": "library",
+      "name": "rusqlite",
+      "version": "0.30",
+      "description": "SQLite bindings for Rust",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/rusqlite@0.30"
+    },
+    {
+      "type": "library",
+      "name": "serde",
+      "version": "1.0",
+      "description": "Serialization framework for Rust",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/serde@1.0"
+    },
+    {
+      "type": "library",
+      "name": "serde_json",
+      "version": "1.0",
+      "description": "JSON support for serde",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/serde_json@1.0"
+    },
+    {
+      "type": "library",
+      "name": "anyhow",
+      "version": "1.0",
+      "description": "Flexible error handling",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/anyhow@1.0"
+    },
+    {
+      "type": "library",
+      "name": "thiserror",
+      "version": "1.0",
+      "description": "Error handling",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/thiserror@1.0"
+    },
+    {
+      "type": "library",
+      "name": "log",
+      "version": "0.4",
+      "description": "Logging facade",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/log@0.4"
+    },
+    {
+      "type": "library",
+      "name": "env_logger",
+      "version": "0.11",
+      "description": "env_logger implementation for log",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/env_logger@0.11"
+    },
+    {
+      "type": "library",
+      "name": "walkdir",
+      "version": "2.4",
+      "description": "Recursive directory iteration",
+      "licenses": [
+        {
+          "license": {
+            "id": "Unlicense OR MIT"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/walkdir@2.4"
+    },
+    {
+      "type": "library",
+      "name": "sha2",
+      "version": "0.10",
+      "description": "SHA-2 hash functions",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/sha2@0.10"
+    },
+    {
+      "type": "library",
+      "name": "regex",
+      "version": "1.10",
+      "description": "Regular expressions",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT OR Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:cargo/regex@1.10"
+    }
+  ]
+}
