@@ -1,0 +1,129 @@
+{
+  "name": "comp-vscode",
+  "displayName": "comP - Code Context Engine",
+  "description": "Local-first code indexing engine for AI agents with MCP support. Open-source alternative to Vexp.",
+  "version": "0.1.0",
+  "publisher": "comp-dev",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Code Analyzers",
+    "Debuggers"
+  ],
+  "keywords": [
+    "ai",
+    "mcp",
+    "code-indexing",
+    "context-engine",
+    "tree-sitter",
+    "code-search"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/comp-dev/comP"
+  },
+  "bugs": {
+    "url": "https://github.com/comp-dev/comP/issues"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "comp.setupAgents",
+        "title": "comP: Setup Agents",
+        "description": "Configure MCP settings for Claude Code, Cursor, Cline, etc."
+      },
+      {
+        "command": "comp.forceReindex",
+        "title": "comP: Force Re-index",
+        "description": "Force complete re-indexing of the workspace"
+      },
+      {
+        "command": "comp.generateContext",
+        "title": "comP: Generate Context Capsule",
+        "description": "Generate optimized context for current task"
+      },
+      {
+        "command": "comp.showImpactGraph",
+        "title": "comP: Show Impact Graph",
+        "description": "Show impact analysis for symbol at cursor"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "comp-explorer",
+          "title": "comP",
+          "icon": "resources/comp-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "comp-explorer": [
+        {
+          "id": "comp-stats",
+          "name": "Statistics",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "comP",
+      "properties": {
+        "comp.maxContextTokens": {
+          "type": "number",
+          "default": 8000,
+          "description": "Maximum tokens for context capsule (default: 8000 for Sonnet, 16000+ for Opus)"
+        },
+        "comp.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show dependency information as code lens"
+        },
+        "comp.autoIndex": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically index files on workspace open"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run esbuild:prod",
+    "compile": "npm run esbuild:dev",
+    "watch": "npm run esbuild:dev -- --watch",
+    "esbuild:dev": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
+    "esbuild:prod": "npm run esbuild:dev -- --minify",
+    "test": "npm run test:unit",
+    "test:unit": "mocha --require ts-node/register 'src/mcp/**/*.test.ts'",
+    "test:coverage": "nyc npm run test:unit",
+    "test:integration": "node ./out/test/runTest.js",
+    "lint:md": "markdownlint-cli2 '**/*.md'",
+    "lint:md:fix": "markdownlint-cli2 '**/*.md' --fix",
+    "lint:ts": "tsc --noEmit",
+    "daemon:build": "cd daemon && cargo build --release",
+    "daemon:test": "cd daemon && cargo test --all -- --test-threads=1"
+  },
+  "devDependencies": {
+    "@types/chai": "^4.3.11",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.3.9",
+    "chai": "^4.3.10",
+    "esbuild": "^0.19.11",
+    "markdownlint-cli2": "^0.12.1",
+    "mocha": "^10.2.0",
+    "nyc": "^15.1.0",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {}
+}

@@ -1,0 +1,55 @@
+# Exclude from VSIX package
+
+# ===== Development Files =====
+src/
+daemon/src/
+daemon/Cargo.toml
+daemon/target/
+Cargo.lock
+
+# ===== Build/Config =====
+tsconfig.json
+.eslintrc.json
+.markdownlintrc.json
+webpack.config.js
+jest.config.js
+
+# ===== Testing =====
+tests/
+**/*.test.ts
+**/*.spec.ts
+coverage/
+.nyc_output/
+
+# ===== Documentation (optional - include README) =====
+docs/
+.github/
+
+# ===== Dev Tools =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ===== Version Control =====
+.git/
+.gitignore
+.github/
+
+# ===== Node/Rust Build =====
+node_modules/
+dist/
+daemon/target/
+
+# ===== Logs =====
+*.log
+*.log.*
+
+# ===== OS/IDE =====
+Thumbs.db
+.AppleDouble
+.LSOverride
+*.sublime-project
+*.sublime-workspace

@@ -1,0 +1,77 @@
+# comP - Git Ignore Rules
+
+# ===== Node.js =====
+node_modules/
+npm-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+dist/
+out/
+
+# ===== Rust (Daemon) =====
+daemon/target/
+Cargo.lock
+*.rlib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# ===== VSCode Extension =====
+*.vsix
+
+# ===== IDE & Editor =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+.env.local
+
+# ===== comP Working Directory =====
+.comp/
+.vexp/
+
+# ===== Python (if used for tooling) =====
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+.pytest_cache/
+
+# ===== Build & Compilation =====
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# ===== Logs & Temp =====
+*.log
+*.log.*
+tmp/
+temp/
+
+# ===== OS-Specific =====
+Thumbs.db
+.AppleDouble
+.LSOverride
+*.sublime-project
+*.sublime-workspace
+
+# ===== Test Coverage =====
+coverage/
+.nyc_output/
+lcov.info
+
+# ===== Security & Credentials =====
+.credentials
+.secrets
+*.key
+*.pem
+
+# ===== Generated Files =====
+SBOM.json
+SBOM.xml

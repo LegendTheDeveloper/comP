@@ -1,0 +1,9 @@
+{
+  "extends": "default",
+  "rules": {
+    "MD003": false,
+    "MD013": false,
+    "MD024": { "siblings_only": true },
+    "MD034": false
+  }
+}
