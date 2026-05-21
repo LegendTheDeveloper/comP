@@ -52,7 +52,7 @@ tsconfig.tsbuildinfo
 *.log
 *.log.*
 tmp/
-temp/
+# temp/ — development documentation (removed from git tracking)
 
 # ===== OS-Specific =====
 Thumbs.db
@@ -65,13 +65,35 @@ Thumbs.db
 coverage/
 .nyc_output/
 lcov.info
+*.lcov
 
 # ===== Security & Credentials =====
 .credentials
 .secrets
 *.key
 *.pem
+.env.production
+.env.*.local
 
-# ===== Generated Files =====
-SBOM.json
-SBOM.xml
+# ===== Generated Files (Keep SBOM.json for release) =====
+# SBOM.json — included in release
+# SBOM.xml — generated for CI/CD
+
+# ===== Development Tools & Caches =====
+.claude/
+.vexp/
+.cache/
+.eslintcache
+.stylelintcache
+.prettierignore
+*.swp
+*.swo
+
+# ===== Miscellaneous Development =====
+.DS_Store
+.history/
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+local.conf
+local.env
