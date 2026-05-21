@@ -3,9 +3,7 @@
 # ===== Development Files =====
 
 src/
-daemon/src/
-daemon/Cargo.toml
-daemon/target/
+daemon/
 Cargo.lock
 
 # ===== Build/Config =====
@@ -47,8 +45,6 @@ docs/
 # ===== Node/Rust Build =====
 
 node_modules/
-dist/
-daemon/target/
 
 # ===== Logs =====
 
