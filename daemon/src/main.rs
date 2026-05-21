@@ -1,10 +1,10 @@
-// comP Rust デーモン
+// comP Rust Daemon
 //
-// 責務：
-// 1. GraphDB と SearchEngine を初期化
-// 2. JSON-RPC 2.0 MCP サーバーとして stdin/stdout でリッスン
-// 3. AI エージェント向けに 5 つの MCP ツールを提供
-// 4. セマンティック検索、影響分析、トークン計算
+// Responsibilities:
+// 1. Initialize GraphDB and SearchEngine
+// 2. Listen on stdin/stdout as JSON-RPC 2.0 MCP server
+// 3. Provide 5 MCP tools for AI agents
+// 4. Semantic search, impact analysis, token calculation
 
 use log::info;
 use std::sync::Arc;
@@ -18,36 +18,36 @@ mod ipc;
 use graph::GraphDB;
 use search::SearchEngine;
 
-/// アプリケーション状態
+/// Application state
 ///
-/// MCP サーバーで共有される状態：
-/// - GraphDB: コード構造の永続化（SQLite）
-/// - SearchEngine: セマンティック検索とスコアリング
+/// Shared state across MCP server:
+/// - GraphDB: Persist code structure (SQLite)
+/// - SearchEngine: Semantic search and scoring
 pub struct AppState {
     pub graph_db: Arc<GraphDB>,
     pub search_engine: Arc<tokio::sync::Mutex<SearchEngine>>,
 }
 
 impl AppState {
-    /// アプリケーション状態を初期化
+    /// Initialize application state
     ///
-    /// # 入力
-    /// - workspace_root: プロジェクト root ディレクトリ
+    /// # Input
+    /// - workspace_root: Project root directory
     ///
-    /// # 出力
-    /// - Result<Self>: AppState インスタンス または初期化エラー
+    /// # Output
+    /// - Result<Self>: AppState instance or initialization error
     ///
-    /// # 処理
-    /// 1. GraphDB: .comp/index.db を開く（なければ作成）
-    /// 2. SearchEngine: メモリ上の検索エンジンを初期化
+    /// # Process
+    /// 1. GraphDB: Open .comp/index.db (create if not exists)
+    /// 2. SearchEngine: Initialize in-memory search engine
     pub async fn new(workspace_root: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        // GraphDB 初期化
+        // Initialize GraphDB
         let graph_db = GraphDB::new(workspace_root).await?;
-        info!("GraphDB 初期化完了: {}", workspace_root);
+        info!("GraphDB initialized: {}", workspace_root);
 
-        // SearchEngine 初期化
+        // Initialize SearchEngine
         let search_engine = SearchEngine::new();
-        info!("SearchEngine 初期化完了");
+        info!("SearchEngine initialized");
 
         Ok(AppState {
             graph_db: Arc::new(graph_db),
@@ -60,24 +60,24 @@ impl AppState {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::new().default_filter_or("info")).init();
 
-    info!("comP デーモン起動");
+    info!("comP daemon starting");
 
-    // ワークスペース root の決定
+    // Determine workspace root
     let workspace_root = std::env::var("WORKSPACE_ROOT")
         .unwrap_or_else(|_| ".".to_string());
 
-    // アプリケーション状態初期化
+    // Initialize application state
     let state = Arc::new(AppState::new(&workspace_root).await?);
-    info!("アプリケーション状態初期化完了");
+    info!("Application state initialized");
 
-    // MCP サーバー起動
-    // JSON-RPC 2.0 over stdio で AI エージェントと通信
+    // Start MCP server
+    // JSON-RPC 2.0 over stdio for AI agent communication
     let mcp_server = mcp::MCPServer::new(state);
-    info!("MCP サーバー起動 (stdin/stdout リッスン)");
+    info!("MCP server started (listening on stdin/stdout)");
 
     mcp_server.run().await?;
 
-    info!("MCP サーバー停止");
+    info!("MCP server stopped");
     Ok(())
 }
 
@@ -86,26 +86,26 @@ mod integration_tests {
     use super::*;
     use serde_json::json;
 
-    /// Phase 7 統合テスト: AppState 初期化
+    /// Phase 7 Integration Test: AppState initialization
     #[tokio::test]
     async fn test_appstate_initialization() {
-        // 一時ディレクトリを作成
+        // Create temporary directory
         let temp_dir = std::env::temp_dir().join("comP_test_appstate");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
 
-        // AppState を初期化
+        // Initialize AppState
         let result = AppState::new(temp_dir.to_str().unwrap()).await;
         assert!(result.is_ok(), "AppState initialization failed");
 
         let _state = result.unwrap();
-        // AppState 生成成功を確認
+        // Verify AppState creation succeeded
 
-        // クリーンアップ
+        // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    /// Phase 7 統合テスト: MCP サーバー生成と基本動作
+    /// Phase 7 Integration Test: MCP server creation and basic operation
     #[tokio::test]
     async fn test_mcp_server_creation_with_appstate() {
         let temp_dir = std::env::temp_dir().join("comP_test_mcp_server");
@@ -118,30 +118,30 @@ mod integration_tests {
                 .expect("Failed to create AppState"),
         );
 
-        // MCP サーバーを生成
+        // Create MCP server
         let _server = mcp::MCPServer::new(state);
-        // MCP サーバーは正常に生成されたことを確認
+        // Verify MCP server created successfully
         assert!(true);
 
-        // クリーンアップ
+        // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    /// Phase 7 統合テスト: フルパイプライン（インデックス→検索→MCP）
+    /// Phase 7 Integration Test: Full pipeline (index -> search -> MCP)
     #[tokio::test]
     async fn test_full_pipeline_index_search_mcp() {
         let temp_dir = std::env::temp_dir().join("comP_test_full_pipeline");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
 
-        // AppState 初期化
+        // Initialize AppState
         let state = Arc::new(
             AppState::new(temp_dir.to_str().unwrap())
                 .await
                 .expect("Failed to create AppState"),
         );
 
-        // SearchEngine にテストデータを投入
+        // Load test data into SearchEngine
         let symbols = vec![
             ("src/auth.rs".to_string(), "authenticate".to_string(), "function".to_string(), 10u32),
             ("src/auth.rs".to_string(), "authorize".to_string(), "function".to_string(), 25u32),
@@ -153,7 +153,7 @@ mod integration_tests {
         assert!(result.is_ok(), "Failed to build search index");
         drop(search_engine);
 
-        // MCP ツール: run_pipeline
+        // MCP Tool: run_pipeline
         let mcp_server = mcp::MCPServer::new(state.clone());
         let run_pipeline_params = json!({
             "task": "authentication implementation",
@@ -166,7 +166,7 @@ mod integration_tests {
         assert!(response["pivot_files"].is_array(), "pivot_files should be array");
         assert!(response["total_tokens"].is_number(), "total_tokens should be number");
 
-        // MCP ツール: get_context
+        // MCP Tool: get_context
         let get_context_params = json!({
             "query": "authentication",
             "limit": 10
@@ -178,7 +178,7 @@ mod integration_tests {
         assert!(response["results"].is_array(), "results should be array");
         assert!(response["count"].is_number(), "count should be number");
 
-        // MCP ツール: get_impact_graph
+        // MCP Tool: get_impact_graph
         let impact_params = json!({
             "symbol_id": 1,
             "symbol_name": "authenticate"
@@ -190,25 +190,25 @@ mod integration_tests {
         assert!(response["affected_files"].is_object(), "affected_files should be object");
         assert!(response["severity"].is_string(), "severity should be string");
 
-        // MCP ツール: list_indexed_files
+        // MCP Tool: list_indexed_files
         let result = mcp_server.handle_list_indexed_files().await;
         assert!(result.is_ok(), "list_indexed_files failed");
         let response = result.unwrap();
         assert!(response["files"].is_array(), "files should be array");
         assert!(response["total_files"].is_number(), "total_files should be number");
 
-        // MCP ツール: get_token_usage
+        // MCP Tool: get_token_usage
         let result = mcp_server.handle_get_token_usage().await;
         assert!(result.is_ok(), "get_token_usage failed");
         let response = result.unwrap();
         assert!(response["total_tokens_consumed"].is_number(), "total_tokens_consumed should be number");
         assert!(response["efficiency"].is_string(), "efficiency should be string");
 
-        // クリーンアップ
+        // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    /// Phase 7 E2E テスト: JSON-RPC 2.0 プロトコル検証
+    /// Phase 7 E2E Test: JSON-RPC 2.0 protocol compliance
     #[tokio::test]
     async fn test_json_rpc_protocol_compliance() {
         let temp_dir = std::env::temp_dir().join("comP_test_jsonrpc");
@@ -236,7 +236,7 @@ mod integration_tests {
         // Response should have jsonrpc and result fields (when wrapped)
         assert!(response.is_object(), "Response should be a JSON object");
 
-        // クリーンアップ
+        // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
