@@ -83,6 +83,7 @@ impl MCPServer {
                 "get_impact_graph" => self.handle_get_impact_graph(params).await,
                 "list_indexed_files" => self.handle_list_indexed_files().await,
                 "get_token_usage" => self.handle_get_token_usage().await,
+                "getStats" => self.handle_get_stats().await,
                 _ => Err(anyhow!("Unknown method: {}", method)),
             };
 
@@ -434,6 +435,26 @@ impl MCPServer {
             "efficiency": efficiency
         }))
     }
+
+    /// Get index statistics (file count, node count, edge count)
+    ///
+    /// # Response:
+    /// ```json
+    /// {
+    ///   "total_files": 42,
+    ///   "total_nodes": 1250,
+    ///   "total_edges": 890
+    /// }
+    /// ```
+    pub async fn handle_get_stats(&self) -> Result<Value> {
+        let (file_count, node_count, edge_count) = self.state.graph_db.get_stats()?;
+
+        Ok(json!({
+            "total_files": file_count,
+            "total_nodes": node_count,
+            "total_edges": edge_count
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -599,5 +620,24 @@ mod tests {
         // Test TokenCounter integration
         let savings = crate::search::TokenCounter::calculate_savings(10000, 4000);
         assert!(savings.contains("%"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_get_stats() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        let result = server.handle_get_stats().await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert!(response["total_files"].is_number());
+        assert!(response["total_nodes"].is_number());
+        assert!(response["total_edges"].is_number());
+
+        // Verify values are non-negative
+        assert!(response["total_files"].as_i64().unwrap_or(-1) >= 0);
+        assert!(response["total_nodes"].as_i64().unwrap_or(-1) >= 0);
+        assert!(response["total_edges"].as_i64().unwrap_or(-1) >= 0);
     }
 }

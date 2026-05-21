@@ -61,14 +61,12 @@ impl IPCServer {
 
     /// Handle get statistics request
     async fn handle_get_stats(&self) -> Result<Value> {
-        // 1. Query DB for stats
-        // 2. Return node count, edge count, file count
-        
+        let (file_count, node_count, edge_count) = self.state.graph_db.get_stats()?;
+
         Ok(json!({
-            "total_files": 0,
-            "total_nodes": 0,
-            "total_edges": 0,
-            "indexed_time_ms": 0
+            "total_files": file_count,
+            "total_nodes": node_count,
+            "total_edges": edge_count
         }))
     }
 }

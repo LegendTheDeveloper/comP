@@ -133,11 +133,12 @@ export class DaemonManager {
     };
 
     return new Promise((resolve, reject) => {
-      // Set timeout for response (10 seconds)
+      // Set timeout based on method (getStats may be slow on large indexes)
+      const timeoutMs = method === "getStats" ? 15000 : 10000;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`Request timeout for method: ${method}`));
-      }, 10000);
+        reject(new Error(`Request timeout for method: ${method} (waited ${timeoutMs}ms)`));
+      }, timeoutMs);
 
       // Wait for response
       this.pendingRequests.set(id, (response) => {
@@ -170,9 +171,23 @@ export class DaemonManager {
 
   /**
    * Get current index statistics
+   *
+   * Returns current state of the index
    */
-  async getStats(): Promise<{ total_files: number; total_nodes: number; total_edges: number }> {
-    return (await this.request("getStats", {})) as any;
+  async getStats(): Promise<{
+    total_files: number;
+    total_nodes: number;
+    total_edges: number;
+  }> {
+    const result = await this.request("getStats", {});
+    if (!result || typeof result !== "object") {
+      throw new Error("Invalid stats response from daemon");
+    }
+    return {
+      total_files: Number(result.total_files) || 0,
+      total_nodes: Number(result.total_nodes) || 0,
+      total_edges: Number(result.total_edges) || 0,
+    };
   }
 
   /**

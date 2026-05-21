@@ -147,14 +147,23 @@ export class SidebarPanel {
 
     try {
       const stats = await this.daemonManager.getStats();
-      
-      // TODO: Send to webview
-      // this.webviewPanel.webview.postMessage({
-      //   type: "statsUpdate",
-      //   stats
-      // });
+
+      // Update webview with stats
+      this.webviewPanel.webview.postMessage({
+        type: "statsUpdate",
+        data: {
+          total_files: stats.total_files || 0,
+          total_nodes: stats.total_nodes || 0,
+          total_edges: stats.total_edges || 0,
+        },
+      });
     } catch (error) {
-      console.error("[comP] Failed to fetch stats:", error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error("[comP] Failed to fetch stats:", errorMsg);
+      this.webviewPanel.webview.postMessage({
+        type: "statsError",
+        message: `Failed to fetch statistics: ${errorMsg}`,
+      });
     }
   }
 
