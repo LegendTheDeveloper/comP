@@ -84,6 +84,7 @@ export class SidebarPanel {
    */
   public setDaemonManager(daemonManager: DaemonManager): void {
     this.daemonManager = daemonManager;
+    this.addLog("✓ Indexing started");
     this.startStatsRefresh();
   }
 
@@ -469,7 +470,7 @@ export class SidebarPanel {
         </style>
       </head>
       <body>
-        <h2>comP Dashboard</h2>
+        <h2>comP Dashboard <span style="font-size: 12px; opacity: 0.7; font-weight: normal;">(v0.1.0)</span></h2>
 
         <div class="control-panel">
           <div class="button-group">
