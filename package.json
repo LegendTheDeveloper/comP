@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "tsucky230",
   "license": "MIT",
+  "icon": "resources/comp-icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -95,9 +96,10 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run esbuild:prod",
-    "compile": "npm run esbuild:dev",
+    "vscode:prepublish": "npm run generate-icon && npm run esbuild:prod",
+    "compile": "npm run generate-icon && npm run esbuild:dev",
     "watch": "npm run esbuild:dev -- --watch",
+    "generate-icon": "node scripts/generate-icon.js",
     "esbuild:dev": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node22",
     "esbuild:prod": "npm run esbuild:dev -- --minify",
     "test": "npm run test:unit",
@@ -121,9 +123,9 @@
     "markdownlint-cli2": "^0.12.1",
     "mocha": "^10.2.0",
     "nyc": "^15.1.0",
+    "sharp": "^0.34.5",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.3.3"
-  },
-  "dependencies": {}
+  }
 }
