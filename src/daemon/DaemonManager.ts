@@ -170,6 +170,13 @@ export class DaemonManager {
   }
 
   /**
+   * Check if daemon is running
+   */
+  isRunning(): boolean {
+    return this.isReady && this.process !== null;
+  }
+
+  /**
    * Get current index statistics
    *
    * Returns current state of the index
@@ -183,10 +190,11 @@ export class DaemonManager {
     if (!result || typeof result !== "object") {
       throw new Error("Invalid stats response from daemon");
     }
+    const stats = result as any;
     return {
-      total_files: Number(result.total_files) || 0,
-      total_nodes: Number(result.total_nodes) || 0,
-      total_edges: Number(result.total_edges) || 0,
+      total_files: Number(stats.total_files) || 0,
+      total_nodes: Number(stats.total_nodes) || 0,
+      total_edges: Number(stats.total_edges) || 0,
     };
   }
 

@@ -8,6 +8,8 @@
 // 5. Set up event listeners for auto-indexing
 
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { DaemonManager } from "./daemon/DaemonManager";
 import { StatusBar } from "./ui/StatusBar";
 import { SidebarPanel } from "./ui/SidebarPanel";
@@ -20,40 +22,63 @@ let statusBar: StatusBar | null = null;
 let sidebarPanel: SidebarPanel | null = null;
 let codeLensProvider: DependencyCodeLensProvider | null = null;
 
+// Check if .comp directory exists in workspace root
+function hasCompDirectory(): boolean {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) return false;
+
+  const compPath = path.join(workspaceRoot, ".comp");
+  return fs.existsSync(compPath);
+}
+
 /** Activation: called when extension is loaded */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log("[comP] Extension activating...");
 
   try {
-    // 1. Initialize daemon manager
-    daemonManager = new DaemonManager(context);
-    await daemonManager.start();
+    // Check if .comp directory exists
+    const autoStartDaemon = hasCompDirectory();
+    console.log(`[comP] .comp directory exists: ${autoStartDaemon}`);
 
-    // 2. Initialize status bar
-    statusBar = new StatusBar();
-    statusBar.show("Initializing...");
-
-    // 3. Initialize sidebar panel
-    sidebarPanel = SidebarPanel.createOrShow(context.extensionPath, daemonManager);
+    // 1. Initialize sidebar panel (always, for manual control)
+    sidebarPanel = SidebarPanel.createOrShow(context.extensionPath, null, context);
     context.subscriptions.push(sidebarPanel as any);
 
-    // 4. Register commands
-    registerCommands(context, daemonManager, statusBar);
+    // 2. Initialize daemon manager only if .comp exists
+    if (autoStartDaemon) {
+      daemonManager = new DaemonManager(context);
 
-    // 5. Register CodeLens provider
-    codeLensProvider = new DependencyCodeLensProvider(daemonManager);
-    context.subscriptions.push(
-      vscode.languages.registerCodeLensProvider(
-        ["typescript", "javascript", "python", "go", "rust", "java", "csharp"],
-        codeLensProvider
-      )
-    );
+      // 2a. Initialize status bar
+      statusBar = new StatusBar();
+      statusBar.show("Initializing...");
 
-    // 6. Set up file system watchers for auto-indexing
-    setupFileWatchers(context, daemonManager, codeLensProvider);
+      await daemonManager.start();
 
-    statusBar.show("Ready");
-    console.log("[comP] Extension activated successfully");
+      // 2b. Update sidebar panel with daemon manager
+      sidebarPanel?.setDaemonManager(daemonManager);
+
+      // 4. Register commands
+      registerCommands(context, daemonManager, statusBar);
+
+      // 5. Register CodeLens provider
+      codeLensProvider = new DependencyCodeLensProvider(daemonManager);
+      context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider(
+          ["typescript", "javascript", "python", "go", "rust", "java", "csharp"],
+          codeLensProvider
+        )
+      );
+
+      // 6. Set up file system watchers for auto-indexing
+      setupFileWatchers(context, daemonManager, codeLensProvider);
+
+      statusBar.show("Ready");
+      console.log("[comP] Extension activated successfully (auto-mode)");
+    } else {
+      // No .comp directory - manual startup mode
+      console.log("[comP] No .comp directory found - sidebar will show startup controls");
+      console.log("[comP] Extension activated successfully (manual-mode)");
+    }
   } catch (error) {
     console.error("[comP] Activation failed:", error);
     vscode.window.showErrorMessage(

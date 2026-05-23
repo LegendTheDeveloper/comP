@@ -63,7 +63,7 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
    */
   async provideCodeLenses(
     document: vscode.TextDocument,
-    token: vscode.CancellationToken
+    _token: vscode.CancellationToken
   ): Promise<vscode.CodeLens[]> {
     // 言語フィルタ：サポート対象言語のみ処理
     if (!this.isSupportedLanguage(document.languageId)) {
@@ -150,9 +150,9 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
    */
   resolveCodeLens(
     codeLens: vscode.CodeLens,
-    token: vscode.CancellationToken
+    _token: vscode.CancellationToken
   ): vscode.CodeLens {
-    const symbolInfo = codeLens.data as SymbolInfo;
+    const symbolInfo = (codeLens as any).data as SymbolInfo;
 
     if (symbolInfo.dependentCount > 0) {
       const refText = `${symbolInfo.dependentCount} reference${

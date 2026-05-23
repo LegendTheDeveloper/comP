@@ -24,9 +24,11 @@ export class StatusBar {
   show(status: string): void {
     if (!this.item) return;
     this.item.text = `◈ comP: ${status}`;
-    this.item.backgroundColor = new vscode.ThemeColor(
-      status === "Error" ? "statusBarItem.errorBackground" : undefined
-    );
+    if (status === "Error") {
+      this.item.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
+    } else {
+      this.item.backgroundColor = undefined;
+    }
     this.item.show();
   }
 
