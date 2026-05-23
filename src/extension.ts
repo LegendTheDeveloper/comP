@@ -42,7 +42,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // 1. Initialize sidebar panel (always, for manual control)
     sidebarPanel = SidebarPanel.createOrShow(context.extensionPath, null, context);
-    context.subscriptions.push(sidebarPanel as any);
+
+    // WebviewViewProvider として登録：これでサイドバーに表示される
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(SidebarPanel.viewType, sidebarPanel, {
+        webviewOptions: { retainContextWhenHidden: true },
+      })
+    );
 
     // 2. Initialize daemon manager only if .comp exists
     if (autoStartDaemon) {
