@@ -294,10 +294,14 @@ export class SidebarPanel {
       });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error("[comP] Failed to fetch stats:", errorMsg);
+
+      // Log detailed error but don't propagate to UI to avoid spam
+      console.debug("[comP] Stats fetch error (will retry):", errorMsg);
+
+      // Send partial error (don't crash UI)
       this.webviewPanel.webview.postMessage({
         type: "statsError",
-        message: `Failed to fetch statistics: ${errorMsg}`,
+        message: `Indexing in progress... (${errorMsg.includes("timeout") ? "large codebase" : "connecting"})`,
         daemonRunning: !!this.daemonManager,
       });
     }

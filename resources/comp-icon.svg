@@ -1,31 +1,16 @@
 <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- Radial gradient for background -->
-    <radialGradient id="bgGradient" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" style="stop-color:#0099ff;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#0055dd;stop-opacity:1" />
+    <radialGradient id="bgGrad" cx="50%" cy="50%">
+      <stop offset="0%" stop-color="#1e90ff"/>
+      <stop offset="100%" stop-color="#0055cc"/>
     </radialGradient>
-
-    <!-- Glow filter for star -->
-    <filter id="starGlow">
-      <feGaussianBlur stdDeviation="1.5" result="coloredBlur"/>
-      <feMerge>
-        <feMergeNode in="coloredBlur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
   </defs>
 
-  <!-- Circular background with gradient -->
-  <circle cx="64" cy="64" r="62" fill="url(#bgGradient)"/>
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="url(#bgGrad)"/>
 
-  <!-- Outer ring accent -->
-  <circle cx="64" cy="64" r="62" fill="none" stroke="#ffffff" stroke-width="0.8" opacity="0.4"/>
-
-  <!-- Five-pointed star (outline style with glow) -->
-  <polygon points="64,22 74,48 102,48 80,66 90,102 64,80 38,102 48,66 26,48 54,48"
-           fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="miter" filter="url(#starGlow)"/>
-
-  <!-- Inner subtle accent circle -->
-  <circle cx="64" cy="64" r="32" fill="none" stroke="#ffffff" stroke-width="0.6" opacity="0.25"/>
+  <!-- Five-pointed star outline in white -->
+  <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polygon points="64,24 74,50 102,50 80,68 90,104 64,80 38,104 48,68 26,50 54,50"/>
+  </g>
 </svg>

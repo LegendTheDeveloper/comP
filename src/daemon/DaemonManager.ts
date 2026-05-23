@@ -133,11 +133,11 @@ export class DaemonManager {
     };
 
     return new Promise((resolve, reject) => {
-      // Set timeout based on method (getStats may be slow on large indexes)
-      const timeoutMs = method === "getStats" ? 15000 : 10000;
+      // Set timeout based on method (getStats may be very slow on large indexes)
+      const timeoutMs = method === "getStats" ? 30000 : 10000;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`Request timeout for method: ${method} (waited ${timeoutMs}ms)`));
+        reject(new Error(`Request timeout for method: ${method}`));
       }, timeoutMs);
 
       // Wait for response
