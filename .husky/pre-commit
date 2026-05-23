@@ -1,0 +1,27 @@
+#!/bin/sh
+set -e
+
+echo "[comP] Running pre-commit hook..."
+
+# Step 1: Run TypeScript linter
+echo "[comP] Linting TypeScript..."
+npm run lint:ts || {
+  echo "[comP] ❌ TypeScript linting failed. Commit blocked."
+  exit 1
+}
+
+# Step 2: Run unit tests (MANDATORY)
+echo "[comP] Running unit tests..."
+npm run test:unit || {
+  echo "[comP] ❌ Tests failed. Commit blocked."
+  echo "[comP] Per CLAUDE.md: tests MUST pass before commit"
+  exit 1
+}
+
+# Step 3: Check test coverage
+echo "[comP] Checking test coverage..."
+npm run test:coverage || {
+  echo "[comP] ⚠️  Coverage check failed or coverage below 80%"
+}
+
+echo "[comP] ✅ Pre-commit checks passed"

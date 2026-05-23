@@ -72,10 +72,12 @@ export class DaemonManager {
         // Process complete lines (JSON-RPC responses are newline-separated)
         const lines = this.responseBuffer.split("\n");
 
-        // Process all complete lines
+        // Process all complete lines except the last one (which may be incomplete)
         for (let i = 0; i < lines.length - 1; i++) {
           const line = lines[i].trim();
-          if (line.length === 0) continue;
+          if (line.length === 0) {
+            continue;
+          }
 
           try {
             const response: JSONRPCResponse = JSON.parse(line);
