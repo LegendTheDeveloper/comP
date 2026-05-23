@@ -5,6 +5,7 @@
   "version": "0.1.0",
   "publisher": "tsucky230",
   "license": "MIT",
+  "icon": "resources/comp-icon.svg",
   "engines": {
     "vscode": "^1.85.0"
   },

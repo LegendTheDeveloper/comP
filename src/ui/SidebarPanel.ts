@@ -18,6 +18,7 @@
 
 import * as vscode from "vscode";
 import * as path from "path";
+import * as fs from "fs";
 import { DaemonManager } from "../daemon/DaemonManager";
 
 
@@ -41,6 +42,18 @@ export class SidebarPanel {
   public static createOrShow(extensionPath: string, daemonManager: DaemonManager | null, context?: vscode.ExtensionContext): SidebarPanel {
     const column = vscode.ViewColumn.One;
 
+    // Get version from package.json
+    let version = "0.1.0";
+    try {
+      if (context) {
+        const pkgPath = path.join(context.extensionPath, "package.json");
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+        version = pkg.version || version;
+      }
+    } catch {
+      // Use default version if unable to read
+    }
+
     // If we already have a panel, show it
     if (SidebarPanel.instance) {
       SidebarPanel.instance.webviewPanel.reveal(column);
@@ -50,10 +63,10 @@ export class SidebarPanel {
       return SidebarPanel.instance;
     }
 
-    // Create new panel
+    // Create new panel with version
     const webviewPanel = vscode.window.createWebviewPanel(
       SidebarPanel.viewType,
-      "comP Statistics",
+      `comP Statistics (v${version})`,
       column,
       {
         enableScripts: true,
@@ -295,13 +308,20 @@ export class SidebarPanel {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
 
-      // Log detailed error but don't propagate to UI to avoid spam
-      console.debug("[comP] Stats fetch error (will retry):", errorMsg);
+      // Silently log timeout errors - daemon is likely still indexing
+      if (errorMsg.includes("timeout")) {
+        console.debug("[comP] Stats timeout (daemon still indexing)");
+        // Don't send error to UI, keep showing last known values
+        return;
+      }
 
-      // Send partial error (don't crash UI)
+      // Log other errors
+      console.debug("[comP] Stats fetch error:", errorMsg);
+
+      // Only show error for non-timeout errors
       this.webviewPanel.webview.postMessage({
         type: "statsError",
-        message: `Indexing in progress... (${errorMsg.includes("timeout") ? "large codebase" : "connecting"})`,
+        message: `Unable to fetch stats: ${errorMsg}`,
         daemonRunning: !!this.daemonManager,
       });
     }
