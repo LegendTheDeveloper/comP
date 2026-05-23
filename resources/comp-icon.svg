@@ -1,12 +1,9 @@
 <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!-- White circular background: center(64,64) radius=64 -->
-  <circle cx="64" cy="64" r="64" fill="#ffffff"/>
-
   <!--
-    Five-pointed star: center(64,64), outer radius R=52, inner radius r=20
-    Outer points at angles: -90°, -18°, 54°, 126°, 198° (clockwise from top)
-    Inner points at angles: -54°, 18°, 90°, 162°, 234°
-    Inner radius ratio r/R = sin(18°)/sin(54°) ≈ 0.382 (standard star proportions)
+    VS Code activity bar icon: transparent background, single-color star.
+    VS Code applies theme color to all opaque pixels automatically.
+    Star: center(64,64), outer R=52, inner r=20, standard 5-point proportions.
+    Marketplace PNG (comp-icon.png) is generated separately with white bg.
   -->
   <polygon
     points="64,12 76,48 113,48 83,70 95,106 64,84 33,106 45,70 15,48 52,48"
