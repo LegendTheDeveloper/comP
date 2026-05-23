@@ -32,6 +32,7 @@ export class DaemonManager {
   private requestId = 0;
   private pendingRequests = new Map<number, (response: JSONRPCResponse) => void>();
   private isReady = false;
+  private responseBuffer = "";
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -62,9 +63,36 @@ export class DaemonManager {
         cwd: workspaceRoot,
       });
 
-      // Handle daemon output
+      // Handle daemon output - parse JSON-RPC responses
       this.process.stdout?.on("data", (data) => {
-        console.log("[comP daemon]", data.toString().trim());
+        this.responseBuffer += data.toString();
+
+        // Process complete lines (JSON-RPC responses are newline-separated)
+        const lines = this.responseBuffer.split("\n");
+
+        // Process all complete lines
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lines[i].trim();
+          if (line.length === 0) continue;
+
+          try {
+            const response: JSONRPCResponse = JSON.parse(line);
+            const handler = this.pendingRequests.get(response.id as number);
+
+            if (handler) {
+              this.pendingRequests.delete(response.id as number);
+              handler(response);
+            } else {
+              console.debug("[comP] Response for unknown request:", response.id);
+            }
+          } catch (error) {
+            // Not a JSON response - might be debug output from daemon
+            console.debug("[comP daemon output]", line);
+          }
+        }
+
+        // Keep the incomplete line in buffer for next data chunk
+        this.responseBuffer = lines[lines.length - 1];
       });
 
       this.process.stderr?.on("data", (data) => {
@@ -78,10 +106,37 @@ export class DaemonManager {
 
       this.isReady = true;
       console.log("[comP] Daemon started successfully");
+
+      // Wait for daemon to be ready by checking connectivity
+      await this.waitForReady();
     } catch (error) {
       console.error("[comP] Failed to start daemon:", error);
       throw new Error(`Failed to start comP daemon: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * Wait for daemon to be ready
+   *
+   * Pings the daemon with a getStats request until it responds
+   */
+  private async waitForReady(): Promise<void> {
+    const maxRetries = 10;
+    const retryDelayMs = 500;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        await this.getStats();
+        console.log("[comP] Daemon is ready");
+        return;
+      } catch (error) {
+        if (i < maxRetries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+        }
+      }
+    }
+
+    console.warn("[comP] Daemon readiness timeout - may not be fully initialized");
   }
 
   /**
@@ -133,8 +188,9 @@ export class DaemonManager {
     };
 
     return new Promise((resolve, reject) => {
-      // Set timeout based on method (getStats may be very slow on large indexes)
-      const timeoutMs = method === "getStats" ? 30000 : 10000;
+      // Set timeout based on method
+      // With proper response handling, these should complete quickly
+      const timeoutMs = method === "getStats" ? 5000 : 3000;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(new Error(`Request timeout for method: ${method}`));

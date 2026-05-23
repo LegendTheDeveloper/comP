@@ -68,7 +68,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("comP daemon starting");
 
     // Determine workspace root
-    let workspace_root = std::env::var("WORKSPACE_ROOT")
+    let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
+        .or_else(|_| std::env::var("WORKSPACE_ROOT"))  // Fallback for compatibility
         .unwrap_or_else(|_| ".".to_string());
 
     // Initialize application state
