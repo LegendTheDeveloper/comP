@@ -65,7 +65,9 @@ export class DaemonManager {
 
       // Handle daemon output - parse JSON-RPC responses
       this.process.stdout?.on("data", (data) => {
-        this.responseBuffer += data.toString();
+        const chunk = data.toString();
+        console.debug(`[comP] Received ${chunk.length} bytes from daemon`);
+        this.responseBuffer += chunk;
 
         // Process complete lines (JSON-RPC responses are newline-separated)
         const lines = this.responseBuffer.split("\n");
@@ -77,17 +79,19 @@ export class DaemonManager {
 
           try {
             const response: JSONRPCResponse = JSON.parse(line);
+            console.log(`[comP] Parsed JSON-RPC response (id: ${response.id})`);
             const handler = this.pendingRequests.get(response.id as number);
 
             if (handler) {
+              console.log(`[comP] Found handler for request id: ${response.id}`);
               this.pendingRequests.delete(response.id as number);
               handler(response);
             } else {
-              console.debug("[comP] Response for unknown request:", response.id);
+              console.warn(`[comP] No handler for response id: ${response.id}`);
             }
           } catch (error) {
             // Not a JSON response - might be debug output from daemon
-            console.debug("[comP daemon output]", line);
+            console.debug(`[comP daemon output] ${line}`);
           }
         }
 
@@ -187,18 +191,22 @@ export class DaemonManager {
       params,
     };
 
+    console.log(`[comP] Sending request: ${method} (id: ${id})`);
+
     return new Promise((resolve, reject) => {
       // Set timeout based on method
       // With proper response handling, these should complete quickly
       const timeoutMs = method === "getStats" ? 5000 : 3000;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
+        console.error(`[comP] Request timeout: ${method} (id: ${id}) after ${timeoutMs}ms`);
         reject(new Error(`Request timeout for method: ${method}`));
       }, timeoutMs);
 
       // Wait for response
       this.pendingRequests.set(id, (response) => {
         clearTimeout(timeout);
+        console.log(`[comP] Received response: ${method} (id: ${id})`);
         if (response.error) {
           reject(new Error(response.error.message));
         } else {
@@ -207,6 +215,7 @@ export class DaemonManager {
       });
 
       // Send request to daemon
+      console.debug(`[comP] Writing request to daemon: ${JSON.stringify(request)}`);
       this.process!.stdin?.write(JSON.stringify(request) + "\n");
     });
   }

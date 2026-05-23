@@ -447,7 +447,12 @@ impl MCPServer {
     /// }
     /// ```
     pub async fn handle_get_stats(&self) -> Result<Value> {
+        info!("handle_get_stats: called");
+
         let (file_count, node_count, edge_count) = self.state.graph_db.get_stats()?;
+
+        info!("handle_get_stats: returning stats - files: {}, nodes: {}, edges: {}",
+              file_count, node_count, edge_count);
 
         Ok(json!({
             "total_files": file_count,
