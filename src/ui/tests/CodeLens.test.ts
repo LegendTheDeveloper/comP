@@ -16,6 +16,14 @@ class MockDaemonManager implements Partial<DaemonManager> {
   async request(_method: string, _params?: unknown): Promise<unknown> {
     return { symbols: [], dependents: [] };
   }
+
+  async getSymbols(_filePath: string): Promise<any[]> {
+    return [];
+  }
+
+  isRunning(): boolean {
+    return true;
+  }
 }
 
 describe("DependencyCodeLensProvider", () => {
@@ -77,11 +85,12 @@ describe("DependencyCodeLensProvider", () => {
     });
 
     it("should handle daemon errors gracefully", async () => {
-      // Mock daemon that throws error
+      // getSymbols が例外を投げる daemon のモック
       const errorDaemon = {
-        request: async () => {
+        getSymbols: async (_path: string) => {
           throw new Error("Daemon unavailable");
         },
+        isRunning: () => true,
       };
       const errorProvider = new DependencyCodeLensProvider(
         errorDaemon as any
