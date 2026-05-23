@@ -1,8 +1,14 @@
 <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!-- White circular background -->
+  <!-- White circular background: center(64,64) radius=64 -->
   <circle cx="64" cy="64" r="64" fill="#ffffff"/>
 
-  <!-- Black five-pointed star -->
-  <polygon points="64,14 79,52 120,52 87,79 103,121 64,92 25,121 41,79 8,52 49,52"
-           fill="#000000"/>
+  <!--
+    Five-pointed star: center(64,64), outer radius R=52, inner radius r=20
+    Outer points at angles: -90°, -18°, 54°, 126°, 198° (clockwise from top)
+    Inner points at angles: -54°, 18°, 90°, 162°, 234°
+    Inner radius ratio r/R = sin(18°)/sin(54°) ≈ 0.382 (standard star proportions)
+  -->
+  <polygon
+    points="64,12 76,48 113,48 83,70 95,106 64,84 33,106 45,70 15,48 52,48"
+    fill="#000000"/>
 </svg>
