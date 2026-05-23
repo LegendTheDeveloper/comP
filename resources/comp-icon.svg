@@ -1,6 +1,8 @@
 <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!-- Five-pointed star in white (transparent background) -->
-  <!-- Star sized to fill viewBox optimally -->
-  <polygon points="64,10 80,50 123,50 88,80 104,122 64,90 24,122 40,80 5,50 48,50"
-           fill="#ffffff" stroke="none"/>
+  <!-- White circular background -->
+  <circle cx="64" cy="64" r="64" fill="#ffffff"/>
+
+  <!-- Black five-pointed star -->
+  <polygon points="64,14 79,52 120,52 87,79 103,121 64,92 25,121 41,79 8,52 49,52"
+           fill="#000000"/>
 </svg>
