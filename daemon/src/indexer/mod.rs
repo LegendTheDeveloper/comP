@@ -30,7 +30,10 @@ pub struct Indexer {
 impl Indexer {
     /// Create a new indexer for the given workspace
     pub fn new(workspace_root: &str) -> Self {
-        let walker = FileWalker::new(workspace_root, WalkerConfig::default());
+        let mut config = WalkerConfig::default();
+        config.ignore_patterns = Self::load_ignore_patterns(workspace_root);
+
+        let walker = FileWalker::new(workspace_root, config);
         let parser = CodeParser::default();
 
         Indexer {
@@ -38,6 +41,28 @@ impl Indexer {
             walker,
             parser,
         }
+    }
+
+    /// Load user-defined ignore patterns from .comp/ignore
+    fn load_ignore_patterns(workspace_root: &str) -> Vec<String> {
+        let path = std::path::Path::new(workspace_root).join(".comp/ignore");
+        std::fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .collect()
+    }
+
+    /// Load node limit settings from .comp/config.json
+    /// Returns (max_nodes, on_limit_exceeded)
+    fn load_comp_config(workspace_root: &str) -> (i64, String) {
+        let path = std::path::Path::new(workspace_root).join(".comp/config.json");
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+        let max_nodes = json["max_nodes"].as_i64().unwrap_or(200_000);
+        let on_limit = json["on_limit_exceeded"].as_str().unwrap_or("warn").to_string();
+        (max_nodes, on_limit)
     }
 
     /// Index the entire workspace
@@ -81,10 +106,34 @@ impl Indexer {
             }
         }
 
-        // 3. TODO: Delete entries for removed files from DB
-        // for path in walk_result.deleted_files {
-        //     db.delete_file(&path)?;
-        // }
+        // 3. 削除されたファイルのエントリを DB から除去
+        for path in &walk_result.deleted_files {
+            if let Err(e) = db.delete_file(path) {
+                eprintln!("Warning: Failed to delete file entry {}: {}", path, e);
+            }
+        }
+
+        // 4. .comp/config.json の max_nodes チェック
+        let (max_nodes, on_limit) = Self::load_comp_config(&self.workspace_root);
+        if let Ok((_, node_count, _)) = db.get_stats() {
+            if node_count > max_nodes {
+                match on_limit.as_str() {
+                    "stop" => {
+                        log::warn!(
+                            "Node limit reached ({} > {}). Indexing halted. Add entries to .comp/ignore to reduce scope.",
+                            node_count, max_nodes
+                        );
+                        return Ok((total_files, changed_count, symbols_count));
+                    }
+                    _ => {
+                        log::warn!(
+                            "Node limit exceeded ({} > {}). Consider adding .comp/ignore entries or increasing max_nodes in .comp/config.json.",
+                            node_count, max_nodes
+                        );
+                    }
+                }
+            }
+        }
 
         Ok((total_files, changed_count, symbols_count))
     }
@@ -107,20 +156,27 @@ impl Indexer {
     async fn parse_and_extract(&mut self, file_entry: &FileEntry, db: &crate::graph::GraphDB) -> Result<usize> {
         use std::fs;
 
-        // 1. Read file content
+        // 1. Read file content based on type
         let full_path = Path::new(&self.workspace_root).join(&file_entry.path);
-        let content = fs::read_to_string(&full_path)?;
-
-        // 2. Parse based on language
-        let symbols = match file_entry.language.as_str() {
-            "json" => DocumentParser::parse_json(&content)?,
-            "jsonl" => DocumentParser::parse_jsonl(&content)?,
-            "xml" => DocumentParser::parse_xml(&content)?,
-            "markdown" | "md" => DocumentParser::parse_markdown(&content)?,
-            _ => {
-                // Tree-sitter parsing for code
-                self.parser.parse_file(&file_entry.language, &content).await?
-            }
+        
+        let is_binary = file_entry.language.as_str() == "parquet";
+        
+        let (symbols, content_str) = if is_binary {
+            let syms = DocumentParser::parse_parquet(&full_path)?;
+            (syms, String::new()) // Binary files don't use string content for extraction later
+        } else {
+            let content = fs::read_to_string(&full_path)?;
+            let syms = match file_entry.language.as_str() {
+                "json" => DocumentParser::parse_json(&content)?,
+                "jsonl" => DocumentParser::parse_jsonl(&content)?,
+                "xml" => DocumentParser::parse_xml(&content)?,
+                "markdown" | "md" => DocumentParser::parse_markdown(&content)?,
+                _ => {
+                    // Tree-sitter parsing for code
+                    self.parser.parse_file(&file_entry.language, &content).await?
+                }
+            };
+            (syms, content)
         };
 
         // 3. Store file in DB
@@ -142,11 +198,15 @@ impl Indexer {
 
         // 5. Extract and store dependencies (edges) — Phase 4
         // Extract raw dependencies from source code
-        let raw_deps = DependencyAnalyzer::extract_dependencies(
-            &file_entry.language,
-            &content,
-            &file_entry.path,
-        ).unwrap_or_default();
+        let raw_deps = if is_binary {
+            Vec::new()
+        } else {
+            DependencyAnalyzer::extract_dependencies(
+                &file_entry.language,
+                &content_str,
+                &file_entry.path,
+            ).unwrap_or_default()
+        };
 
         // Resolve dependency names to node IDs
         let edges = DependencyAnalyzer::resolve_dependencies(&raw_deps, &symbol_map, &HashMap::new());
@@ -163,27 +223,39 @@ impl Indexer {
     }
 
     /// Index a single file (incremental update)
-    pub async fn index_file(&mut self, path: &Path) -> Result<()> {
-        let content = std::fs::read_to_string(path)?;
-        
-        // Get relative path
-        let relative_path = path.strip_prefix(&self.workspace_root)?;
-        let relative_str = relative_path.to_string_lossy().to_string();
-        
-        // Detect language (same logic as walker)
-        let language = self.walker_detect_language(&relative_str);
+    ///
+    /// WHY: ファイル変更時に呼ばれる。元実装は DB 未保存 (TODO のまま) で
+    /// 統計に一切反映されなかった。parse_and_extract を再利用して
+    /// パース・シンボル抽出・依存解決・DB 保存まで一気通貫で行う。
+    pub async fn index_file(&mut self, path: &Path, db: &crate::graph::GraphDB) -> Result<()> {
+        use sha2::{Sha256, Digest};
 
-        // Parse
-        match language.as_str() {
-            "json" => { DocumentParser::parse_json(&content)?; },
-            "xml" => { DocumentParser::parse_xml(&content)?; },
-            "markdown" | "md" => { DocumentParser::parse_markdown(&content)?; },
-            _ => { 
-                self.parser.parse_file(&language, &content).await?;
-            }
+        // workspace_root 相対パスへ変換 (絶対パスのまま DB に入ると一意性が崩れる)
+        // WHY: Windows の to_string_lossy() は \ を返すが DB は / で統一する。
+        // VSCode の TypeScript 側は / で送ってくるため、混在するとパス照合が壊れる。
+        let relative_path = path
+            .strip_prefix(&self.workspace_root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+
+        let language = self.walker_detect_language(&relative_path);
+
+        // ファイルハッシュ計算 (FileEntry に必須)
+        // バイナリファイル(Parquetなど)に対応するためbytesとして読み込む
+        let content_bytes = std::fs::read(path)?;
+        let mut hasher = Sha256::new();
+        hasher.update(&content_bytes);
+        let hash = format!("{:x}", hasher.finalize());
+
+        let file_entry = FileEntry {
+            path: relative_path,
+            hash,
+            language,
+            modified_time: 0,
         };
 
-        // TODO: Update graph DB
+        // parse_and_extract が DB 書き込みまで実行
+        self.parse_and_extract(&file_entry, db).await?;
 
         Ok(())
     }
@@ -208,9 +280,11 @@ impl Indexer {
                 "html" | "htm" => "html",
                 "css" | "scss" | "less" => "css",
                 "json" => "json",
+                "jsonl" => "jsonl",
                 "yaml" | "yml" => "yaml",
                 "xml" => "xml",
                 "md" => "markdown",
+                "parquet" => "parquet",
                 _ => "unknown",
             }
         } else {

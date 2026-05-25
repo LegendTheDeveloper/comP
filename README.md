@@ -2,7 +2,7 @@
 
 **An open-source, local-first code indexing engine that provides AI coding agents with optimal context.**
 
-comP is a free alternative to Vexp that enables Claude Code, Cursor, Cline, and other AI agents to understand and analyze your codebase efficiently. It indexes your project, generates semantic context, and estimates token usage—all running locally on your machine.
+comP enables Claude Code, Cursor, Cline, and other AI agents to understand and analyze your codebase efficiently. It indexes your project, builds a semantic code graph, and estimates token usage—all running locally on your machine.
 
 ---
 
@@ -73,6 +73,21 @@ Choose your AI agent (Claude Code, Cursor, Cline, etc.), and comP will configure
 
 ---
 
+## Agent Compatibility
+
+| Agent | Status | Notes |
+| --- | --- | --- |
+| **Claude Code** | ✅ Verified | Tested by maintainers |
+| **GitHub Copilot** | ✅ Verified | Tested by maintainers |
+| Cursor | ⚪ Should work | MCP 2024-11-05 compliant — untested |
+| Cline | ⚪ Should work | MCP 2024-11-05 compliant — untested |
+| Windsurf | ⚪ Should work | MCP 2024-11-05 compliant — untested |
+| Gemini | ❌ Not supported | No MCP support (REST API only) |
+
+Any MCP 2024-11-05 compliant client should work. If your agent needs a specific config, [open an issue](https://github.com/tsucky230/comP/issues/new).
+
+---
+
 ## Usage
 
 ### Command Palette
@@ -109,6 +124,48 @@ Once configured, AI agents like Claude Code can call comP's tools:
 @comP run_pipeline
 Analyze the impact of changing the `authenticate()` function
 ```
+
+---
+
+## Configuration
+
+comP stores its configuration in `.comp/` at your project root (excluded from git by default).
+
+### Excluding Files and Directories
+
+Create `.comp/ignore` to exclude paths from indexing (same syntax as `.gitignore`):
+
+```gitignore
+node_modules/
+vendor/
+dist/
+build/
+target/
+__pycache__/
+*.min.js
+```
+
+The following patterns are excluded by default: `node_modules/`, `.git/`, `dist/`, `build/`, `target/`.
+
+### Index Limits
+
+Create `.comp/config.json` to control indexing behavior for large repositories:
+
+```json
+{
+  "max_nodes": 100000,
+  "on_limit_exceeded": "warn"
+}
+```
+
+| Option | Values | Default | Description |
+| --- | --- | --- | --- |
+| `max_nodes` | integer | `200000` | Threshold for the total node count |
+| `on_limit_exceeded` | `"warn"` \| `"stop"` | `"warn"` | `warn`: notify and continue · `stop`: halt indexing |
+
+> **Expected database size** (`.comp/index.db`): ~1–5 MB for small projects (~1k files), ~20–80 MB for medium (~10k files), ~200 MB–1 GB for large repositories (100k+ files). Only symbol metadata is stored—no raw file content.
+>
+> **Tip for monorepos**: Open only the relevant subdirectory in VSCode. comP indexes only the open workspace folder.
 
 ---
 
@@ -232,12 +289,6 @@ npm run lint:md:fix
 | **v0.2** | Word (.docx) support, advanced impact analysis |
 | **v0.3** | Embedding-based search, cross-repo indexing |
 | **v1.0** | Stable API, wider agent support, community integrations |
-
----
-
-## Acknowledgments
-
-comP is inspired by [Vexp](https://vexp.dev) and brings its powerful context-engine capabilities to the open-source community.
 
 ---
 

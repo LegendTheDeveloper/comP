@@ -13,7 +13,6 @@ mod indexer;
 mod graph;
 mod search;
 mod mcp;
-mod ipc;
 
 use graph::GraphDB;
 use search::SearchEngine;
@@ -76,6 +75,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(AppState::new(&workspace_root).await?);
     info!("Application state initialized");
 
+    // 初回 workspace 全体インデックス (MCP server 起動前に完了させる)
+    // WHY: デーモン起動時に DB は空。これを実行しないとファイル数=0 のまま固まる。
+    // tokio::spawn できないのは GraphDB 内部 (rusqlite Connection) が !Sync のため。
+    // Phase 3 で GraphDB を tokio::sync::Mutex<Connection> 化したら spawn 化可能。
+    // 現状は同期実行 → VSCode の getStats リトライ (5秒x10回=50秒) 内に完了する想定。
+    {
+        info!("Starting initial workspace indexing...");
+        // WHY: 前回セッションの hash を DB から読み込み、変更ファイルだけ再インデックスする。
+        // None を渡すと全ファイルを毎回フルスキャンしてしまうため、セッション間の陳腐化を防ぐ。
+        let previous_hashes = state.graph_db.get_all_file_hashes().unwrap_or_default();
+        let mut indexer = indexer::Indexer::new(&workspace_root);
+        match indexer.index_workspace(Some(&previous_hashes), &state.graph_db).await {
+            Ok((total, indexed, symbols)) => {
+                info!(
+                    "Initial indexing complete: indexed {}/{} files, {} symbols",
+                    indexed, total, symbols
+                );
+            }
+            Err(e) => log::error!("Initial indexing failed: {}", e),
+        }
+    }
+
     // Start MCP server
     // JSON-RPC 2.0 over stdio for AI agent communication
     let mcp_server = mcp::MCPServer::new(state);
@@ -111,7 +132,7 @@ mod integration_tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    /// Phase 7 Integration Test: MCP server creation and basic operation
+    /// MCPServer 生成後に getStats が正しく初期値 (0/0/0) を返すか検証
     #[tokio::test]
     async fn test_mcp_server_creation_with_appstate() {
         let temp_dir = std::env::temp_dir().join("comP_test_mcp_server");
@@ -124,12 +145,12 @@ mod integration_tests {
                 .expect("Failed to create AppState"),
         );
 
-        // Create MCP server
-        let _server = mcp::MCPServer::new(state);
-        // Verify MCP server created successfully
-        assert!(true);
+        let server = mcp::MCPServer::new(state);
+        let stats = server.handle_get_stats().await.expect("getStats failed");
+        assert_eq!(stats["total_files"], 0);
+        assert_eq!(stats["total_nodes"], 0);
+        assert_eq!(stats["total_edges"], 0);
 
-        // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -203,12 +224,12 @@ mod integration_tests {
         assert!(response["files"].is_array(), "files should be array");
         assert!(response["total_files"].is_number(), "total_files should be number");
 
-        // MCP Tool: get_token_usage
+        // MCP Tool: get_token_usage (未実装ステータス)
         let result = mcp_server.handle_get_token_usage().await;
         assert!(result.is_ok(), "get_token_usage failed");
         let response = result.unwrap();
-        assert!(response["total_tokens_consumed"].is_number(), "total_tokens_consumed should be number");
-        assert!(response["efficiency"].is_string(), "efficiency should be string");
+        assert_eq!(response["status"], "not_implemented");
+        assert!(response["timestamp"].is_number());
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);

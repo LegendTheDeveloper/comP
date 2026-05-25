@@ -31,57 +31,44 @@ function hasCompDirectory(): boolean {
   return fs.existsSync(compPath);
 }
 
+let watcherDisposable: vscode.Disposable | null = null;
+let codeLensDisposable: vscode.Disposable | null = null;
+let commandsRegistered = false;
+
 /** Activation: called when extension is loaded */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   console.log("[comP] Extension activating...");
 
   try {
-    // Check if .comp directory exists
     const autoStartDaemon = hasCompDirectory();
     console.log(`[comP] .comp directory exists: ${autoStartDaemon}`);
 
-    // 1. Initialize sidebar panel (always, for manual control)
+    // 1. Sidebar panel (常時。manual モードでも Start ボタンで起動できるよう)
     sidebarPanel = SidebarPanel.createOrShow(context.extensionPath, null, context);
-
-    // WebviewViewProvider として登録：これでサイドバーに表示される
     context.subscriptions.push(
       vscode.window.registerWebviewViewProvider(SidebarPanel.viewType, sidebarPanel, {
         webviewOptions: { retainContextWhenHidden: true },
       })
     );
 
-    // 2. Initialize daemon manager only if .comp exists
+    // 2. ライフサイクルコールバックを SidebarPanel に注入
+    // WHY: SidebarPanel が new DaemonManager() で独自に二重生成していた問題を排除。
+    // Start/Stop ボタンの実体は extension.ts が一元管理する。
+    sidebarPanel.setLifecycleCallbacks({
+      onStartRequest: async () => {
+        await startDaemonStack(context);
+        return daemonManager;
+      },
+      onStopRequest: async () => {
+        await stopDaemonStack();
+      },
+    });
+
+    // 3. auto モード: .comp 存在時は即起動
     if (autoStartDaemon) {
-      daemonManager = new DaemonManager(context);
-
-      // 2a. Initialize status bar
-      statusBar = new StatusBar();
-      statusBar.show("Initializing...");
-
-      await daemonManager.start();
-
-      // 2b. Update sidebar panel with daemon manager
-      sidebarPanel?.setDaemonManager(daemonManager);
-
-      // 4. Register commands
-      registerCommands(context, daemonManager, statusBar);
-
-      // 5. Register CodeLens provider
-      codeLensProvider = new DependencyCodeLensProvider(daemonManager);
-      context.subscriptions.push(
-        vscode.languages.registerCodeLensProvider(
-          ["typescript", "javascript", "python", "go", "rust", "java", "csharp"],
-          codeLensProvider
-        )
-      );
-
-      // 6. Set up file system watchers for auto-indexing
-      setupFileWatchers(context, daemonManager, codeLensProvider);
-
-      statusBar.show("Ready");
+      await startDaemonStack(context);
       console.log("[comP] Extension activated successfully (auto-mode)");
     } else {
-      // No .comp directory - manual startup mode
       console.log("[comP] No .comp directory found - sidebar will show startup controls");
       console.log("[comP] Extension activated successfully (manual-mode)");
     }
@@ -91,6 +78,77 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       `comP failed to activate: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+/**
+ * Daemon + 周辺機能を一括起動する。
+ * 二重起動を防ぐため既存 daemonManager がある場合は何もしない。
+ */
+async function startDaemonStack(context: vscode.ExtensionContext): Promise<void> {
+  if (daemonManager?.isRunning()) {
+    console.log("[comP] Daemon already running, skipping startDaemonStack");
+    return;
+  }
+
+  daemonManager = new DaemonManager(context);
+
+  if (!statusBar) {
+    statusBar = new StatusBar();
+  }
+  statusBar.show("Initializing...");
+
+  await daemonManager.start();
+
+  sidebarPanel?.setDaemonManager(daemonManager);
+
+  // commands は activate 時に 1 度だけ登録（VSCode は同じ ID の重複登録を禁止）
+  if (!commandsRegistered) {
+    registerCommands(context, daemonManager, statusBar);
+    commandsRegistered = true;
+  }
+
+  // CodeLens / FileWatcher は restart で再生成必要なので毎回登録 → dispose 管理
+  if (codeLensDisposable) {
+    codeLensDisposable.dispose();
+  }
+  codeLensProvider = new DependencyCodeLensProvider(daemonManager);
+  codeLensDisposable = vscode.languages.registerCodeLensProvider(
+    ["typescript", "javascript", "python", "go", "rust", "java", "csharp"],
+    codeLensProvider
+  );
+  context.subscriptions.push(codeLensDisposable);
+
+  if (watcherDisposable) {
+    watcherDisposable.dispose();
+    watcherDisposable = null;
+  }
+  watcherDisposable = setupFileWatchers(context, daemonManager, codeLensProvider);
+
+  statusBar.show("Ready");
+}
+
+/**
+ * Daemon + 周辺機能を一括停止する。commands 登録は VSCode lifecycle で
+ * 管理されるため dispose しない (deactivate まで保持)。
+ */
+async function stopDaemonStack(): Promise<void> {
+  if (watcherDisposable) {
+    watcherDisposable.dispose();
+    watcherDisposable = null;
+  }
+  if (codeLensDisposable) {
+    codeLensDisposable.dispose();
+    codeLensDisposable = null;
+  }
+  codeLensProvider = null;
+
+  if (daemonManager) {
+    await daemonManager.stop();
+    daemonManager = null;
+  }
+
+  sidebarPanel?.setDaemonManager(null);
+  statusBar?.show("Stopped");
 }
 
 /** Deactivation: called when extension is unloaded */
@@ -115,13 +173,13 @@ function setupFileWatchers(
   context: vscode.ExtensionContext,
   daemonManager: DaemonManager,
   codeLensProvider: DependencyCodeLensProvider
-): void {
+): vscode.Disposable | null {
   const config = vscode.workspace.getConfiguration("comp");
   const autoIndex = config.get<boolean>("autoIndex", true);
 
   if (!autoIndex) {
     console.log("[comP] Auto-indexing disabled");
-    return;
+    return null;
   }
 
   // Debounce timer for rapid file changes
@@ -163,4 +221,5 @@ function setupFileWatchers(
 
   context.subscriptions.push(watcher);
   console.log("[comP] Auto-indexing enabled");
+  return watcher;
 }

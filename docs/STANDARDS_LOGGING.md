@@ -22,7 +22,7 @@
 
 ## 3. フォーマット（推奨）
 
-```
+```text
 [YYYY-MM-DD HH:MM:SS] [LEVEL] [module:line] message {context}
 ```
 

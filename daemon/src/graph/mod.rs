@@ -11,6 +11,7 @@
 
 use anyhow::Result;
 use rusqlite::Connection;
+use std::collections::HashMap;
 
 mod schema;
 
@@ -149,12 +150,158 @@ impl GraphDB {
         Ok((file_count, node_count, edge_count))
     }
 
+    /// List all indexed files with id, path, language
+    ///
+    /// WHY: handle_list_indexed_files が実データを返すために必要。
+    pub fn list_files(&self) -> Result<Vec<(i64, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, path, language FROM files ORDER BY path"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Count symbols (nodes) per file_id
+    pub fn count_symbols_per_file(&self) -> Result<HashMap<i64, i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_id, COUNT(*) FROM nodes GROUP BY file_id"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (file_id, count) = row?;
+            map.insert(file_id, count);
+        }
+        Ok(map)
+    }
+
+    /// Search symbols by name (LIKE pattern, case-insensitive)
+    ///
+    /// WHY: SearchEngine の TF-IDF が未構築のため、当面の手段として
+    /// シンボル名 LIKE 検索で context を返す。
+    pub fn search_symbols_by_name(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String, String, i32)>> {
+        // 返却: (file_path, symbol_name, kind, line)
+        let pattern = format!("%{}%", query);
+        let mut stmt = self.conn.prepare(
+            "SELECT files.path, nodes.name, nodes.kind, nodes.line
+             FROM nodes JOIN files ON nodes.file_id = files.id
+             WHERE LOWER(nodes.name) LIKE LOWER(?)
+             LIMIT ?"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i32>(3)?,
+            ))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Build symbol_id -> (name, file_path) map for impact analysis
+    pub fn get_symbol_map(&self) -> Result<HashMap<i64, (String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT nodes.id, nodes.name, files.path
+             FROM nodes JOIN files ON nodes.file_id = files.id"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (id, name, path) = row?;
+            map.insert(id, (name, path));
+        }
+        Ok(map)
+    }
+
+    /// Build reverse-dependency map: to_id -> [from_id, ...]
+    ///
+    /// WHY: 「シンボル X を変更したら誰が影響を受けるか」は
+    /// 「X を呼んでいる側 (from)」を逆引きする必要があるため。
+    pub fn get_reverse_deps(&self) -> Result<HashMap<i64, Vec<i64>>> {
+        let mut stmt = self.conn.prepare("SELECT from_id, to_id FROM edges")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut map: HashMap<i64, Vec<i64>> = HashMap::new();
+        for row in rows {
+            let (from_id, to_id) = row?;
+            map.entry(to_id).or_insert_with(Vec::new).push(from_id);
+        }
+        Ok(map)
+    }
+
     /// Clear all indexed data (for force re-index)
     pub fn clear_index(&self) -> Result<()> {
         self.conn.execute("DELETE FROM edges", [])?;
         self.conn.execute("DELETE FROM nodes", [])?;
         self.conn.execute("DELETE FROM files", [])?;
         Ok(())
+    }
+
+    /// Delete a single file and its associated nodes/edges
+    ///
+    /// WHY: ファイル削除/リネーム時に古いエントリを残すと、impact 分析や
+    /// 統計が嘘の値になる。CASCADE を使わず明示的に edges → nodes → files の
+    /// 順で削除する (SQLite の外部キー設定が無い前提)。
+    pub fn delete_file(&self, path: &str) -> Result<usize> {
+        // file_id を取得 (存在しなければ no-op で 0 件)
+        let file_id: Option<i64> = self.conn
+            .query_row("SELECT id FROM files WHERE path = ?", [path], |row| row.get(0))
+            .ok();
+
+        let Some(fid) = file_id else { return Ok(0); };
+
+        // 1. このファイルのノード ID をすべて取得
+        let mut stmt = self.conn.prepare("SELECT id FROM nodes WHERE file_id = ?")?;
+        let node_ids: Vec<i64> = stmt
+            .query_map([fid], |row| row.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+
+        // 2. 該当ノードを参照するエッジを削除 (from / to 両方)
+        for nid in &node_ids {
+            self.conn.execute(
+                "DELETE FROM edges WHERE from_id = ? OR to_id = ?",
+                rusqlite::params![nid, nid],
+            )?;
+        }
+
+        // 3. ノード削除
+        self.conn.execute("DELETE FROM nodes WHERE file_id = ?", [fid])?;
+
+        // 4. ファイル本体削除
+        let removed = self.conn.execute("DELETE FROM files WHERE id = ?", [fid])?;
+
+        Ok(removed)
+    }
+
+    /// Load all (path → hash) entries from the DB for incremental indexing
+    ///
+    /// WHY: Passing these to index_workspace lets the indexer skip files whose
+    /// content hash hasn't changed since the last session, avoiding a full
+    /// re-index on every daemon restart.
+    pub fn get_all_file_hashes(&self) -> Result<HashMap<String, String>> {
+        let mut stmt = self.conn.prepare("SELECT path, hash FROM files")?;
+        let map = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(map)
     }
 }
 

@@ -32,6 +32,9 @@ export class DaemonManager {
   private requestId = 0;
   private pendingRequests = new Map<number, (response: JSONRPCResponse) => void>();
   private isReady = false;
+  // プロセス起動済み（stdin/stdout 利用可能）だが疎通確認前。
+  // waitForReady が getStats を呼ぶ際の許可フラグ。
+  private isProcessSpawned = false;
   private responseBuffer = "";
 
   constructor(context: vscode.ExtensionContext) {
@@ -108,13 +111,21 @@ export class DaemonManager {
       this.process.on("exit", (code) => {
         console.log("[comP] Daemon exited with code:", code);
         this.isReady = false;
+        this.isProcessSpawned = false;
       });
 
-      this.isReady = true;
-      console.log("[comP] Daemon started successfully");
+      // WHY: spawn 直後は子プロセス起動中で stdin がまだ受信不可能な可能性がある。
+      // request() が isReady を見て即送信すると永久 pending になる窓があったため、
+      // waitForReady で疎通確認できるまでは isReady=false に保つ。
+      // ただし waitForReady 自体が request("getStats") を呼ぶ → isReady の事前許可が必要なため、
+      // 内部用フラグ isProcessSpawned で区別する。
+      this.isProcessSpawned = true;
+      console.log("[comP] Daemon process spawned, awaiting readiness...");
 
       // Wait for daemon to be ready by checking connectivity
       await this.waitForReady();
+      this.isReady = true;
+      console.log("[comP] Daemon ready");
     } catch (error) {
       console.error("[comP] Failed to start daemon:", error);
       throw new Error(`Failed to start comP daemon: ${error instanceof Error ? error.message : String(error)}`);
@@ -170,6 +181,7 @@ export class DaemonManager {
 
       this.process = null;
       this.isReady = false;
+      this.isProcessSpawned = false;
     }
   }
 
@@ -181,7 +193,9 @@ export class DaemonManager {
    * Response: { "jsonrpc": "2.0", "id": 1, "result": {...} }
    */
   async request(method: string, params?: unknown): Promise<unknown> {
-    if (!this.isReady || !this.process) {
+    // waitForReady 中は isReady=false だが疎通確認のため getStats 送信を許可する
+    const allowedDuringHandshake = method === "getStats" && this.isProcessSpawned;
+    if (!this.process || (!this.isReady && !allowedDuringHandshake)) {
       throw new Error("Daemon is not running");
     }
 

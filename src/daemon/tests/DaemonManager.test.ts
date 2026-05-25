@@ -8,7 +8,7 @@
 
 import { expect } from 'chai';
 import * as sinon from 'sinon';
-import { DaemonManager } from './DaemonManager';
+import { DaemonManager } from '../DaemonManager';
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
 

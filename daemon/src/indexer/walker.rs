@@ -46,8 +46,10 @@ pub struct WalkerResult {
 pub struct WalkerConfig {
     /// Skip hidden files and directories (starting with .)
     pub skip_hidden: bool,
-    /// Additional patterns to skip (beyond .gitignore)
+    /// Built-in patterns to skip (substring match against full path)
     pub skip_patterns: Vec<String>,
+    /// User-defined patterns from .comp/ignore (gitignore-style)
+    pub ignore_patterns: Vec<String>,
 }
 
 impl Default for WalkerConfig {
@@ -62,6 +64,7 @@ impl Default for WalkerConfig {
                 "dist".to_string(),
                 "build".to_string(),
             ],
+            ignore_patterns: vec![],
         }
     }
 }
@@ -180,9 +183,17 @@ impl FileWalker {
             return true;
         }
 
-        // Skip files in skip_patterns
+        // Built-in patterns: substring match against full path
         for pattern in &self.config.skip_patterns {
             if path.to_string_lossy().contains(pattern) {
+                return true;
+            }
+        }
+
+        // User-defined patterns from .comp/ignore
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        for pattern in &self.config.ignore_patterns {
+            if Self::matches_ignore_pattern(&normalized, pattern) {
                 return true;
             }
         }
@@ -190,10 +201,29 @@ impl FileWalker {
         false
     }
 
-    /// Get relative path from workspace root
+    /// Match a normalized path against a gitignore-style pattern.
+    ///
+    /// Supports:
+    /// - Name match: `node_modules` → any path segment equals this
+    /// - Directory pattern: `dist/` → same as `dist` (trailing slash stripped)
+    /// - Suffix glob: `*.min.js` → path ends with `.min.js`
+    fn matches_ignore_pattern(path: &str, pattern: &str) -> bool {
+        let pattern = pattern.trim_end_matches('/');
+        if pattern.is_empty() {
+            return false;
+        }
+        if pattern.starts_with('*') {
+            let suffix = &pattern[1..];
+            return path.ends_with(suffix);
+        }
+        // Match any path segment (handles both files and directories)
+        path.split('/').any(|component| component == pattern)
+    }
+
+    /// Get relative path from workspace root, normalized to forward slashes
     fn get_relative_path(&self, path: &Path) -> Result<String> {
         let relative = path.strip_prefix(&self.workspace_root)?;
-        Ok(relative.to_string_lossy().to_string())
+        Ok(relative.to_string_lossy().replace('\\', "/"))
     }
 
     /// Calculate SHA256 hash of file content

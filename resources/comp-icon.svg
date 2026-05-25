@@ -1,11 +1,24 @@
-<svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-  <!--
-    VS Code activity bar icon: transparent background, single-color star.
-    VS Code applies theme color to all opaque pixels automatically.
-    Star: center(64,64), outer R=52, inner r=20, standard 5-point proportions.
-    Marketplace PNG (comp-icon.png) is generated separately with white bg.
-  -->
-  <polygon
-    points="64,12 76,48 113,48 83,70 95,106 64,84 33,106 45,70 15,48 52,48"
-    fill="#000000"/>
+<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+  <!-- Circle with pentagram (5-pointed star) cutout using negative space -->
+  <!-- Outer circle (clockwise) + inner pentagram (counter-clockwise) with fill-rule="evenodd" -->
+  <!-- Pentagram is a continuous path: star point -> valley -> star point -> valley... -->
+  <path fill-rule="evenodd" clip-rule="evenodd" fill="currentColor" d="
+    M12,2
+    C17.5228,2 22,6.47715 22,12
+    C22,17.5228 17.5228,22 12,22
+    C6.47715,22 2,17.5228 2,12
+    C2,6.47715 6.47715,2 12,2
+    Z
+    M12,5.5
+    L13.854,8.618
+    L17.254,9.118
+    L14.854,11.382
+    L15.472,14.854
+    L12,12.618
+    L8.528,14.854
+    L9.146,11.382
+    L6.746,9.118
+    L10.146,8.618
+    Z
+  "/>
 </svg>

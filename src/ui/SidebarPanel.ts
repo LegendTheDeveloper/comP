@@ -26,6 +26,17 @@ import { DaemonManager } from "../daemon/DaemonManager";
  * - resolveWebviewView: VSCode が sidebar を表示するときに呼び出す
  * - setDaemonManager: extension.ts が daemon 起動後に呼び出す
  */
+/**
+ * extension.ts が SidebarPanel に注入する起動/停止コールバック。
+ * WHY: 以前 SidebarPanel が new DaemonManager() で独自に二重生成していた結果、
+ * extension.ts のグローバル daemonManager と分離され、commands.ts (forceReindex 等) が
+ * 古いインスタンスを叩く不整合があった。生成責務を extension.ts に一本化する。
+ */
+export interface DaemonLifecycleCallbacks {
+  onStartRequest: () => Promise<DaemonManager | null>;
+  onStopRequest: () => Promise<void>;
+}
+
 export class SidebarPanel implements vscode.WebviewViewProvider {
   public static readonly viewType = "comp-stats";
   private static instance: SidebarPanel | undefined;
@@ -33,15 +44,13 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   // WebviewView は resolveWebviewView が呼ばれるまで undefined
   private view?: vscode.WebviewView;
   private daemonManager: DaemonManager | null = null;
-  private extensionContext: vscode.ExtensionContext;
   private statsInterval: NodeJS.Timeout | null = null;
   private logs: string[] = [];
   private maxLogs = 100;
   private version = "0.1.0";
+  private lifecycleCallbacks: DaemonLifecycleCallbacks | null = null;
 
   private constructor(context: vscode.ExtensionContext) {
-    this.extensionContext = context;
-
     // package.json からバージョンを取得
     try {
       const pkgPath = path.join(context.extensionPath, "package.json");
@@ -109,10 +118,27 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   /**
    * daemon 起動後に extension.ts から呼ばれる
    */
-  public setDaemonManager(daemonManager: DaemonManager): void {
+  public setDaemonManager(daemonManager: DaemonManager | null): void {
     this.daemonManager = daemonManager;
-    this.addLog("✓ Indexing started");
-    this.startStatsRefresh();
+    if (daemonManager) {
+      this.addLog("✓ Indexing started");
+      this.startStatsRefresh();
+      this.view?.webview.postMessage({ type: "daemonStatus", running: true });
+    } else {
+      if (this.statsInterval) {
+        clearInterval(this.statsInterval);
+        this.statsInterval = null;
+      }
+      this.view?.webview.postMessage({ type: "daemonStatus", running: false });
+    }
+  }
+
+  /**
+   * extension.ts が起動/停止ロジックを注入する。
+   * WHY: SidebarPanel は UI 層に専念し、DaemonManager のライフサイクル管理を行わない。
+   */
+  public setLifecycleCallbacks(callbacks: DaemonLifecycleCallbacks): void {
+    this.lifecycleCallbacks = callbacks;
   }
 
   /**
@@ -157,14 +183,22 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       this.addLog("Daemon already running");
       return;
     }
+    if (!this.lifecycleCallbacks) {
+      this.addLog("✗ Lifecycle callbacks not configured");
+      return;
+    }
 
     try {
       this.addLog("Starting daemon...");
-      this.daemonManager = new DaemonManager(this.extensionContext);
-      await this.daemonManager.start();
-      this.addLog("✓ Daemon started successfully");
-      this.startStatsRefresh();
-      this.view?.webview.postMessage({ type: "daemonStatus", running: true });
+      const dm = await this.lifecycleCallbacks.onStartRequest();
+      if (dm) {
+        this.daemonManager = dm;
+        this.addLog("✓ Daemon started successfully");
+        this.startStatsRefresh();
+        this.view?.webview.postMessage({ type: "daemonStatus", running: true });
+      } else {
+        this.addLog("✗ Daemon start returned null");
+      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.addLog(`✗ Failed to start daemon: ${errorMsg}`);
@@ -177,6 +211,10 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       this.addLog("Daemon not running");
       return;
     }
+    if (!this.lifecycleCallbacks) {
+      this.addLog("✗ Lifecycle callbacks not configured");
+      return;
+    }
 
     try {
       this.addLog("Stopping daemon...");
@@ -184,7 +222,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         clearInterval(this.statsInterval);
         this.statsInterval = null;
       }
-      await this.daemonManager.stop();
+      await this.lifecycleCallbacks.onStopRequest();
       this.daemonManager = null;
       this.addLog("Daemon stopped");
       this.view?.webview.postMessage({ type: "daemonStatus", running: false });

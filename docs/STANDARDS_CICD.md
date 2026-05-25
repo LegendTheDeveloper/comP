@@ -24,6 +24,7 @@
 | Rust | `cargo audit` |
 
 **脆弱性レベル**:
+
 - Critical/High → PUSHブロック
 - Medium → 警告のみ
 

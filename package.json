@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "publisher": "tsucky230",
   "license": "MIT",
-  "icon": "resources/comp-icon.svg",
+  "icon": "resources/comp-icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -61,7 +61,7 @@
         {
           "id": "comp-explorer",
           "title": "comP",
-          "icon": "resources/comp-icon.svg"
+          "icon": "resources/comp-icon-activitybar.svg"
         }
       ]
     },
@@ -129,6 +129,7 @@
     "sinon": "^17.0.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vsce": "^2.15.0"
   }
 }
