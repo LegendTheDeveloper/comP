@@ -259,6 +259,30 @@ impl SearchEngine {
             }
         }
 
+        // WHY: TF-IDF は完全トークン一致のみスコアを付けるため、"auth" → "authenticate" の
+        //      ような前方一致クエリで 0 件になる。サブストリング fallback でこれを補完する。
+        if results.is_empty() {
+            let mut seen = std::collections::HashSet::new();
+            'outer: for (file_path, symbols) in &self.documents {
+                for (symbol_name, kind, line) in symbols {
+                    let sym_lower = symbol_name.to_lowercase();
+                    let matches = query_tokens.iter().any(|qt| sym_lower.contains(qt.as_str()));
+                    if matches && seen.insert(file_path.clone()) {
+                        results.push(SearchResult {
+                            file_path: file_path.clone(),
+                            symbol_name: symbol_name.clone(),
+                            score: 0.3,
+                            kind: kind.clone(),
+                            line: *line,
+                        });
+                        if results.len() >= limit {
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(results)
     }
 

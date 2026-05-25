@@ -103,3 +103,14 @@ local.env
 edevcomP*
 edevcomP*.rs
 edevcomP*/
+
+# ===== Generated Icon Variants (run scripts/generate-icon.js to regenerate) =====
+resources/comp-icon-dark.png
+resources/comp-icon-dark.svg
+resources/comp-icon-light.png
+resources/comp-icon-light.svg
+resources/comp-icon-activitybar.png
+resources/comp-icon-activitybar.svg
+
+# ===== Daemon Build Artifacts =====
+daemon/build_output.txt

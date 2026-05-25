@@ -1,0 +1,114 @@
+// SidebarPanel Unit Tests
+//
+// Coverage:
+// - createOrShow() throws when context is missing
+// - createOrShow() returns singleton on repeated calls
+// - resolveWebviewView() sets HTML on the webview
+// - setDaemonManager(null) posts daemonStatus: false
+// - setDaemonManager(daemon) posts daemonStatus: true
+// - setLifecycleCallbacks() stores callbacks for use in message handling
+
+import { expect } from "chai";
+import * as sinon from "sinon";
+import { SidebarPanel } from "../SidebarPanel";
+
+describe("SidebarPanel", () => {
+  let mockContext: any;
+  let mockWebviewView: any;
+  let postedMessages: any[];
+  let clock: sinon.SinonFakeTimers;
+
+  beforeEach(() => {
+    // Reset singleton between tests
+    (SidebarPanel as any).instance = undefined;
+
+    clock = sinon.useFakeTimers();
+    postedMessages = [];
+
+    mockContext = {
+      extensionPath: "/nonexistent/path/for/test",
+    };
+
+    mockWebviewView = {
+      webview: {
+        options: {},
+        html: "",
+        postMessage: sinon.stub().callsFake((msg: any) => {
+          postedMessages.push(msg);
+        }),
+        onDidReceiveMessage: sinon.stub().returns({ dispose: () => {} }),
+      },
+      onDidChangeVisibility: sinon.stub().returns({ dispose: () => {} }),
+      visible: true,
+    };
+  });
+
+  afterEach(() => {
+    clock.restore();
+    (SidebarPanel as any).instance = undefined;
+  });
+
+  it("createOrShow() throws when ExtensionContext is missing", () => {
+    expect(() => SidebarPanel.createOrShow("/path", null, undefined)).to.throw();
+  });
+
+  it("createOrShow() returns an instance when context is provided", () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    expect(panel).to.be.instanceOf(SidebarPanel);
+  });
+
+  it("createOrShow() returns the same singleton on repeated calls", () => {
+    const first = SidebarPanel.createOrShow("/path", null, mockContext);
+    const second = SidebarPanel.createOrShow("/path", null, mockContext);
+    expect(first).to.equal(second);
+  });
+
+  it("resolveWebviewView() sets HTML containing comP branding", () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(mockWebviewView.webview.html).to.include("comP");
+  });
+
+  it("resolveWebviewView() registers a message handler on the webview", () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(mockWebviewView.webview.onDidReceiveMessage.calledOnce).to.be.true;
+  });
+
+  it("setDaemonManager(null) posts daemonStatus: false", () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    postedMessages.length = 0;
+
+    panel.setDaemonManager(null);
+
+    const msg = postedMessages.find((m) => m.type === "daemonStatus");
+    expect(msg).to.not.be.undefined;
+    expect(msg.running).to.be.false;
+  });
+
+  it("setDaemonManager(daemon) posts daemonStatus: true", () => {
+    const mockDaemon: any = {
+      getStats: sinon.stub().resolves({ total_files: 5, total_nodes: 10, total_edges: 3 }),
+      isRunning: () => true,
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    postedMessages.length = 0;
+
+    panel.setDaemonManager(mockDaemon);
+
+    const msg = postedMessages.find((m) => m.type === "daemonStatus");
+    expect(msg).to.not.be.undefined;
+    expect(msg.running).to.be.true;
+  });
+
+  it("setLifecycleCallbacks() stores callbacks without throwing", () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    const callbacks = {
+      onStartRequest: sinon.stub().resolves(null),
+      onStopRequest: sinon.stub().resolves(),
+    };
+    expect(() => panel.setLifecycleCallbacks(callbacks)).to.not.throw();
+  });
+});

@@ -10,6 +10,7 @@
 // Protocol: JSON-RPC 2.0 over stdio
 
 use anyhow::{Result, anyhow};
+use log::info;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -78,12 +79,18 @@ impl MCPServer {
 
             // Call appropriate handler
             let result = match method {
+                "initialize" => self.handle_initialize(params).await,
+                "tools/list" => self.handle_tools_list().await,
+                "tools/call" => self.handle_tools_call(params).await,
                 "run_pipeline" => self.handle_run_pipeline(params).await,
                 "get_context" => self.handle_get_context(params).await,
                 "get_impact_graph" => self.handle_get_impact_graph(params).await,
                 "list_indexed_files" => self.handle_list_indexed_files().await,
                 "get_token_usage" => self.handle_get_token_usage().await,
                 "getStats" => self.handle_get_stats().await,
+                "forceReindex" => self.handle_force_reindex().await,
+                "indexFile" => self.handle_index_file(params).await,
+                "removeFile" => self.handle_remove_file(params).await,
                 _ => Err(anyhow!("Unknown method: {}", method)),
             };
 
@@ -150,46 +157,78 @@ impl MCPServer {
     /// 6. Calculate savings percentage
     /// 7. Estimate API cost based on model
     pub async fn handle_run_pipeline(&self, params: Value) -> Result<Value> {
-        // 1. Extract parameters
         let task = params["task"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'task' parameter"))?;
-        let max_tokens = params["max_tokens"]
-            .as_u64()
-            .unwrap_or(8000) as usize;
+        let max_tokens = params["max_tokens"].as_u64().unwrap_or(8000) as usize;
 
-        // For Phase 6 stub: Return structure with realistic data
-        // In production, this would:
-        // - Call search_engine.search(task, limit)
-        // - Collect file metadata from GraphDB
-        // - Call get_impact_graph for each pivot file
-        // - Count tokens and calculate savings
+        // 1. task を単語分割して各キーワードでシンボル名 LIKE 検索 → pivot 候補
+        // WHY: タスク文字列全体の LIKE 検索では "fix auth bug" → 0件になる。
+        //      単語ごとに個別検索して OR マージすることで関連ファイルをヒットさせる。
+        let keywords: Vec<&str> = task
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|w| w.len() >= 3)
+            .collect();
 
-        let pivot_files = json!([
-            {
-                "path": "src/auth/authenticate.rs",
-                "symbols": 5,
-                "tokens": 500
+        let mut all_hits: Vec<(String, String, String, i32)> = if keywords.is_empty() {
+            self.state.graph_db.search_symbols_by_name(task, 10)?
+        } else {
+            let mut merged = Vec::new();
+            for kw in &keywords {
+                merged.extend(self.state.graph_db.search_symbols_by_name(kw, 5)?);
             }
-        ]);
+            merged
+        };
+        // ファイル単位で先頭出現順に並べ替えてから上限を切る
+        all_hits.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+        let hits = all_hits;
+        let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
+        let files_list = self.state.graph_db.list_files()?;
+        let path_to_id: std::collections::HashMap<String, i64> = files_list
+            .into_iter()
+            .map(|(id, path, _)| (path, id))
+            .collect();
 
-        let related_files = json!([
-            {
-                "path": "src/types/user.rs",
-                "symbols": 3,
-                "tokens": 200
+        // 2. ヒットしたファイルを重複排除して pivot に
+        let mut seen = std::collections::HashSet::new();
+        let mut pivot_files = Vec::new();
+        let mut pivot_paths: Vec<String> = Vec::new();
+        for (file, _name, _kind, _line) in hits {
+            if seen.insert(file.clone()) {
+                let sym = path_to_id
+                    .get(&file)
+                    .and_then(|id| symbol_counts.get(id))
+                    .copied()
+                    .unwrap_or(0);
+                // WHY: sym*20 は過小評価。関数1つ平均50行 × 約1token/行で sym*50 に近い。
+                //      ファイルサイズをDBに持たないため行数ベースの概算を使う。
+                let tokens = (sym as usize).saturating_mul(50);
+                pivot_files.push(json!({
+                    "path": file.clone(),
+                    "symbols": sym,
+                    "tokens": tokens
+                }));
+                pivot_paths.push(file);
             }
-        ]);
+        }
 
-        let total_tokens = 700;
-        let full_workspace_tokens = 1800;
+        let total_tokens: usize = pivot_files
+            .iter()
+            .filter_map(|v| v["tokens"].as_u64())
+            .map(|t| t as usize)
+            .sum();
+
+        // 3. ワークスペース全体トークン推定 (節約率算出用)
+        let total_symbols: i64 = symbol_counts.values().sum();
+        let full_workspace_tokens = (total_symbols as usize).saturating_mul(50).max(total_tokens + 1);
+
         let savings = crate::search::TokenCounter::calculate_savings(full_workspace_tokens, total_tokens);
         let cost = crate::search::TokenCounter::estimate_cost(total_tokens, "sonnet");
 
         Ok(json!({
             "task": task,
             "pivot_files": pivot_files,
-            "related_files": related_files,
+            "related_files": [],  // TODO: impact graph 経由で算出 (Phase 5)
             "total_tokens": total_tokens,
             "max_tokens": max_tokens,
             "savings": savings,
@@ -227,42 +266,37 @@ impl MCPServer {
     /// 3. Optionally filter by symbol kind
     /// 4. Return results ranked by relevance score
     pub async fn handle_get_context(&self, params: Value) -> Result<Value> {
-        // Extract parameters
         let query = params["query"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'query' parameter"))?;
         let limit = params["limit"]
             .as_u64()
             .unwrap_or(10) as usize;
+        let kind_filter = params["kind_filter"].as_str();
 
-        // For Phase 6 stub: Return realistic search results
-        // In production, this would:
-        // - Call search_engine.search(query, limit)
-        // - Filter by kind if provided
-        // - Convert SearchResult to JSON
-        // - Return sorted by relevance
+        // GraphDB を直接 LIKE 検索する (SearchEngine の TF-IDF が未構築のため)
+        let hits = self.state.graph_db.search_symbols_by_name(query, limit * 2)?;
 
-        let results = json!([
-            {
-                "file": "src/auth/authenticate.rs",
-                "symbol": "authenticate",
-                "kind": "function",
-                "line": 15,
-                "score": 0.95
-            },
-            {
-                "file": "src/auth/authorize.rs",
-                "symbol": "authorize_user",
-                "kind": "function",
-                "line": 42,
-                "score": 0.87
-            }
-        ]);
+        let results: Vec<Value> = hits
+            .into_iter()
+            .filter(|(_, _, kind, _)| kind_filter.map_or(true, |f| f == kind))
+            .take(limit)
+            .map(|(file, name, kind, line)| {
+                json!({
+                    "file": file,
+                    "symbol": name,
+                    "kind": kind,
+                    "line": line,
+                    "score": 1.0  // LIKE 検索のためスコアは固定。TF-IDF 実装後に置換予定
+                })
+            })
+            .collect();
 
+        let count = results.len();
         Ok(json!({
             "query": query,
             "results": results,
-            "count": 2,
+            "count": count,
             "limit": limit
         }))
     }
@@ -299,27 +333,26 @@ impl MCPServer {
     /// 4. Group affected symbols by file
     /// 5. Calculate severity based on impact count
     pub async fn handle_get_impact_graph(&self, params: Value) -> Result<Value> {
-        // Extract parameters
         let symbol_id = params["symbol_id"]
             .as_i64()
             .ok_or_else(|| anyhow!("Missing 'symbol_id' parameter"))?;
-        let symbol_name = params["symbol_name"]
-            .as_str()
-            .unwrap_or("unknown");
+        let symbol_name = params["symbol_name"].as_str().unwrap_or("unknown");
 
-        // For Phase 6 stub: Return realistic impact analysis
-        // In production, this would:
-        // - Call get_impact_graph(symbol_id) from search engine
-        // - Group results by file
-        // - Calculate severity (0 = none, 1-5 = low, 6-20 = medium, 20+ = high)
-        // - Return impact structure
+        // GraphDB から逆依存マップ・シンボルマップを構築し、SearchEngine の BFS を呼ぶ
+        let reverse_deps = self.state.graph_db.get_reverse_deps()?;
+        let symbol_map = self.state.graph_db.get_symbol_map()?;
 
-        let affected_files = json!({
-            "src/routes/login.rs": ["handleLogin", "validateCredentials"],
-            "src/middleware/auth.rs": ["authMiddleware"]
-        });
+        let search_engine = self.state.search_engine.lock().await;
+        let impact = search_engine.get_impact_graph(symbol_id, &reverse_deps, &symbol_map)?;
+        drop(search_engine);
 
-        let impact_count = 3;
+        let mut affected_obj = serde_json::Map::new();
+        let mut impact_count: usize = 0;
+        for (file, symbols) in &impact {
+            impact_count += symbols.len();
+            affected_obj.insert(file.clone(), json!(symbols));
+        }
+
         let severity = match impact_count {
             0 => "none",
             1..=5 => "low",
@@ -330,7 +363,7 @@ impl MCPServer {
         Ok(json!({
             "symbol_id": symbol_id,
             "symbol": symbol_name,
-            "affected_files": affected_files,
+            "affected_files": Value::Object(affected_obj),
             "impact_count": impact_count,
             "severity": severity
         }))
@@ -358,25 +391,25 @@ impl MCPServer {
     /// 3. Group by language
     /// 4. Calculate totals and statistics
     pub async fn handle_list_indexed_files(&self) -> Result<Value> {
-        // For Phase 6 stub: Return realistic index statistics
-        // In production, this would:
-        // - Call GraphDB::get_stats()
-        // - Query all files from nodes table
-        // - Count symbols by language
-        // - Return complete statistics
+        let files_raw = self.state.graph_db.list_files()?;
+        let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
 
-        let files = json!([
-            { "path": "src/main.rs", "language": "rust", "symbols": 12 },
-            { "path": "src/lib.rs", "language": "rust", "symbols": 8 },
-            { "path": "src/auth.ts", "language": "typescript", "symbols": 15 },
-        ]);
-
-        let total_files = 10;
-        let total_symbols = 50;
-
-        let mut languages = std::collections::HashMap::new();
-        languages.insert("rust".to_string(), 20);
-        languages.insert("typescript".to_string(), 30);
+        let mut total_symbols: i64 = 0;
+        let mut languages: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        let files: Vec<Value> = files_raw
+            .into_iter()
+            .map(|(id, path, language)| {
+                let sym = *symbol_counts.get(&id).unwrap_or(&0);
+                total_symbols += sym;
+                *languages.entry(language.clone()).or_insert(0) += 1;
+                json!({
+                    "path": path,
+                    "language": language,
+                    "symbols": sym
+                })
+            })
+            .collect();
+        let total_files = files.len();
 
         Ok(json!({
             "files": files,
@@ -407,32 +440,107 @@ impl MCPServer {
     /// 3. Calculate efficiency (context optimization benefit)
     /// 4. Add current timestamp
     pub async fn handle_get_token_usage(&self) -> Result<Value> {
-        // For Phase 6 stub: Return realistic token metrics
-        // In production, this would:
-        // - Query internal token counter
-        // - Access query execution logs
-        // - Calculate averages and efficiency metrics
-        // - Return statistics with timestamp
-
-        let total_tokens_consumed = 45000;
-        let queries_executed = 15;
-        let average_tokens_per_query = total_tokens_consumed / queries_executed;
-
-        // Timestamp: current time in seconds since UNIX_EPOCH
+        // WHY: 内部トークン使用量カウンタは未実装。
+        // 嘘の数字を返すと AI エージェントの判断材料を歪めるため、
+        // status="not_implemented" を明示し、null を返す。
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // Efficiency: assuming 60% average token reduction through optimization
-        let efficiency = "60%";
+        Ok(json!({
+            "status": "not_implemented",
+            "message": "Token usage tracking is not yet implemented",
+            "total_tokens_consumed": Value::Null,
+            "queries_executed": Value::Null,
+            "average_tokens_per_query": Value::Null,
+            "timestamp": timestamp,
+            "efficiency": Value::Null
+        }))
+    }
+
+    /// Force re-index of entire workspace
+    ///
+    /// WHY: VSCode `comp.forceReindex` コマンドから呼ばれる。
+    /// DB を全クリアして再構築する。インデックス処理がブロッキング実行のため
+    /// レスポンスが遅い可能性あり (timeout 注意)。
+    pub async fn handle_force_reindex(&self) -> Result<Value> {
+        info!("handle_force_reindex: clearing index");
+        self.state.graph_db.clear_index()?;
+
+        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
+            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+            .unwrap_or_else(|_| ".".to_string());
+
+        info!("handle_force_reindex: rebuilding index for {}", workspace_root);
+        let mut indexer = crate::indexer::Indexer::new(&workspace_root);
+        let (total, indexed, symbols) = indexer
+            .index_workspace(None, &self.state.graph_db)
+            .await?;
+
+        let (files, nodes, edges) = self.state.graph_db.get_stats()?;
+        info!(
+            "handle_force_reindex: complete - {}/{} files, {} symbols, {} nodes, {} edges",
+            indexed, total, symbols, nodes, edges
+        );
 
         Ok(json!({
-            "total_tokens_consumed": total_tokens_consumed,
-            "queries_executed": queries_executed,
-            "average_tokens_per_query": average_tokens_per_query,
-            "timestamp": timestamp,
-            "efficiency": efficiency
+            "total_files": files,
+            "total_nodes": nodes,
+            "total_edges": edges,
+            "indexed_files": indexed,
+            "scanned_files": total,
+            "symbols_extracted": symbols
+        }))
+    }
+
+    /// Index a single file (incremental update)
+    ///
+    /// WHY: VSCode の FileSystemWatcher が変更ファイルごとに呼ぶ。
+    /// 既存実装は DB に書き込まない TODO 状態だったため統計に反映されなかった。
+    pub async fn handle_index_file(&self, params: Value) -> Result<Value> {
+        let path_str = params["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
+
+        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
+            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+            .unwrap_or_else(|_| ".".to_string());
+
+        let mut indexer = crate::indexer::Indexer::new(&workspace_root);
+        indexer
+            .index_file(std::path::Path::new(path_str), &self.state.graph_db)
+            .await?;
+
+        Ok(json!({ "status": "ok", "path": path_str }))
+    }
+
+    /// Remove a file from the index
+    ///
+    /// VSCode の onDidDelete から呼ばれる。絶対パスを workspace 相対に変換して
+    /// DB から削除する。
+    pub async fn handle_remove_file(&self, params: Value) -> Result<Value> {
+        let path_str = params["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
+
+        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
+            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+            .unwrap_or_else(|_| ".".to_string());
+
+        // 絶対パスなら workspace 相対に変換し、\ → / に正規化 (DB は / 統一)
+        let relative_path = std::path::Path::new(path_str)
+            .strip_prefix(&workspace_root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|_| path_str.replace('\\', "/"));
+
+        let removed = self.state.graph_db.delete_file(&relative_path)?;
+        info!("handle_remove_file: deleted {} ({} rows)", relative_path, removed);
+
+        Ok(json!({
+            "status": "ok",
+            "path": relative_path,
+            "removed": removed
         }))
     }
 
@@ -460,6 +568,122 @@ impl MCPServer {
             "total_edges": edge_count
         }))
     }
+
+    /// MCP initialize handshake — returns server capabilities
+    pub async fn handle_initialize(&self, _params: Value) -> Result<Value> {
+        Ok(json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "comP", "version": "0.1.0" }
+        }))
+    }
+
+    /// MCP tools/list — AI-accessible tools with precise descriptions and input schemas
+    ///
+    /// WHY: Description quality directly controls when AI agents call each tool.
+    /// "Call ONLY when..." / "Do NOT call..." constraints prevent accidental invocations
+    /// that would pollute the context window mid-implementation.
+    pub async fn handle_tools_list(&self) -> Result<Value> {
+        Ok(json!({
+            "tools": [
+                {
+                    "name": "run_pipeline",
+                    "description": "Call at the START of a new coding task (bug fix, feature, refactor) to retrieve the most relevant files and symbols for that task. Do NOT call mid-implementation or for general questions. Returns pivot files and related symbols ranked by relevance.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "One sentence describing what you are about to implement or fix. Example: 'fix JWT token expiry bug in auth middleware'"
+                            },
+                            "max_tokens": {
+                                "type": "integer",
+                                "description": "Token budget for returned context. Default: 8000"
+                            },
+                            "include_tests": {
+                                "type": "boolean",
+                                "description": "Include test files in results. Default: false"
+                            }
+                        },
+                        "required": ["task"]
+                    }
+                },
+                {
+                    "name": "get_context",
+                    "description": "Search for specific symbols (functions, classes, types) by name or keyword. Use when you know the exact name to look up. Do NOT use for starting a new task — use run_pipeline instead.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Symbol name or keyword. Example: 'authenticate' or 'UserRepository'"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Max results to return. Default: 10"
+                            },
+                            "kind_filter": {
+                                "type": "string",
+                                "description": "Filter by symbol kind: 'function', 'class', 'type', or 'variable'"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "get_impact_graph",
+                    "description": "Show which files and symbols are affected when a specific symbol changes. Call before modifying a function or class to understand the blast radius. Requires a numeric symbol_id from a prior run_pipeline or get_context result.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "symbol_id": {
+                                "type": "integer",
+                                "description": "Numeric ID of the symbol to analyze (obtained from run_pipeline or get_context)"
+                            },
+                            "symbol_name": {
+                                "type": "string",
+                                "description": "Human-readable name for display purposes only"
+                            }
+                        },
+                        "required": ["symbol_id"]
+                    }
+                },
+                {
+                    "name": "list_indexed_files",
+                    "description": "List all indexed files with symbol counts and language breakdown. Use to understand overall codebase structure. Do NOT use to find relevant files for a task — use run_pipeline for that.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+            ]
+        }))
+    }
+
+    /// MCP tools/call — dispatches to the appropriate tool handler
+    ///
+    /// WHY: Standard MCP agents call tools/call instead of the raw method name.
+    /// Wraps the result in MCP content format so agents can parse it uniformly.
+    pub async fn handle_tools_call(&self, params: Value) -> Result<Value> {
+        let name = params["name"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'name' in tools/call params"))?;
+        let args = params["arguments"].clone();
+
+        let result = match name {
+            "run_pipeline" => self.handle_run_pipeline(args).await?,
+            "get_context" => self.handle_get_context(args).await?,
+            "get_impact_graph" => self.handle_get_impact_graph(args).await?,
+            "list_indexed_files" => self.handle_list_indexed_files().await?,
+            "get_token_usage" => self.handle_get_token_usage().await?,
+            _ => return Err(anyhow!("Unknown tool: {}", name)),
+        };
+
+        Ok(json!({
+            "content": [{ "type": "text", "text": result.to_string() }],
+            "isError": false
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -468,10 +692,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_server_creation() {
-        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let temp_dir = std::env::temp_dir().join("comP_test_mcp_creation");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.expect("Failed to create AppState"));
         let server = MCPServer::new(state);
-        // Verify server creation doesn't panic
-        assert!(true);
+
+        // 新規生成時は indexing 未実施なので 0 件
+        let stats = server.handle_get_stats().await.expect("getStats failed");
+        assert_eq!(stats["total_files"].as_i64().unwrap(), 0);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
@@ -598,18 +830,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_get_token_usage() {
-        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let temp_dir = std::env::temp_dir().join("comP_test_token_usage");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.expect("Failed to create AppState"));
         let server = MCPServer::new(state);
 
-        let result = server.handle_get_token_usage().await;
-        assert!(result.is_ok());
-
-        let response = result.unwrap();
-        assert!(response["total_tokens_consumed"].is_number());
-        assert!(response["queries_executed"].is_number());
-        assert!(response["average_tokens_per_query"].is_number());
+        let response = server.handle_get_token_usage().await.unwrap();
+        // 未実装ステータスを明示している前提
+        assert_eq!(response["status"], "not_implemented");
         assert!(response["timestamp"].is_number());
-        assert!(response["efficiency"].is_string());
+        assert!(response["total_tokens_consumed"].is_null());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[test]
