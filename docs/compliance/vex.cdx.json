@@ -1,0 +1,15 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-05-25T00:00:00Z",
+    "component": {
+      "type": "application",
+      "name": "comp-vscode",
+      "version": "0.1.0",
+      "purl": "pkg:npm/comp-vscode@0.1.0"
+    }
+  },
+  "vulnerabilities": []
+}

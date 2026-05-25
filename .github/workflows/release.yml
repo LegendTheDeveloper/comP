@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: 22.x
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -47,27 +47,26 @@ jobs:
         run: npm run daemon:build
 
       - name: Install vsce (VSCode Extension CLI)
-        run: npm install -g vsce
+        run: npm install -g @vscode/vsce
 
       - name: Package VSIX
         run: vsce package --out comP-${{ github.ref_name }}.vsix
 
-      - name: Verify SBOM
-        run: |
-          # Check if SBOM.json exists
-          if [ ! -f SBOM.json ]; then
-            echo "Warning: SBOM.json not found, using pre-generated SBOM"
-          else
-            echo "SBOM.json found, verifying format..."
-            jq . SBOM.json > /dev/null && echo "SBOM.json is valid JSON"
-          fi
+      - name: Generate SBOM (CycloneDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          artifact-name: sbom.cdx.json
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             comP-${{ github.ref_name }}.vsix
-            SBOM.json
+            sbom.cdx.json
+            docs/compliance/vex.cdx.json
           body: |
             ## Release ${{ github.ref_name }}
 
@@ -76,31 +75,23 @@ jobs:
             ### Files
 
             - **comP-${{ github.ref_name }}.vsix** — VSCode extension package
-            - **SBOM.json** — Software Bill of Materials (CycloneDX 1.4 format)
+            - **sbom.cdx.json** — Software Bill of Materials (CycloneDX 1.6)
+            - **vex.cdx.json** — Vulnerability Exploitability eXchange
             - **Daemon binary** — Included in VSIX package
 
             ### Installation
 
-            #### VSCode Extension
             ```bash
             code --install-extension comP-${{ github.ref_name }}.vsix
             ```
 
             Or drag-and-drop the VSIX file onto VSCode.
 
-            ### What's in this release
-
-            - ✅ Rust daemon with 5 MCP tools (run_pipeline, get_context, get_impact_graph, list_indexed_files, get_token_usage)
-            - ✅ GraphDB (SQLite) for code indexing
-            - ✅ TF-IDF semantic search engine
-            - ✅ Dependency analysis (BFS graph traversal)
-            - ✅ Token counting and cost estimation
-            - ✅ JSON-RPC 2.0 protocol over stdio
-            - ✅ 66+ unit tests, 4 integration tests
-
             ### Security
 
-            See `SBOM.json` for software dependencies and licenses.
+            See [SECURITY.md](https://github.com/tsucky230/comP/blob/main/SECURITY.md)
+            for vulnerability reporting and [docs/compliance/](https://github.com/tsucky230/comP/blob/main/docs/compliance/README.md)
+            for CRA compliance information.
 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
