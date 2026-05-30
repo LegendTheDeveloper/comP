@@ -13,17 +13,20 @@ import { AgentSetupManager } from "../mcp/AgentSetup";
 
 export function registerCommands(
   context: vscode.ExtensionContext,
-  daemonManager: DaemonManager,
+  // WHY: 再起動のたびに新しい DaemonManager が生成されるため、登録時点の参照ではなく
+  // 呼び出し時点の最新インスタンスを得るゲッターを受け取る。
+  getDaemonManager: () => DaemonManager | null,
   statusBar: StatusBar
 ): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ".";
-  const agentSetup = new AgentSetupManager(daemonManager, workspaceRoot);
+  // _daemonManager は AgentSetupManager では未使用（将来の拡張用）
+  const agentSetup = new AgentSetupManager(null as unknown as DaemonManager, workspaceRoot, context.extensionPath);
 
   // Command 1: comp.setupAgents
   // Setup MCP for AI agents (Claude Code, Cursor, Cline, etc.)
   context.subscriptions.push(
     vscode.commands.registerCommand("comp.setupAgents", async () => {
-      const agents = ["Claude Code", "Cursor", "Cline", "Windsurf", "Continue"];
+      const agents = ["Claude Code", "Cursor", "Cline", "Windsurf", "Continue", "Antigravity"];
       const selected = await vscode.window.showQuickPick(agents, {
         placeHolder: "Select an AI agent to configure",
       });
@@ -69,10 +72,15 @@ export function registerCommands(
 
       if (proceed !== "Yes") return;
 
+      const dm = getDaemonManager();
+      if (!dm?.isRunning()) {
+        vscode.window.showErrorMessage("comP daemon is not running. Start it from the comP sidebar first.");
+        return;
+      }
       statusBar.show("Indexing...");
       try {
-        await daemonManager.request("forceReindex");
-        const stats = await daemonManager.getStats();
+        await dm.request("forceReindex");
+        const stats = await dm.getStats();
         statusBar.updateStats(stats.total_nodes, stats.total_files, "Ready");
         vscode.window.showInformationMessage(`Re-indexing completed: ${stats.total_nodes} symbols found`);
       } catch (error) {
@@ -126,8 +134,10 @@ export function registerCommands(
   // Show index statistics dashboard
   context.subscriptions.push(
     vscode.commands.registerCommand("comp.showStats", async () => {
+      const dm = getDaemonManager();
       try {
-        const stats = await daemonManager.getStats();
+        if (!dm?.isRunning()) throw new Error("Daemon is not running");
+        const stats = await dm.getStats();
         const message = `comP Statistics\n\nFiles: ${stats.total_files}\nSymbols: ${stats.total_nodes}\nDependencies: ${stats.total_edges}`;
         vscode.window.showInformationMessage(message);
       } catch (error) {

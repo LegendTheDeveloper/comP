@@ -4,6 +4,8 @@
 
 src/
 daemon/
+!daemon/target/release/comp-daemon.exe
+!daemon/target/release/comp-daemon
 Cargo.lock
 
 # ===== Build/Config =====

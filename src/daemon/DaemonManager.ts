@@ -36,6 +36,8 @@ export class DaemonManager {
   // waitForReady が getStats を呼ぶ際の許可フラグ。
   private isProcessSpawned = false;
   private responseBuffer = "";
+  // WHY: デーモンが改行なしの壊れたデータを大量送信したとき際限なく成長するのを防ぐ
+  private readonly MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -68,9 +70,15 @@ export class DaemonManager {
 
       // Handle daemon output - parse JSON-RPC responses
       this.process.stdout?.on("data", (data) => {
-        const chunk = data.toString();
+        const chunk = data.toString('utf8');
         console.debug(`[comP] Received ${chunk.length} bytes from daemon`);
         this.responseBuffer += chunk;
+
+        if (this.responseBuffer.length > this.MAX_BUFFER_SIZE) {
+          console.error('[comP] Response buffer exceeded 10MB limit — clearing (daemon may be misbehaving)');
+          this.responseBuffer = '';
+          return;
+        }
 
         // Process complete lines (JSON-RPC responses are newline-separated)
         const lines = this.responseBuffer.split("\n");
@@ -105,11 +113,27 @@ export class DaemonManager {
       });
 
       this.process.stderr?.on("data", (data) => {
-        console.error("[comP daemon err]", data.toString().trim());
+        console.error("[comP daemon err]", data.toString('utf8').trim());
+      });
+
+      this.process.on("error", (err) => {
+        console.error("[comP] Failed to spawn daemon:", err.message);
+        // reject all pending requests immediately
+        for (const [id, handler] of this.pendingRequests) {
+          handler({ jsonrpc: "2.0", id, error: { code: -32000, message: `Daemon spawn failed: ${err.message}` } });
+        }
+        this.pendingRequests.clear();
+        this.isReady = false;
+        this.isProcessSpawned = false;
       });
 
       this.process.on("exit", (code) => {
         console.log("[comP] Daemon exited with code:", code);
+        // reject pending requests so they don't hang until timeout
+        for (const [id, handler] of this.pendingRequests) {
+          handler({ jsonrpc: "2.0", id, error: { code: -32000, message: `Daemon exited with code ${code}` } });
+        }
+        this.pendingRequests.clear();
         this.isReady = false;
         this.isProcessSpawned = false;
       });
@@ -153,36 +177,46 @@ export class DaemonManager {
       }
     }
 
-    console.warn("[comP] Daemon readiness timeout - may not be fully initialized");
+    throw new Error("Daemon did not respond after 10 retries — binary may have crashed or workspace is too large");
   }
 
   /**
    * Stop the daemon gracefully
    */
   async stop(): Promise<void> {
-    if (this.process) {
-      console.log("[comP] Stopping daemon...");
-      this.process.kill("SIGTERM");
+    if (!this.process) {
+      return;
+    }
 
-      // Wait up to 5 seconds for process to exit
-      await new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          if (this.process) {
-            this.process.kill("SIGKILL");
-          }
-          resolve(null);
-        }, 5000);
+    console.log("[comP] Stopping daemon...");
+    const proc = this.process;
 
-        this.process?.on("exit", () => {
-          clearTimeout(timeout);
-          resolve(null);
-        });
+    // WHY: 参照を先にクリアすることで、stop() の並行呼び出しや
+    // deactivate() との競合で二重 kill が起きるのを防ぐ。
+    this.process = null;
+    this.isReady = false;
+    this.isProcessSpawned = false;
+
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        console.log("[comP] Daemon did not exit in time, sending SIGKILL");
+        proc.kill("SIGKILL");
+        resolve();
+      }, 3000);
+
+      // WHY: exit ハンドラを kill より先に登録する。
+      // kill 後に登録すると、プロセスが即座に終了した場合に
+      // exit イベントを取り逃して 3 秒タイムアウトまで待ち続けるバグを防ぐ。
+      proc.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
       });
 
-      this.process = null;
-      this.isReady = false;
-      this.isProcessSpawned = false;
-    }
+      // WHY: Windows のネイティブバイナリは SIGTERM を無視する実装が多いため
+      // Windows では SIGKILL を直接送って確実に終了させる。
+      const signal = process.platform === "win32" ? "SIGKILL" : "SIGTERM";
+      proc.kill(signal);
+    });
   }
 
   /**
@@ -266,16 +300,22 @@ export class DaemonManager {
     total_files: number;
     total_nodes: number;
     total_edges: number;
+    efficiency?: string;
+    tokens_saved?: number;
+    queries_count?: number;
   }> {
     const result = await this.request("getStats", {});
     if (!result || typeof result !== "object") {
       throw new Error("Invalid stats response from daemon");
     }
-    const stats = result as any;
+    const stats = result as Record<string, unknown>;
     return {
-      total_files: Number(stats.total_files) || 0,
-      total_nodes: Number(stats.total_nodes) || 0,
-      total_edges: Number(stats.total_edges) || 0,
+      total_files: Number(stats["total_files"]) || 0,
+      total_nodes: Number(stats["total_nodes"]) || 0,
+      total_edges: Number(stats["total_edges"]) || 0,
+      efficiency: typeof stats["efficiency"] === "string" ? stats["efficiency"] : undefined,
+      tokens_saved: stats["tokens_saved"] !== undefined ? Number(stats["tokens_saved"]) : undefined,
+      queries_count: stats["queries_count"] !== undefined ? Number(stats["queries_count"]) : undefined,
     };
   }
 

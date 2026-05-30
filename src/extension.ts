@@ -33,7 +33,7 @@ function hasCompDirectory(): boolean {
 
 let watcherDisposable: vscode.Disposable | null = null;
 let codeLensDisposable: vscode.Disposable | null = null;
-let commandsRegistered = false;
+
 
 /** Activation: called when extension is loaded */
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
@@ -51,7 +51,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       })
     );
 
-    // 2. ライフサイクルコールバックを SidebarPanel に注入
+    // 2. StatusBar とコマンドを常時登録
+    // WHY: デーモン起動失敗時でも comp.showStats が "command not found" にならないよう、
+    // startDaemonStack の成否に関係なく activate() で一度だけ登録する。
+    statusBar = new StatusBar();
+    statusBar.show("Stopped");
+    context.subscriptions.push({ dispose: () => statusBar?.dispose() });
+    registerCommands(context, () => daemonManager, statusBar);
+
+    // 3. ライフサイクルコールバックを SidebarPanel に注入
     // WHY: SidebarPanel が new DaemonManager() で独自に二重生成していた問題を排除。
     // Start/Stop ボタンの実体は extension.ts が一元管理する。
     sidebarPanel.setLifecycleCallbacks({
@@ -64,7 +72,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     });
 
-    // 3. auto モード: .comp 存在時は即起動
+    // 4. auto モード: .comp 存在時は即起動
     if (autoStartDaemon) {
       await startDaemonStack(context);
       console.log("[comP] Extension activated successfully (auto-mode)");
@@ -92,20 +100,16 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
 
   daemonManager = new DaemonManager(context);
 
-  if (!statusBar) {
-    statusBar = new StatusBar();
-  }
-  statusBar.show("Initializing...");
+  statusBar?.show("Initializing...");
 
-  await daemonManager.start();
+  try {
+    await daemonManager.start();
+  } catch (error) {
+    statusBar?.show("Error");
+    throw error;
+  }
 
   sidebarPanel?.setDaemonManager(daemonManager);
-
-  // commands は activate 時に 1 度だけ登録（VSCode は同じ ID の重複登録を禁止）
-  if (!commandsRegistered) {
-    registerCommands(context, daemonManager, statusBar);
-    commandsRegistered = true;
-  }
 
   // CodeLens / FileWatcher は restart で再生成必要なので毎回登録 → dispose 管理
   if (codeLensDisposable) {
@@ -116,7 +120,9 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
     ["typescript", "javascript", "python", "go", "rust", "java", "csharp"],
     codeLensProvider
   );
-  context.subscriptions.push(codeLensDisposable);
+  // WHY: context.subscriptions に push しない。startDaemonStack は再起動時に再呼ばれるため、
+  // push するたびに古いエントリが subscriptions に蓄積し deactivate 時に二重 dispose になる。
+  // 代わりに deactivate() で明示的に dispose する。
 
   if (watcherDisposable) {
     watcherDisposable.dispose();
@@ -124,7 +130,7 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
   }
   watcherDisposable = setupFileWatchers(context, daemonManager, codeLensProvider);
 
-  statusBar.show("Ready");
+  statusBar?.show("Ready");
 }
 
 /**
@@ -155,12 +161,18 @@ async function stopDaemonStack(): Promise<void> {
 export async function deactivate(): Promise<void> {
   console.log("[comP] Extension deactivating...");
 
+  sidebarPanel?.dispose();
+
   if (daemonManager) {
     await daemonManager.stop();
   }
 
   if (statusBar) {
     statusBar.dispose();
+  }
+
+  if (codeLensDisposable) {
+    codeLensDisposable.dispose();
   }
 
   if (codeLensProvider) {
@@ -196,6 +208,7 @@ function setupFileWatchers(
     }
 
     debounceTimer = setTimeout(async () => {
+      debounceTimer = null;
       try {
         await daemonManager.indexFile(uri.fsPath);
         // Invalidate CodeLens cache for this file
@@ -219,7 +232,17 @@ function setupFileWatchers(
     }
   });
 
-  context.subscriptions.push(watcher);
+  // WHY: watcher dispose 時に pending の debounceTimer も確実にクリアするため複合 Disposable を返す
+  const disposable: vscode.Disposable = {
+    dispose: () => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = null;
+      }
+      watcher.dispose();
+    },
+  };
+  context.subscriptions.push(disposable);
   console.log("[comP] Auto-indexing enabled");
-  return watcher;
+  return disposable;
 }

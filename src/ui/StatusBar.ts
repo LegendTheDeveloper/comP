@@ -8,9 +8,11 @@
 import * as vscode from "vscode";
 
 export class StatusBar {
+  public static instance: StatusBar | null = null;
   private item: vscode.StatusBarItem | null = null;
 
   constructor() {
+    StatusBar.instance = this;
     // Create status bar item on the left side
     this.item = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
@@ -33,12 +35,13 @@ export class StatusBar {
   }
 
   /** Update with statistics from daemon */
-  updateStats(totalNodes: number, totalFiles: number, status: "Ready" | "Indexing" | "Error" = "Ready"): void {
+  updateStats(totalNodes: number, totalFiles: number, status: "Ready" | "Indexing" | "Error" = "Ready", efficiency?: string): void {
     if (!this.item) return;
 
     const statusIcon = status === "Ready" ? "✓" : status === "Indexing" ? "⟳" : "⚠";
-    this.item.text = `◈ comP: ${totalNodes} symbols | ${statusIcon} ${status}`;
-    this.item.tooltip = `${totalFiles} files indexed • ${totalNodes} symbols • Status: ${status}`;
+    const savingsText = efficiency && efficiency !== "0%" ? ` | ${efficiency} saved` : "";
+    this.item.text = `◈ comP: ${totalNodes} symbols${savingsText} | ${statusIcon} ${status}`;
+    this.item.tooltip = `${totalFiles} files indexed • ${totalNodes} symbols • Status: ${status}${efficiency ? ` • Efficiency: ${efficiency}` : ""}`;
 
     // Set background color based on status
     if (status === "Error") {

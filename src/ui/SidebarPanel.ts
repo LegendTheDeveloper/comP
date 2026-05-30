@@ -15,6 +15,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { DaemonManager } from "../daemon/DaemonManager";
+import { StatusBar } from "./StatusBar";
 
 /**
  * Sidebar panel - WebviewViewProvider として実装
@@ -244,6 +245,18 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
 
     try {
       const stats = await this.daemonManager.getStats();
+      const efficiency: string = stats.efficiency || "0%";
+      const tokensSaved: number = stats.tokens_saved || 0;
+      const queriesCount: number = stats.queries_count || 0;
+
+      // ステータスバーにも efficiency を反映
+      StatusBar.instance?.updateStats(
+        stats.total_nodes || 0,
+        stats.total_files || 0,
+        "Ready",
+        efficiency
+      );
+
       this.view.webview.postMessage({
         type: "statsUpdate",
         data: {
@@ -252,6 +265,9 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
           totalNodes: stats.total_nodes || 0,
           totalEdges: stats.total_edges || 0,
           lastUpdated: new Date().toLocaleTimeString(),
+          efficiency,
+          tokensSaved,
+          queriesCount,
         },
       });
     } catch (error) {
@@ -289,6 +305,13 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
 
   private sendLogsUpdate(): void {
     this.view?.webview.postMessage({ type: "logsUpdate", logs: this.logs });
+  }
+
+  public dispose(): void {
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
   }
 
   private getHtml(): string {
@@ -387,6 +410,16 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     <div class="stat-item"><div class="stat-label">Edges</div><div class="stat-value" id="edgeCount">--</div></div>
     <div class="stat-item"><div class="stat-label">Updated</div><div class="stat-value" id="lastUpdated" style="font-size:11px;">--</div></div>
   </div>
+  <div class="stats-container" style="margin-top:0;">
+    <div class="stat-item" style="grid-column:span 2;">
+      <div class="stat-label">Compression Ratio</div>
+      <div style="display:flex;align-items:baseline;justify-content:center;gap:8px;">
+        <div class="stat-value" id="tokenEfficiency" style="color:var(--vscode-terminal-ansiGreen);">--</div>
+        <div style="font-size:11px;opacity:0.7;" id="tokensSaved"></div>
+      </div>
+      <div style="font-size:10px;opacity:0.5;margin-top:2px;" id="queriesCount"></div>
+    </div>
+  </div>
   <div class="logs-section">
     <div class="logs-header"><h3>Logs</h3><button onclick="clearLogs()">Clear</button></div>
     <div class="logs-content" id="logsContent"><div class="log-entry">Initializing...</div></div>
@@ -404,6 +437,11 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         document.getElementById('symbolCount').textContent = d.totalNodes ?? '--';
         document.getElementById('edgeCount').textContent = d.totalEdges ?? '--';
         document.getElementById('lastUpdated').textContent = d.lastUpdated ?? '--';
+        document.getElementById('tokenEfficiency').textContent = d.efficiency || '0%';
+        const avgSaved = d.queriesCount > 0 ? Math.round(d.tokensSaved / d.queriesCount) : 0;
+        const avgSavedStr = avgSaved > 1000 ? (avgSaved / 1000).toFixed(1) + 'K' : String(avgSaved);
+        document.getElementById('tokensSaved').textContent = d.queriesCount > 0 ? '~' + avgSavedStr + ' tokens/query' : '';
+        document.getElementById('queriesCount').textContent = 'vs full codebase · ' + (d.queriesCount || 0) + ' queries';
         if (d.daemonRunning) updateStatus(true);
       } else if (msg.type === 'daemonStatus') {
         updateStatus(msg.running);
