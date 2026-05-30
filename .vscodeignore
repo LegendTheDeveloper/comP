@@ -60,3 +60,13 @@ Thumbs.db
 .LSOverride
 *.sublime-project
 *.sublime-workspace
+
+# ===== Local Data/Configs =====
+.comp/
+.claude/
+.husky/
+scripts/
+temp/
+*.vsix
+CLAUDE.md
+AGENTS.md

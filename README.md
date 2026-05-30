@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="resources/comp-icon.png" width="128" height="128" alt="comP Logo">
+</p>
+
 # comP - Code Context Engine for AI Agents
 
 **An open-source, local-first code indexing engine that provides AI coding agents with optimal context.**
@@ -8,12 +12,13 @@ comP enables Claude Code, Cursor, Cline, and other AI agents to understand and a
 
 ## What It Does
 
-- **📑 Code Indexing**: Automatically builds a searchable graph of your codebase using tree-sitter (30+ languages)
-- **🎯 Smart Context**: Provides AI agents with only the most relevant code, reducing tokens by ~60%
-- **🔍 Impact Analysis**: Shows what code could break when you change a symbol
-- **📊 Token Counter**: Displays exactly how many tokens your context uses
-- **🤝 MCP Integration**: Works with Claude Code, Cursor, Cline, and other AI agents via Model Context Protocol
-- **100% Local**: Everything runs on your machine—no cloud calls, no data sharing
+- **📑 Code Indexing**: Automatically builds a searchable graph of your codebase using tree-sitter (30+ languages) with **concurrent background indexing** to prevent editor startup blocking.
+- **🎯 Smart Context**: Provides AI agents with only the most relevant code, reducing tokens by ~60%.
+- **🔍 Impact Analysis**: Shows what code could break when you change a symbol.
+- **📊 Token Counter**: Displays exactly how many tokens your context uses, and tracks **accumulated token savings and efficiency** across sessions.
+- **🔍 BM25 Search**: Complements symbol graph traversal with full-text search capability for Markdown files.
+- **🤝 MCP Integration**: Works with Claude Code, Cursor, Cline, and other AI agents via Model Context Protocol.
+- **100% Local**: Everything runs on your machine—no cloud calls, no data sharing.
 
 **Supported Languages (30+)**: C, C++, C#, Go, Java, JavaScript, TypeScript, Python, Rust, Ruby, Bash, Kotlin, Swift, PHP, Dart, Elixir, Haskell, Lua, R, Zig, SQL, HTML, CSS, YAML, Scala, and more.
 
@@ -30,10 +35,10 @@ comP enables Claude Code, Cursor, Cline, and other AI agents to understand and a
 
 ## Installation
 
-### From VSCode Marketplace (Coming Soon)
+### From VSCode Marketplace
 
-1. Open VSCode
-2. Go to **Extensions** (Ctrl+Shift+X)
+1. Open **VSCode**
+2. Go to **Extensions** (`Ctrl+Shift+X`)
 3. Search for **"comP - Code Context Engine"**
 4. Click **Install**
 
@@ -59,17 +64,17 @@ npm run daemon:build
 
 ## Quick Start
 
-1. **Install** the comP extension
-2. **Open a folder** in VSCode (e.g., a Git repository)
-3. comP will **automatically index** your code
-4. Watch the **status bar** to see indexing progress
-5. Use comP commands:
+1. **Install** the comP extension.
+2. **Open a folder** in VSCode (e.g., a Git repository).
+3. comP will **automatically index** your code in the background.
+4. Watch the **status bar** to see indexing progress.
+5. Run the setup command:
 
 ```bash
 Ctrl+Shift+P → "comP: Setup Agents"
 ```
 
-Choose your AI agent (Claude Code, Cursor, Cline, etc.), and comP will configure the MCP connection.
+Choose your AI agent (Claude Code, Cursor, Cline, Antigravity, etc.), and comP will configure the MCP connection.
 
 ---
 
@@ -77,12 +82,13 @@ Choose your AI agent (Claude Code, Cursor, Cline, etc.), and comP will configure
 
 | Agent | Status | Notes |
 | --- | --- | --- |
-| **Claude Code** | ✅ Verified | Tested by maintainers |
-| **GitHub Copilot** | ✅ Verified | Tested by maintainers |
-| Cursor | ⚪ Should work | MCP 2024-11-05 compliant — untested |
-| Cline | ⚪ Should work | MCP 2024-11-05 compliant — untested |
-| Windsurf | ⚪ Should work | MCP 2024-11-05 compliant — untested |
-| Gemini | ❌ Not supported | No MCP support (REST API only) |
+| **Claude Code** | ✅ Supported & Verified | Verified by maintainers |
+| **GitHub Copilot** | ✅ Supported & Verified | Verified by maintainers |
+| **Antigravity** | ✅ Supported & Verified | Premium agent in Antigravity IDE |
+| **Cursor** | ✅ Supported | MCP 2024-11-05 compliant |
+| **Cline** | ✅ Supported | MCP 2024-11-05 compliant |
+| **Windsurf** | ✅ Supported | MCP 2024-11-05 compliant |
+| **Gemini** | ❌ Not supported | No native MCP client support |
 
 Any MCP 2024-11-05 compliant client should work. If your agent needs a specific config, [open an issue](https://github.com/tsucky230/comP/issues/new).
 
@@ -114,6 +120,7 @@ Click to open the **Statistics Dashboard** with:
 - Indexing progress
 - Total nodes and edges
 - Token reduction estimate (e.g., 60% saved)
+- Session-specific and accumulated token metrics (Sent, Saved, Efficiency %)
 
 ### AI Agent Usage
 
@@ -174,7 +181,7 @@ Create `.comp/config.json` to control indexing behavior for large repositories:
 ### Architecture
 
 1. **Indexer (Rust daemon)**: Scans your workspace, parses code with tree-sitter, stores graph in SQLite
-2. **Search Engine**: Finds relevant code using semantic search + graph traversal
+2. **Search Engine**: Finds relevant code using semantic search + graph traversal + BM25 complementary
 3. **MCP Server**: Exposes tools to AI agents via Model Context Protocol
 4. **VSCode Extension**: Manages the daemon, displays UI, handles user commands
 
@@ -187,11 +194,11 @@ Your Code Files
         ↓
   SQLite Graph DB (.comp/index.db)
         ↓
-  Semantic Search
+  Semantic Search & BM25
         ↓
   MCP Tools (run_pipeline, get_context, etc.)
         ↓
-  AI Agent (Claude Code, Cursor, Cline)
+  AI Agent (Claude Code, Cursor, Cline, Antigravity)
 ```
 
 ---
@@ -220,38 +227,33 @@ When you run **"comP: Generate Context Capsule"**:
 
 ### Issue: "comP is not indexing"
 
-- Check the **Status Bar** (bottom-left) for progress
+- Check the **Status Bar** (bottom-left) for progress.
 - If stuck: **Ctrl+Shift+P** → "comP: Force Re-index"
-- Check `.comp/` folder exists and `.gitignore` includes it
+- Check `.comp/` folder exists and `.gitignore` includes it.
 
 ### Issue: "MCP connection failed"
 
-- Run **"comP: Setup Agents"** again
-- Verify your agent (Claude Code, Cursor) has the `.comp/mcp-config.json` file
-- Check VSCode Output panel (View → Output → "comP") for errors
+- Run **"comP: Setup Agents"** again.
+- Verify your agent has the `.comp/mcp-config.json` file.
+- Check VSCode Output panel (View → Output → "comP") for errors.
 
 ### Issue: "Indexing is slow"
 
-- Large repos (>100k files) take time on first run
-- Subsequent updates are incremental (fast)
-- Check system resources: comP uses <500MB RAM
+- Large repos (>100k files) take time on first run.
+- Subsequent updates are incremental (fast).
+- Check system resources: comP uses <500MB RAM.
 
 ### Issue: "Not all languages are recognized"
 
-- comP supports 30+ languages out-of-the-box
-- **Unsupported files** are silently skipped (not indexed)
-- Word (.docx) support coming in v2
+- comP supports 30+ languages out-of-the-box.
+- **Unsupported files** are silently skipped (not indexed).
+- Word (.docx) support coming in v2.
 
 ---
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
-
-- How to report bugs
-- How to suggest features
-- How to set up the dev environment
-- Code of Conduct
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ### Development Setup
 
@@ -283,13 +285,13 @@ npm run lint:md:fix
 
 ## Roadmap
 
-| Version | Features |
-| --- | --- |
-| **v0.1** | Core indexing, basic MCP, 30 languages, JSON/XML/Markdown |
-| **v0.2** | Word (.docx) support, advanced impact analysis |
-| **v0.3** | Embedding-based search, cross-repo indexing |
-| **v0.4** | Auto project docs generation (CLAUDE.md / README from index), Git diff-aware context for PR review |
-| **v1.0** | Stable API, wider agent support, community integrations |
+| Version | Features | Status |
+| --- | --- | --- |
+| **v0.1** | Core indexing, basic MCP, 30 languages, JSON/XML/Markdown, background indexing, and token stats. | ✅ **Released** |
+| **v0.2** | Word (.docx) support, advanced impact analysis | ⚪ Planning |
+| **v0.3** | Embedding-based search, cross-repo indexing | ⚪ Planning |
+| **v0.4** | Auto project docs generation, Git diff-aware context for PR review | ⚪ Planning |
+| **v1.0** | Stable API, wider agent support, community integrations | ⚪ Planning |
 
 ---
 
