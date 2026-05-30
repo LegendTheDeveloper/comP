@@ -7,6 +7,7 @@
 
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
 import { DaemonManager } from "../daemon/DaemonManager";
 
 interface AgentConfig {
@@ -33,10 +34,12 @@ interface AgentConfig {
  */
 export class AgentSetupManager {
   private workspaceRoot: string;
+  private extensionPath: string | undefined;
 
-  constructor(_daemonManager: DaemonManager, workspaceRoot: string) {
+  constructor(_daemonManager: DaemonManager, workspaceRoot: string, extensionPath?: string) {
     // daemonManager reserved for future use (e.g., querying indexing status during config generation)
     this.workspaceRoot = workspaceRoot;
+    this.extensionPath = extensionPath;
   }
 
   /**
@@ -89,6 +92,13 @@ export class AgentSetupManager {
           template: (path) => this.generateContinueConfig(path),
         };
 
+      case "Antigravity":
+        return {
+          name: "Antigravity",
+          configPath: this.antigravityConfigPath(),
+          template: (path) => this.generateAntigravityConfig(path),
+        };
+
       default:
         return null;
     }
@@ -122,7 +132,10 @@ export class AgentSetupManager {
     try {
       const daemonPath = this.getDaemonPath();
       const configContent = config.template(daemonPath);
-      const fullPath = path.join(this.workspaceRoot, config.configPath);
+      // WHY: Antigravity 等グローバル設定は絶対パスで返るため join 不要
+      const fullPath = path.isAbsolute(config.configPath)
+        ? config.configPath
+        : path.join(this.workspaceRoot, config.configPath);
 
       // Create directories if needed
       const dir = path.dirname(fullPath);
@@ -152,12 +165,25 @@ export class AgentSetupManager {
    *
    * # 出力
    * - daemon 実行ファイルの絶対パス
+   *
+   * # 優先順位
+   * 1. 開発ビルド: <workspaceRoot>/daemon/target/release/
+   * 2. 配布版: <workspaceRoot>/.comp/bin/
    */
   private getDaemonPath(): string {
-    // TODO: DaemonManager から daemon パスを取得
-    // 一時的には production bundled binary を想定
     const binaryName = process.platform === "win32" ? "comp-daemon.exe" : "comp-daemon";
-    // Assuming daemon is in .comp/bin/
+
+    // Development: cargo build output in workspace
+    const devPath = path.join(this.workspaceRoot, "daemon", "target", "release", binaryName);
+    if (fs.existsSync(devPath)) return devPath;
+
+    // Extension: binary bundled with the installed extension
+    if (this.extensionPath) {
+      const extPath = path.join(this.extensionPath, "daemon", "target", "release", binaryName);
+      if (fs.existsSync(extPath)) return extPath;
+    }
+
+    // Production: bundled binary in workspace .comp/bin
     return path.join(this.workspaceRoot, ".comp", "bin", binaryName);
   }
 
@@ -296,5 +322,45 @@ mcp_servers = {
 
   private continueConfigPath(): string {
     return ".comp/config/continue_config.py";
+  }
+
+  /**
+   * Antigravity MCP config path
+   *
+   * Antigravity (Google Gemini-based IDE) stores global MCP config at
+   * ~/.gemini/antigravity-ide/mcp_config.json — absolute path so generateConfig
+   * writes directly without prepending workspaceRoot.
+   */
+  private antigravityConfigPath(): string {
+    return path.join(os.homedir(), ".gemini", "antigravity-ide", "mcp_config.json");
+  }
+
+  /**
+   * Generate Antigravity MCP configuration
+   *
+   * Merges comP into the existing mcp_config.json rather than overwriting,
+   * to preserve other MCP servers the user may have configured.
+   */
+  private generateAntigravityConfig(daemonPath: string): string {
+    let existing: { mcpServers: Record<string, unknown> } = { mcpServers: {} };
+
+    try {
+      const raw = fs.readFileSync(this.antigravityConfigPath(), "utf-8");
+      const parsed = JSON.parse(raw);
+      existing = { mcpServers: {}, ...parsed };
+    } catch {
+      // File absent or invalid — start from scratch
+    }
+
+    existing.mcpServers["comp"] = {
+      command: daemonPath,
+      args: [],
+      env: {
+        COMP_WORKSPACE_ROOT: this.workspaceRoot,
+        RUST_LOG: "info",
+      },
+    };
+
+    return JSON.stringify(existing, null, 2);
   }
 }
