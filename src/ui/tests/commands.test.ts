@@ -51,7 +51,7 @@ describe("registerCommands", () => {
   });
 
   it("registers all 5 commands", () => {
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     expect(handlers.size).to.equal(5);
     expect(handlers.has("comp.setupAgents")).to.be.true;
     expect(handlers.has("comp.forceReindex")).to.be.true;
@@ -61,7 +61,7 @@ describe("registerCommands", () => {
   });
 
   it("comp.showStats calls getStats and shows information message", async () => {
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.showStats")!();
     expect(mockDaemon.getStats.calledOnce).to.be.true;
     expect((vscode.window as any).showInformationMessage.calledOnce).to.be.true;
@@ -69,42 +69,42 @@ describe("registerCommands", () => {
 
   it('comp.forceReindex with "Yes" calls request("forceReindex")', async () => {
     (vscode.window as any).showWarningMessage = sinon.stub().resolves("Yes");
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.forceReindex")!();
     expect(mockDaemon.request.calledWith("forceReindex")).to.be.true;
   });
 
   it('comp.forceReindex with "Cancel" skips request', async () => {
     (vscode.window as any).showWarningMessage = sinon.stub().resolves("Cancel");
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.forceReindex")!();
     expect(mockDaemon.request.called).to.be.false;
   });
 
   it("comp.forceReindex updates status bar on success", async () => {
     (vscode.window as any).showWarningMessage = sinon.stub().resolves("Yes");
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.forceReindex")!();
     expect(mockStatusBar.updateStats.calledOnce).to.be.true;
   });
 
   it("comp.setupAgents with no selection does nothing", async () => {
     (vscode.window as any).showQuickPick = sinon.stub().resolves(undefined);
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.setupAgents")!();
     expect((vscode.window as any).showInformationMessage.called).to.be.false;
   });
 
   it("comp.generateContext with no input does nothing", async () => {
     (vscode.window as any).showInputBox = sinon.stub().resolves(undefined);
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.generateContext")!();
     expect(mockDaemon.request.called).to.be.false;
   });
 
   it("comp.showImpactGraph with no active editor shows error", async () => {
     (vscode.window as any).activeTextEditor = undefined;
-    registerCommands(mockContext, mockDaemon, mockStatusBar);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.showImpactGraph")!();
     expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
   });
