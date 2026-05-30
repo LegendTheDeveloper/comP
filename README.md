@@ -288,6 +288,7 @@ npm run lint:md:fix
 | **v0.1** | Core indexing, basic MCP, 30 languages, JSON/XML/Markdown |
 | **v0.2** | Word (.docx) support, advanced impact analysis |
 | **v0.3** | Embedding-based search, cross-repo indexing |
+| **v0.4** | Auto project docs generation (CLAUDE.md / README from index), Git diff-aware context for PR review |
 | **v1.0** | Stable API, wider agent support, community integrations |
 
 ---
