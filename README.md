@@ -66,7 +66,9 @@ npm run daemon:build
 
 1. **Install** the comP extension.
 2. **Open a folder** in VSCode (e.g., a Git repository).
-3. comP will **automatically index** your code in the background.
+3. **Start the daemon**:
+   - **First-time workspace**: Open the comP sidebar by clicking the **comP icon** in the Activity Bar (left edge), and click the **"Start comP" button** to manually trigger the initial indexing.
+   - **Subsequent times (when `.comp/` directory exists)**: comP will **automatically start indexing** your code in the background upon opening the folder.
 4. Watch the **status bar** to see indexing progress.
 5. Run the setup command:
 
