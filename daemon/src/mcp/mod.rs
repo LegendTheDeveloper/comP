@@ -163,9 +163,9 @@ impl MCPServer {
             .ok_or_else(|| anyhow!("Missing 'task' parameter"))?;
         let max_tokens = params["max_tokens"].as_u64().unwrap_or(8000) as usize;
 
-        // 1. task を単語分割して各キーワードでシンボル名 LIKE 検索 → pivot 候補
-        // WHY: タスク文字列全体の LIKE 検索では "fix auth bug" → 0件になる。
-        //      単語ごとに個別検索して OR マージすることで関連ファイルをヒットさせる。
+        // 1. Split task into words and query symbol name LIKE for each keyword -> pivot candidates
+        // WHY: A LIKE query on the entire task string (e.g. "fix auth bug") would return 0 hits.
+        //      We search each word individually and merge with OR to match related files.
         let keywords: Vec<&str> = task
             .split(|c: char| !c.is_alphanumeric() && c != '_')
             .filter(|w| w.len() >= 3)
@@ -180,12 +180,12 @@ impl MCPServer {
             }
             merged
         };
-        // ファイル単位で先頭出現順に並べ替えてから上限を切る
+        // Sort files by first occurrence before applying limits
         all_hits.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         let hits = all_hits;
         let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
         let files_list = self.state.graph_db.list_files()?;
-        // WHY: language 情報を消費前に保存しておく。BM25 が Markdown ファイル一覧を必要とするため。
+        // WHY: Save language info before consuming. BM25 requires the list of Markdown files.
         let markdown_paths: Vec<String> = files_list
             .iter()
             .filter(|(_, _, lang)| lang == "markdown")
@@ -196,7 +196,7 @@ impl MCPServer {
             .map(|(id, path, _)| (path, id))
             .collect();
 
-        // 2. ヒットしたファイルを重複排除して pivot に
+        // 2. Deduplicate matched files to build pivot files list
         let mut seen = std::collections::HashSet::new();
         let mut pivot_files = Vec::new();
         let mut pivot_paths: Vec<String> = Vec::new();
@@ -207,8 +207,8 @@ impl MCPServer {
                     .and_then(|id| symbol_counts.get(id))
                     .copied()
                     .unwrap_or(0);
-                // WHY: sym*20 は過小評価。関数1つ平均50行 × 約1token/行で sym*50 に近い。
-                //      ファイルサイズをDBに持たないため行数ベースの概算を使う。
+                // WHY: sym*20 is an underestimation. An average function has ~50 lines x ~1 token/line, closer to sym*50.
+                //      We estimate based on line count approximations since file sizes aren't stored in DB.
                 let tokens = (sym as usize).saturating_mul(50);
                 pivot_files.push(json!({
                     "path": file.clone(),
@@ -219,9 +219,9 @@ impl MCPServer {
             }
         }
 
-        // BM25 フルテキスト検索（Markdown ファイル向け補完）
-        // WHY: シンボル LIKE 検索は見出し名のみヒット。本文キーワードは届かないため
-        // Markdown ファイルを実ファイルから読み込み BM25 でスコアリングして pivot に追加する。
+        // BM25 full-text search (complements search for Markdown files)
+        // WHY: Symbol LIKE queries only match headings, missing body content keywords.
+        //      We read Markdown files and score using BM25, then add to pivot files.
         if !markdown_paths.is_empty() && !keywords.is_empty() {
             let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
                 .unwrap_or_else(|_| ".".to_string());
@@ -255,14 +255,14 @@ impl MCPServer {
             .map(|t| t as usize)
             .sum();
 
-        // 3. ワークスペース全体トークン推定 (節約率算出用)
+        // 3. Estimate total workspace tokens (for calculating savings ratio)
         let total_symbols: i64 = symbol_counts.values().sum();
         let full_workspace_tokens = (total_symbols as usize).saturating_mul(50).max(total_tokens + 1);
 
         let savings = crate::search::TokenCounter::calculate_savings(full_workspace_tokens, total_tokens);
         let cost = crate::search::TokenCounter::estimate_cost(total_tokens, "sonnet");
 
-        // セッション累積トークン統計を更新
+        // Update accumulated token statistics for the session
         let saved_this_call = full_workspace_tokens.saturating_sub(total_tokens) as u64;
         self.state.tokens_sent.fetch_add(total_tokens as u64, Ordering::Relaxed);
         self.state.tokens_saved.fetch_add(saved_this_call, Ordering::Relaxed);
@@ -273,7 +273,7 @@ impl MCPServer {
         Ok(json!({
             "task": task,
             "pivot_files": pivot_files,
-            "related_files": [],  // TODO: impact graph 経由で算出 (Phase 5)
+            "related_files": [],  // TODO: calculate via impact graph (Phase 5)
             "total_tokens": total_tokens,
             "max_tokens": max_tokens,
             "savings": savings,
@@ -321,7 +321,7 @@ impl MCPServer {
             .unwrap_or(10) as usize;
         let kind_filter = params["kind_filter"].as_str();
 
-        // GraphDB を直接 LIKE 検索する (SearchEngine の TF-IDF が未構築のため)
+        // Query GraphDB directly via LIKE (since SearchEngine TF-IDF is not yet built)
         let hits = self.state.graph_db.search_symbols_by_name(query, limit * 2)?;
 
         let results: Vec<Value> = hits
@@ -334,7 +334,7 @@ impl MCPServer {
                     "symbol": name,
                     "kind": kind,
                     "line": line,
-                    "score": 1.0  // LIKE 検索のためスコアは固定。TF-IDF 実装後に置換予定
+                    "score": 1.0  // Score is fixed for LIKE queries. To be replaced after TF-IDF implementation.
                 })
             })
             .collect();
@@ -385,7 +385,7 @@ impl MCPServer {
             .ok_or_else(|| anyhow!("Missing 'symbol_id' parameter"))?;
         let symbol_name = params["symbol_name"].as_str().unwrap_or("unknown");
 
-        // GraphDB から逆依存マップ・シンボルマップを構築し、SearchEngine の BFS を呼ぶ
+        // Build reverse dependency & symbol maps from GraphDB and invoke SearchEngine BFS
         let reverse_deps = self.state.graph_db.get_reverse_deps()?;
         let symbol_map = self.state.graph_db.get_symbol_map()?;
 
@@ -513,9 +513,8 @@ impl MCPServer {
 
     /// Force re-index of entire workspace
     ///
-    /// WHY: VSCode `comp.forceReindex` コマンドから呼ばれる。
-    /// DB を全クリアして再構築する。インデックス処理がブロッキング実行のため
-    /// レスポンスが遅い可能性あり (timeout 注意)。
+    /// WHY: Called from VSCode `comp.forceReindex` command.
+    /// Clears and rebuilds the database. Response might be slow since indexing is blocking (beware of timeouts).
     pub async fn handle_force_reindex(&self) -> Result<Value> {
         info!("handle_force_reindex: clearing index");
         self.state.graph_db.clear_index()?;
@@ -548,8 +547,8 @@ impl MCPServer {
 
     /// Index a single file (incremental update)
     ///
-    /// WHY: VSCode の FileSystemWatcher が変更ファイルごとに呼ぶ。
-    /// 既存実装は DB に書き込まない TODO 状態だったため統計に反映されなかった。
+    /// WHY: Called by VSCode's FileSystemWatcher for each modified file.
+    /// The previous implementation was a TODO that did not write to DB, which left stats unreflected.
     pub async fn handle_index_file(&self, params: Value) -> Result<Value> {
         let path_str = params["path"]
             .as_str()
@@ -569,8 +568,7 @@ impl MCPServer {
 
     /// Remove a file from the index
     ///
-    /// VSCode の onDidDelete から呼ばれる。絶対パスを workspace 相対に変換して
-    /// DB から削除する。
+    /// Called by VSCode's onDidDelete. Converts absolute path to workspace-relative and deletes from DB.
     pub async fn handle_remove_file(&self, params: Value) -> Result<Value> {
         let path_str = params["path"]
             .as_str()
@@ -580,7 +578,7 @@ impl MCPServer {
             .or_else(|_| std::env::var("WORKSPACE_ROOT"))
             .unwrap_or_else(|_| ".".to_string());
 
-        // 絶対パスなら workspace 相対に変換し、\ → / に正規化 (DB は / 統一)
+        // Convert to workspace-relative path if absolute, and normalize \ to / (DB uses / unified)
         let relative_path = std::path::Path::new(path_str)
             .strip_prefix(&workspace_root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -766,7 +764,7 @@ mod tests {
         let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.expect("Failed to create AppState"));
         let server = MCPServer::new(state);
 
-        // 新規生成時は indexing 未実施なので 0 件
+        // Nodes are 0 at creation since indexing has not run
         let stats = server.handle_get_stats().await.expect("getStats failed");
         assert_eq!(stats["total_files"].as_i64().unwrap(), 0);
 

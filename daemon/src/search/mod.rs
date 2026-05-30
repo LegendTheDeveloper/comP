@@ -259,8 +259,8 @@ impl SearchEngine {
             }
         }
 
-        // WHY: TF-IDF は完全トークン一致のみスコアを付けるため、"auth" → "authenticate" の
-        //      ような前方一致クエリで 0 件になる。サブストリング fallback でこれを補完する。
+        // WHY: TF-IDF only scores exact token matches. Prefix queries like "auth" -> "authenticate"
+        //      would return 0 hits. We complement this with substring fallback.
         if results.is_empty() {
             let mut seen = std::collections::HashSet::new();
             'outer: for (file_path, symbols) in &self.documents {

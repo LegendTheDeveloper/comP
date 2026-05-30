@@ -18,20 +18,19 @@ import { DaemonManager } from "../daemon/DaemonManager";
 import { StatusBar } from "./StatusBar";
 
 /**
- * Sidebar panel - WebviewViewProvider として実装
+ * Sidebar panel - Implemented as a WebviewViewProvider.
  *
- * # 入力
- * - context: VSCode ExtensionContext（バージョン読み込み・DaemonManager 生成に使用）
+ * # Inputs
+ * - context: VSCode ExtensionContext (used for loading version and creating DaemonManager)
  *
- * # 出力
- * - resolveWebviewView: VSCode が sidebar を表示するときに呼び出す
- * - setDaemonManager: extension.ts が daemon 起動後に呼び出す
+ * # Outputs
+ * - resolveWebviewView: Called by VSCode to display the sidebar
+ * - setDaemonManager: Called by extension.ts after starting the daemon
  */
 /**
- * extension.ts が SidebarPanel に注入する起動/停止コールバック。
- * WHY: 以前 SidebarPanel が new DaemonManager() で独自に二重生成していた結果、
- * extension.ts のグローバル daemonManager と分離され、commands.ts (forceReindex 等) が
- * 古いインスタンスを叩く不整合があった。生成責務を extension.ts に一本化する。
+ * Lifecycle callbacks injected by extension.ts for starting/stopping the daemon.
+ * WHY: Avoid duplicate creation of DaemonManager in SidebarPanel which caused inconsistency
+ * with commands (e.g. forceReindex) calling an outdated instance. Creation is centralized in extension.ts.
  */
 export interface DaemonLifecycleCallbacks {
   onStartRequest: () => Promise<DaemonManager | null>;
@@ -42,7 +41,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   public static readonly viewType = "comp-stats";
   private static instance: SidebarPanel | undefined;
 
-  // WebviewView は resolveWebviewView が呼ばれるまで undefined
+  // WebviewView remains undefined until resolveWebviewView is called
   private view?: vscode.WebviewView;
   private daemonManager: DaemonManager | null = null;
   private statsInterval: NodeJS.Timeout | null = null;
@@ -52,19 +51,19 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   private lifecycleCallbacks: DaemonLifecycleCallbacks | null = null;
 
   private constructor(context: vscode.ExtensionContext) {
-    // package.json からバージョンを取得
+    // Load version from package.json
     try {
       const pkgPath = path.join(context.extensionPath, "package.json");
       const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
       this.version = pkg.version || this.version;
     } catch {
-      // フォールバック
+      // Fallback
     }
   }
 
   /**
-   * extension.ts から呼ばれる初期化メソッド
-   * 後方互換のため旧シグネチャを維持
+   * Initialization method called by extension.ts.
+   * Maintains original signature for backward compatibility.
    */
   public static createOrShow(
     _extensionPath: string,
@@ -81,12 +80,12 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   }
 
   /**
-   * VSCode がサイドバーに WebView を表示するときに呼ばれる
+   * Called by VSCode when displaying the webview in the sidebar.
    *
-   * # 処理
-   * - WebView の HTML をセット
-   * - メッセージハンドラーを登録
-   * - daemon が起動済みなら stats 取得を開始
+   * # Actions
+   * - Sets HTML content for the WebView
+   * - Registers the message handlers
+   * - Starts polling stats if the daemon is already running
    */
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -102,7 +101,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       this.handleWebviewMessage(message);
     });
 
-    // visible になったとき stats を更新
+    // Refresh stats when the panel becomes visible
     webviewView.onDidChangeVisibility(() => {
       if (webviewView.visible) {
         this.refreshStats();
@@ -117,7 +116,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   }
 
   /**
-   * daemon 起動後に extension.ts から呼ばれる
+   * Called by extension.ts after starting the daemon
    */
   public setDaemonManager(daemonManager: DaemonManager | null): void {
     this.daemonManager = daemonManager;
@@ -135,21 +134,21 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   }
 
   /**
-   * extension.ts が起動/停止ロジックを注入する。
-   * WHY: SidebarPanel は UI 層に専念し、DaemonManager のライフサイクル管理を行わない。
+   * Injects lifecycle callbacks from extension.ts.
+   * WHY: SidebarPanel should focus on UI only and delegate lifecycle management.
    */
   public setLifecycleCallbacks(callbacks: DaemonLifecycleCallbacks): void {
     this.lifecycleCallbacks = callbacks;
   }
 
   /**
-   * WebView からのメッセージを処理
+   * Handles incoming messages from the WebView.
    *
-   * # 処理分岐
-   * - "refresh": stats 更新
-   * - "startDaemon": daemon 起動
-   * - "stopDaemon": daemon 停止
-   * - "clearLogs": ログクリア
+   * # Branches
+   * - "refresh": Refreshes statistics
+   * - "startDaemon": Starts the daemon
+   * - "stopDaemon": Stops the daemon
+   * - "clearLogs": Clears UI logs
    */
   private async handleWebviewMessage(message: {
     command: string;
@@ -249,7 +248,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       const tokensSaved: number = stats.tokens_saved || 0;
       const queriesCount: number = stats.queries_count || 0;
 
-      // ステータスバーにも efficiency を反映
+      // Update efficiency stats in the status bar
       StatusBar.instance?.updateStats(
         stats.total_nodes || 0,
         stats.total_files || 0,

@@ -20,8 +20,8 @@ pub use schema::Schema;
 
 /// Graph database interface for storing code structure
 pub struct GraphDB {
-    // WHY: Mutex<Connection> にして Send+Sync を得る。
-    // tokio::spawn でインデックスを並行実行するために必要。
+    // WHY: Use Mutex<Connection> to obtain Send+Sync.
+    // Required to run indexing concurrently via tokio::spawn.
     conn: Mutex<Connection>,
 }
 
@@ -135,9 +135,9 @@ impl GraphDB {
 
     /// Atomically increment token stats in the metadata table
     ///
-    /// WHY: run_pipeline は Claude Code が spawn する MCP daemon プロセスで実行され、
-    /// getStats は VSCode 拡張が spawn する別プロセスから呼ばれる。
-    /// in-memory AtomicU64 はプロセス間で共有されないため、共有 SQLite DB に永続化する。
+    /// WHY: run_pipeline is executed in the MCP daemon process spawned by Claude Code,
+    /// while getStats is called from a separate process spawned by the VSCode extension.
+    /// Since an in-memory AtomicU64 is not shared between processes, we persist it in the shared SQLite DB.
     pub fn increment_token_stats(&self, tokens_sent: u64, tokens_saved: u64) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
         for key in &["tokens_sent", "tokens_saved", "queries_count"] {
@@ -210,7 +210,7 @@ impl GraphDB {
 
     /// List all indexed files with id, path, language
     ///
-    /// WHY: handle_list_indexed_files が実データを返すために必要。
+    /// WHY: Required for handle_list_indexed_files to return actual data.
     pub fn list_files(&self) -> Result<Vec<(i64, String, String)>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
         let mut stmt = conn.prepare(
@@ -241,14 +241,14 @@ impl GraphDB {
 
     /// Search symbols by name (LIKE pattern, case-insensitive)
     ///
-    /// WHY: SearchEngine の TF-IDF が未構築のため、当面の手段として
-    /// シンボル名 LIKE 検索で context を返す。
+    /// WHY: Since SearchEngine's TF-IDF is not yet built, we temporarily return context
+    /// by searching symbol names using a LIKE pattern.
     pub fn search_symbols_by_name(
         &self,
         query: &str,
         limit: usize,
     ) -> Result<Vec<(String, String, String, i32)>> {
-        // 返却: (file_path, symbol_name, kind, line)
+        // Return: (file_path, symbol_name, kind, line)
         let pattern = format!("%{}%", query);
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
         let mut stmt = conn.prepare(
@@ -292,8 +292,8 @@ impl GraphDB {
 
     /// Build reverse-dependency map: to_id -> [from_id, ...]
     ///
-    /// WHY: 「シンボル X を変更したら誰が影響を受けるか」は
-    /// 「X を呼んでいる側 (from)」を逆引きする必要があるため。
+    /// WHY: Finding "who is affected if symbol X is modified" requires
+    /// looking up the caller side (from) reversely.
     pub fn get_reverse_deps(&self) -> Result<HashMap<i64, Vec<i64>>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
         let mut stmt = conn.prepare("SELECT from_id, to_id FROM edges")?;
@@ -319,27 +319,27 @@ impl GraphDB {
 
     /// Delete a single file and its associated nodes/edges
     ///
-    /// WHY: ファイル削除/リネーム時に古いエントリを残すと、impact 分析や
-    /// 統計が嘘の値になる。CASCADE を使わず明示的に edges → nodes → files の
-    /// 順で削除する (SQLite の外部キー設定が無い前提)。
+    /// WHY: Leaving old entries on file deletion or renaming makes impact analysis
+    /// and stats inaccurate. We delete in the order of edges -> nodes -> files
+    /// explicitly without relying on CASCADE (assuming SQLite foreign key constraints are not enabled).
     pub fn delete_file(&self, path: &str) -> Result<usize> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
 
-        // file_id を取得 (存在しなければ no-op で 0 件)
+        // Get file_id (no-op with 0 results if it doesn't exist)
         let file_id: Option<i64> = conn
             .query_row("SELECT id FROM files WHERE path = ?", [path], |row| row.get(0))
             .ok();
 
         let Some(fid) = file_id else { return Ok(0); };
 
-        // 1. このファイルのノード ID をすべて取得
+        // 1. Get all node IDs of this file
         let mut stmt = conn.prepare("SELECT id FROM nodes WHERE file_id = ?")?;
         let node_ids: Vec<i64> = stmt
             .query_map([fid], |row| row.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
 
-        // 2. 該当ノードを参照するエッジを削除 (from / to 両方)
+        // 2. Delete edges referencing the target nodes (both from and to sides)
         for nid in &node_ids {
             conn.execute(
                 "DELETE FROM edges WHERE from_id = ? OR to_id = ?",
@@ -347,10 +347,10 @@ impl GraphDB {
             )?;
         }
 
-        // 3. ノード削除
+        // 3. Delete nodes
         conn.execute("DELETE FROM nodes WHERE file_id = ?", [fid])?;
 
-        // 4. ファイル本体削除
+        // 4. Delete file entry
         let removed = conn.execute("DELETE FROM files WHERE id = ?", [fid])?;
 
         Ok(removed)

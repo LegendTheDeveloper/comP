@@ -31,11 +31,11 @@ interface DaemonSymbol {
 /**
  * CodeLens provider for displaying symbol dependency information
  *
- * # 責務
- * - サポート言語判定：TypeScript, Python, Go, Rust, Java, C#等
- * - daemon からシンボル情報を取得
- * - export/public シンボルのみを表示対象に
- * - 各シンボルの依存カウントを表示
+ * # Responsibilities
+ * - Language support check: TypeScript, Python, Go, Rust, Java, C#, etc.
+ * - Retrieve symbol information from the daemon
+ * - Display only exported/public symbols
+ * - Show dependency count for each symbol
  */
 export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
   private daemonManager: DaemonManager;
@@ -51,21 +51,21 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
   /**
    * Provide code lenses for document
    *
-   * # 入力
-   * - document: VSCode ドキュメント
-   * - token: キャンセルトークン
+   * # Inputs
+   * - document: VSCode document
+   * - token: Cancellation token
    *
-   * # 出力
-   * - CodeLens 配列（export されたシンボルの依存情報）
+   * # Outputs
+   * - Array of CodeLens (dependency info for exported symbols)
    *
-   * # 前提条件
-   * - daemon が起動済み
+   * # Prerequisites
+   * - The daemon must be running
    */
   async provideCodeLenses(
     document: vscode.TextDocument,
     _token: vscode.CancellationToken
   ): Promise<vscode.CodeLens[]> {
-    // 言語フィルタ：サポート対象言語のみ処理
+    // Language filter: only process supported languages
     if (!this.isSupportedLanguage(document.languageId)) {
       return [];
     }
@@ -75,27 +75,27 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
     try {
       const filePath = document.uri.fsPath;
 
-      // キャッシュから取得、なければ daemon に問い合わせ
+      // Get from cache, otherwise query the daemon
       let symbols = this.cache.get(filePath);
       if (!symbols) {
         try {
           symbols = (await this.daemonManager.getSymbols(filePath)) || [];
           this.cache.set(filePath, symbols);
         } catch (error) {
-          // daemon 問い合わせに失敗した場合は空配列を返す
+          // Return empty array if daemon query fails
           console.debug("[comP] Failed to query symbols:", error);
           return [];
         }
       }
 
-      // export/public シンボルのみフィルタ、CodeLens を生成
+      // Filter for exported/public symbols and generate CodeLenses
       for (const symbol of symbols) {
-        // export や public シンボルのみ表示
+        // Display only exported or public symbols
         if (!this.isExportedSymbol(symbol)) {
           continue;
         }
 
-        // 行番号が有効範囲内か確認
+        // Verify if line number is within document bounds
         if (symbol.line >= document.lineCount) {
           continue;
         }
@@ -137,16 +137,16 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
   /**
    * Resolve code lens command
    *
-   * # 入力
-   * - codeLens: VSCode CodeLens オブジェクト
-   * - token: キャンセルトークン
+   * # Inputs
+   * - codeLens: VSCode CodeLens object
+   * - token: Cancellation token
    *
-   * # 出力
-   * - command が設定された CodeLens
+   * # Outputs
+   * - CodeLens with command configured
    *
-   * # 動作
-   * - 依存カウント > 0: "X references" を表示、クリックで参照プロバイダを起動
-   * - 依存カウント = 0: "No references" を表示（no-op コマンド）
+   * # Behavior
+   * - Dependent count > 0: Display "X references", click starts reference provider
+   * - Dependent count = 0: Display "No references" (no-op command)
    */
   resolveCodeLens(
     codeLens: vscode.CodeLens,
@@ -177,18 +177,18 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
   /**
    * Check if symbol is exported/public
    *
-   * # 入力
-   * - symbol: daemon から返されたシンボル
+   * # Inputs
+   * - symbol: Symbol returned from the daemon
    *
-   * # 出力
+   * # Outputs
    * - true if symbol is exported/public and should be displayed
    *
-   * # フィルタ条件
-   * - scope が "export", "public" を含む
-   * - kind が function, class, interface, type 等（変数は除外）
+   * # Filter Conditions
+   * - scope contains "export" or "public"
+   * - kind is function, class, interface, type, etc. (variables excluded)
    */
   private isExportedSymbol(symbol: DaemonSymbol): boolean {
-    // 表示対象の kind
+    // Kinds to display
     const displayKinds = [
       "function",
       "class",
@@ -204,7 +204,7 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
       return false;
     }
 
-    // scope が export/public を含む場合のみ表示
+    // Display only if scope contains export/public
     if (!symbol.scope) {
       return false;
     }
@@ -220,13 +220,13 @@ export class DependencyCodeLensProvider implements vscode.CodeLensProvider {
   /**
    * Check if language is supported by comP
    *
-   * # 入力
+   * # Inputs
    * - languageId: VSCode language ID
    *
-   * # 出力
+   * # Outputs
    * - true if supported, false otherwise
    *
-   * # サポート言語
+   * # Supported Languages
    * - TypeScript, JavaScript, Python, Go, Rust, Java, C#, C++, Ruby, PHP, SQL, JSON, YAML
    */
   private isSupportedLanguage(languageId: string): boolean {

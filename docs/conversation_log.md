@@ -34,3 +34,24 @@
 
 ### 次回のタスク
 - 整備した内容のコミットとプッシュ。
+
+---
+
+## 2026-05-31 (コメント英語化タスクの完了)
+### ユーザーからの要望
+- ソースコードのコメントは全て簡潔な英語にしてほしい。
+
+### 実施内容
+1. 日本語コメントの最終確認と英語化置換：
+   - `src/test/setup.ts`、`src/daemon/DaemonManager.ts`、および Rust デーモン側の `daemon/src/graph/mod.rs` 内に日本語コメントが残存していることを確認。
+   - これらの日本語コメントをすべて簡潔な英語（concise English）に翻訳・置換しました。
+   - 置換後、正規表現による grep 検索を用いて、TypeScript および Rust の全ソースコード内に日本語コメントの残存がないことを最終確認しました。
+2. 静的検証とテストの実行：
+   - `npm run lint:ts` を実行し、型チェックエラーがないことを確認。
+   - `npm run test`（TSテスト 61件）および `npm run daemon:test`（Rustテスト 63件）を実行し、すべて正常にパスすることを確認。
+3. リリースビルドと結合動作検証：
+   - バックグラウンドプロセスとして残っていた `comp-daemon.exe` を `taskkill` で強制終了させ、最新の Rust 側コードを反映した `cargo build --release` を正常完了。
+   - Python による JSON-RPC 結合テストスクリプト `test_daemon_rpc.py` を実行し、英語化されたデーモンが正しく動作（getStats, run_pipeline, get_token_usage 等のAPI疎通）することを確認。
+
+### 次回のタスク
+- 英語化およびドキュメント更新を含めた変更の一括プッシュ。

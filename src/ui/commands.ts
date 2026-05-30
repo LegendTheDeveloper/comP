@@ -13,13 +13,13 @@ import { AgentSetupManager } from "../mcp/AgentSetup";
 
 export function registerCommands(
   context: vscode.ExtensionContext,
-  // WHY: 再起動のたびに新しい DaemonManager が生成されるため、登録時点の参照ではなく
-  // 呼び出し時点の最新インスタンスを得るゲッターを受け取る。
+  // WHY: A new DaemonManager is created on restart, so we accept a getter to get the latest
+  // instance at invocation time instead of a static reference at registration.
   getDaemonManager: () => DaemonManager | null,
   statusBar: StatusBar
 ): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ".";
-  // _daemonManager は AgentSetupManager では未使用（将来の拡張用）
+  // _daemonManager is unused in AgentSetupManager (reserved for future expansion)
   const agentSetup = new AgentSetupManager(null as unknown as DaemonManager, workspaceRoot, context.extensionPath);
 
   // Command 1: comp.setupAgents

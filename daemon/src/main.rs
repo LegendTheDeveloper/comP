@@ -23,7 +23,7 @@ use search::SearchEngine;
 /// Shared state across MCP server:
 /// - GraphDB: Persist code structure (SQLite)
 /// - SearchEngine: Semantic search and scoring
-/// - Token counters: run_pipeline 呼び出し毎に累積（セッションリセット許容）
+/// - Token counters: accumulated per run_pipeline call (session resets allowed)
 pub struct AppState {
     pub graph_db: Arc<GraphDB>,
     pub search_engine: Arc<tokio::sync::Mutex<SearchEngine>>,
@@ -78,16 +78,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(AppState::new(&workspace_root).await?);
     info!("Application state initialized");
 
-    // バックグラウンドでインデックスを起動し、MCP サーバーをすぐに開始する
-    // WHY: GraphDB が Mutex<Connection> になったためスレッド間共有が安全。
-    // Claude Code は MCP 起動タイムアウト内にハンドシェイクを要求するため、
-    // 48秒かかるインデックスを待たず即座に応答する必要がある。
+    // Start indexing in the background and immediately start the MCP server.
+    // WHY: Safe to share across threads now that GraphDB uses Mutex<Connection>.
+    // Claude Code requires a handshake within MCP startup timeout, so we must respond immediately
+    // without waiting for indexing which can take ~48s.
     {
         let state_for_idx = Arc::clone(&state);
         let root_for_idx = workspace_root.clone();
         tokio::spawn(async move {
             info!("Starting initial workspace indexing...");
-            // WHY: 前回セッションの hash を DB から読み込み、変更ファイルだけ再インデックスする。
+            // WHY: Load hashes from previous session database to only re-index modified files.
             let previous_hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
             let mut indexer = indexer::Indexer::new(&root_for_idx);
             match indexer.index_workspace(Some(&previous_hashes), &state_for_idx.graph_db).await {
@@ -137,7 +137,7 @@ mod integration_tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    /// MCPServer 生成後に getStats が正しく初期値 (0/0/0) を返すか検証
+    /// Verify getStats returns correct initial values (0/0/0) after MCPServer creation
     #[tokio::test]
     async fn test_mcp_server_creation_with_appstate() {
         let temp_dir = std::env::temp_dir().join("comP_test_mcp_server");

@@ -24,7 +24,7 @@ describe("StatusBar", () => {
       show: sinon.stub(),
       dispose: sinon.stub(),
     };
-    // test-setup.ts の共有モックオブジェクトを上書き（全モジュール共通参照）
+    // Overwrite the shared mock object in test-setup.ts (referenced globally)
     (vscode.window as any).createStatusBarItem = sinon.stub().returns(mockItem);
   });
 

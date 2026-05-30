@@ -32,11 +32,11 @@ export class DaemonManager {
   private requestId = 0;
   private pendingRequests = new Map<number, (response: JSONRPCResponse) => void>();
   private isReady = false;
-  // プロセス起動済み（stdin/stdout 利用可能）だが疎通確認前。
-  // waitForReady が getStats を呼ぶ際の許可フラグ。
+  // Process is spawned (stdin/stdout available) but handshake not yet complete.
+  // Flag to allow getStats requests during waitForReady.
   private isProcessSpawned = false;
   private responseBuffer = "";
-  // WHY: デーモンが改行なしの壊れたデータを大量送信したとき際限なく成長するのを防ぐ
+  // WHY: Prevent the buffer from growing indefinitely if the daemon sends a massive burst of malformed data without newlines
   private readonly MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10 MB
 
   constructor(context: vscode.ExtensionContext) {
@@ -138,11 +138,9 @@ export class DaemonManager {
         this.isProcessSpawned = false;
       });
 
-      // WHY: spawn 直後は子プロセス起動中で stdin がまだ受信不可能な可能性がある。
-      // request() が isReady を見て即送信すると永久 pending になる窓があったため、
-      // waitForReady で疎通確認できるまでは isReady=false に保つ。
-      // ただし waitForReady 自体が request("getStats") を呼ぶ → isReady の事前許可が必要なため、
-      // 内部用フラグ isProcessSpawned で区別する。
+      // WHY: stdin might not be ready immediately after spawn.
+      // We keep isReady=false until connectivity is confirmed via waitForReady to prevent permanent pending states.
+      // Since waitForReady queries getStats, we use the internal isProcessSpawned flag to temporarily bypass the check.
       this.isProcessSpawned = true;
       console.log("[comP] Daemon process spawned, awaiting readiness...");
 
@@ -191,8 +189,7 @@ export class DaemonManager {
     console.log("[comP] Stopping daemon...");
     const proc = this.process;
 
-    // WHY: 参照を先にクリアすることで、stop() の並行呼び出しや
-    // deactivate() との競合で二重 kill が起きるのを防ぐ。
+    // WHY: Clear references beforehand to prevent duplicate kill calls from concurrent stop() or deactivate() invocations.
     this.process = null;
     this.isReady = false;
     this.isProcessSpawned = false;
@@ -204,16 +201,14 @@ export class DaemonManager {
         resolve();
       }, 3000);
 
-      // WHY: exit ハンドラを kill より先に登録する。
-      // kill 後に登録すると、プロセスが即座に終了した場合に
-      // exit イベントを取り逃して 3 秒タイムアウトまで待ち続けるバグを防ぐ。
+      // WHY: Register the exit handler before sending the kill signal.
+      // If registered after, we might miss the exit event if it dies immediately, causing a 3-second timeout wait.
       proc.once("exit", () => {
         clearTimeout(timeout);
         resolve();
       });
 
-      // WHY: Windows のネイティブバイナリは SIGTERM を無視する実装が多いため
-      // Windows では SIGKILL を直接送って確実に終了させる。
+      // WHY: Windows native binaries often ignore SIGTERM, so send SIGKILL directly on Windows to ensure termination.
       const signal = process.platform === "win32" ? "SIGKILL" : "SIGTERM";
       proc.kill(signal);
     });
@@ -227,7 +222,7 @@ export class DaemonManager {
    * Response: { "jsonrpc": "2.0", "id": 1, "result": {...} }
    */
   async request(method: string, params?: unknown): Promise<unknown> {
-    // waitForReady 中は isReady=false だが疎通確認のため getStats 送信を許可する
+    // Allow sending getStats during waitForReady where isReady is still false, to establish connectivity
     const allowedDuringHandshake = method === "getStats" && this.isProcessSpawned;
     if (!this.process || (!this.isReady && !allowedDuringHandshake)) {
       throw new Error("Daemon is not running");

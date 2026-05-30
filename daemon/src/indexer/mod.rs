@@ -106,16 +106,16 @@ impl Indexer {
             }
         }
 
-        // 3. 削除されたファイルのエントリを DB から除去
+        // 3. Remove deleted file entries from the database
         for path in &walk_result.deleted_files {
             if let Err(e) = db.delete_file(path) {
-                // WHY: 削除失敗時はエントリが DB に残り、存在しないファイルのシンボルが
-                // 検索結果に出続ける不整合になる。warn で記録して次回インデックス時の再試行を促す。
+                // WHY: If deletion fails, entries persist in the database, leading to obsolete search results.
+                //      Log a warning to prompt retries during the next indexing run.
                 log::warn!("Failed to remove deleted file from index (stale entry may persist): {} — {}", path, e);
             }
         }
 
-        // 4. .comp/config.json の max_nodes チェック
+        // 4. Check max_nodes limit from .comp/config.json
         let (max_nodes, on_limit) = Self::load_comp_config(&self.workspace_root);
         if let Ok((_, node_count, _)) = db.get_stats() {
             if node_count > max_nodes {
@@ -167,8 +167,8 @@ impl Indexer {
             let syms = DocumentParser::parse_parquet(&full_path)?;
             (syms, String::new()) // Binary files don't use string content for extraction later
         } else {
-            // WHY: InvalidData はほぼ UTF-8 以外のエンコーディング。
-            // ユーザーには無害なスキップとして debug ログだけ残し、caller の eprintln を避ける。
+            // WHY: InvalidData usually indicates non-UTF-8 encoding.
+            // Skip silently with a debug log and avoid printing to stderr to prevent user noise.
             let content = match fs::read_to_string(&full_path) {
                 Ok(c) => c,
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
@@ -235,15 +235,14 @@ impl Indexer {
 
     /// Index a single file (incremental update)
     ///
-    /// WHY: ファイル変更時に呼ばれる。元実装は DB 未保存 (TODO のまま) で
-    /// 統計に一切反映されなかった。parse_and_extract を再利用して
-    /// パース・シンボル抽出・依存解決・DB 保存まで一気通貫で行う。
+    /// WHY: Called upon file changes. Previous implementation was a TODO that did not save to DB.
+    /// We reuse parse_and_extract to parse, extract symbols, resolve dependencies, and save to DB in one go.
     pub async fn index_file(&mut self, path: &Path, db: &crate::graph::GraphDB) -> Result<()> {
         use sha2::{Sha256, Digest};
 
-        // workspace_root 相対パスへ変換 (絶対パスのまま DB に入ると一意性が崩れる)
-        // WHY: Windows の to_string_lossy() は \ を返すが DB は / で統一する。
-        // VSCode の TypeScript 側は / で送ってくるため、混在するとパス照合が壊れる。
+        // Convert to workspace-relative path (using absolute paths breaks DB uniqueness constraint)
+        // WHY: Windows path normalizer returns backslashes (\), but the database must use forward slashes (/) consistently.
+        //      The TypeScript extension sends forward slashes, so mismatch breaks path lookups.
         let relative_path = path
             .strip_prefix(&self.workspace_root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -251,8 +250,8 @@ impl Indexer {
 
         let language = self.walker_detect_language(&relative_path);
 
-        // ファイルハッシュ計算 (FileEntry に必須)
-        // バイナリファイル(Parquetなど)に対応するためbytesとして読み込む
+        // Calculate file hash (required for FileEntry)
+        // Read as bytes to handle binary files (e.g., Parquet) gracefully
         let content_bytes = std::fs::read(path)?;
         let mut hasher = Sha256::new();
         hasher.update(&content_bytes);
@@ -265,7 +264,7 @@ impl Indexer {
             modified_time: 0,
         };
 
-        // parse_and_extract が DB 書き込みまで実行
+        // parse_and_extract performs parsing and writes to database
         self.parse_and_extract(&file_entry, db).await?;
 
         Ok(())

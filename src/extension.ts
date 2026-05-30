@@ -43,7 +43,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const autoStartDaemon = hasCompDirectory();
     console.log(`[comP] .comp directory exists: ${autoStartDaemon}`);
 
-    // 1. Sidebar panel (常時。manual モードでも Start ボタンで起動できるよう)
+    // 1. Sidebar panel (Always active so that start button is available even in manual mode)
     sidebarPanel = SidebarPanel.createOrShow(context.extensionPath, null, context);
     context.subscriptions.push(
       vscode.window.registerWebviewViewProvider(SidebarPanel.viewType, sidebarPanel, {
@@ -51,17 +51,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       })
     );
 
-    // 2. StatusBar とコマンドを常時登録
-    // WHY: デーモン起動失敗時でも comp.showStats が "command not found" にならないよう、
-    // startDaemonStack の成否に関係なく activate() で一度だけ登録する。
+    // 2. Always register the StatusBar and commands.
+    // WHY: To prevent "command not found" errors on comp.showStats when daemon fails to start,
+    // we register them exactly once in activate() regardless of startDaemonStack success.
     statusBar = new StatusBar();
     statusBar.show("Stopped");
     context.subscriptions.push({ dispose: () => statusBar?.dispose() });
     registerCommands(context, () => daemonManager, statusBar);
 
-    // 3. ライフサイクルコールバックを SidebarPanel に注入
-    // WHY: SidebarPanel が new DaemonManager() で独自に二重生成していた問題を排除。
-    // Start/Stop ボタンの実体は extension.ts が一元管理する。
+    // 3. Inject lifecycle callbacks into SidebarPanel.
+    // WHY: Prevent duplicate DaemonManager creation within SidebarPanel.
+    // The actual start/stop execution is centralized in extension.ts.
     sidebarPanel.setLifecycleCallbacks({
       onStartRequest: async () => {
         await startDaemonStack(context);
@@ -72,7 +72,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       },
     });
 
-    // 4. auto モード: .comp 存在時は即起動
+    // 4. Auto mode: immediately start if .comp directory exists
     if (autoStartDaemon) {
       await startDaemonStack(context);
       console.log("[comP] Extension activated successfully (auto-mode)");
@@ -89,8 +89,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 }
 
 /**
- * Daemon + 周辺機能を一括起動する。
- * 二重起動を防ぐため既存 daemonManager がある場合は何もしない。
+ * Starts the daemon and helper services.
+ * Skips starting if a running instance already exists to prevent duplicate processes.
  */
 async function startDaemonStack(context: vscode.ExtensionContext): Promise<void> {
   if (daemonManager?.isRunning()) {
@@ -111,7 +111,7 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
 
   sidebarPanel?.setDaemonManager(daemonManager);
 
-  // CodeLens / FileWatcher は restart で再生成必要なので毎回登録 → dispose 管理
+  // CodeLens and FileWatcher need to be re-created on restart -> manage via dispose
   if (codeLensDisposable) {
     codeLensDisposable.dispose();
   }
@@ -120,9 +120,9 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
     ["typescript", "javascript", "python", "go", "rust", "java", "csharp"],
     codeLensProvider
   );
-  // WHY: context.subscriptions に push しない。startDaemonStack は再起動時に再呼ばれるため、
-  // push するたびに古いエントリが subscriptions に蓄積し deactivate 時に二重 dispose になる。
-  // 代わりに deactivate() で明示的に dispose する。
+  // WHY: Do not push to context.subscriptions since startDaemonStack is called on restarts.
+  // Pushing would accumulate obsolete entries, leading to duplicate dispose errors during deactivation.
+  // Instead, dispose manually during deactivate().
 
   if (watcherDisposable) {
     watcherDisposable.dispose();
@@ -134,8 +134,8 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
 }
 
 /**
- * Daemon + 周辺機能を一括停止する。commands 登録は VSCode lifecycle で
- * 管理されるため dispose しない (deactivate まで保持)。
+ * Stops the daemon and helper services.
+ * Commands registered in activate() are not disposed here to keep them registered.
  */
 async function stopDaemonStack(): Promise<void> {
   if (watcherDisposable) {
@@ -232,7 +232,7 @@ function setupFileWatchers(
     }
   });
 
-  // WHY: watcher dispose 時に pending の debounceTimer も確実にクリアするため複合 Disposable を返す
+  // WHY: Return a composite disposable to ensure pending debounce timers are cleared when watcher is disposed.
   const disposable: vscode.Disposable = {
     dispose: () => {
       if (debounceTimer) {

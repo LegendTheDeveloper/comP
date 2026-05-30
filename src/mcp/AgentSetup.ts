@@ -20,17 +20,17 @@ interface AgentConfig {
 /**
  * AgentSetup - Generate MCP configuration files for various AI agents
  *
- * # 対応エージェント
- * - Claude Code（claude_desktop_config.json）
- * - Cursor（.cursor/rules）
- * - Cline（.cline/config.json）
- * - Windsurf（.windsurf/config.json）
- * - GitHub Copilot（N/A - requires different approach）
- * - Continue.dev（.continue/config.py）
+ * # Supported Agents
+ * - Claude Code (claude_desktop_config.json)
+ * - Cursor (.cursor/rules)
+ * - Cline (.cline/config.json)
+ * - Windsurf (.windsurf/config.json)
+ * - GitHub Copilot (N/A - requires different approach)
+ * - Continue.dev (.continue/config.py)
  *
- * # MCP サーバー構成
- * - stdio：daemon を MCP サーバーとしてサブプロセス起動
- * - 初期化パラメータ：workspace_root
+ * # MCP Server Setup
+ * - stdio: Spawn daemon as an MCP server subprocess
+ * - Init parameters: workspace_root
  */
 export class AgentSetupManager {
   private workspaceRoot: string;
@@ -45,14 +45,14 @@ export class AgentSetupManager {
   /**
    * Get configuration template for specific agent
    *
-   * # 入力
-   * - agentName: "Claude Code", "Cursor", "Cline", "Windsurf" 等
+   * # Inputs
+   * - agentName: "Claude Code", "Cursor", "Cline", "Windsurf", etc.
    *
-   * # 出力
-   * - AgentConfig オブジェクト（パス、テンプレート）
+   * # Outputs
+   * - AgentConfig object (path, template)
    *
-   * # 前提条件
-   * - daemon バイナリが既知の場所に存在
+   * # Prerequisites
+   * - The daemon binary exists in a known location
    */
   getAgentConfig(agentName: string): AgentConfig | null {
 
@@ -107,14 +107,14 @@ export class AgentSetupManager {
   /**
    * Generate and write configuration for agent
    *
-   * # 入力
-   * - agentName: エージェント名
+   * # Inputs
+   * - agentName: The name of the agent
    *
-   * # 出力
+   * # Outputs
    * - { configPath, success, message }
    *
-   * # 前提条件
-   * - ユーザーがファイル書き込み権限を持つ
+   * # Prerequisites
+   * - The user has file write permissions
    */
   async generateConfig(
     agentName: string
@@ -132,7 +132,7 @@ export class AgentSetupManager {
     try {
       const daemonPath = this.getDaemonPath();
       const configContent = config.template(daemonPath);
-      // WHY: Antigravity 等グローバル設定は絶対パスで返るため join 不要
+      // WHY: Global configs like Antigravity return absolute paths so no join is required
       const fullPath = path.isAbsolute(config.configPath)
         ? config.configPath
         : path.join(this.workspaceRoot, config.configPath);
@@ -163,12 +163,12 @@ export class AgentSetupManager {
   /**
    * Get daemon binary path for MCP stdio communication
    *
-   * # 出力
-   * - daemon 実行ファイルの絶対パス
+   * # Outputs
+   * - Absolute path of the daemon executable
    *
-   * # 優先順位
-   * 1. 開発ビルド: <workspaceRoot>/daemon/target/release/
-   * 2. 配布版: <workspaceRoot>/.comp/bin/
+   * # Precedence
+   * 1. Development build: <workspaceRoot>/daemon/target/release/
+   * 2. Bundled package: <workspaceRoot>/.comp/bin/
    */
   private getDaemonPath(): string {
     const binaryName = process.platform === "win32" ? "comp-daemon.exe" : "comp-daemon";
@@ -190,14 +190,14 @@ export class AgentSetupManager {
   /**
    * Generate Claude Code MCP configuration
    *
-   * # フォーマット
+   * # Format
    * - claude_desktop_config.json in ~/Library/Application Support/Claude/ (macOS)
    * - $APPDATA/Claude/claude_desktop_config.json (Windows)
    * - ~/.config/Claude/claude_desktop_config.json (Linux)
    *
-   * # MCP サーバー設定
-   * - command: daemon バイナリパス
-   * - args: (なし)
+   * # MCP Server Setup
+   * - command: daemon binary path
+   * - args: (none)
    * - env: COMP_WORKSPACE_ROOT
    */
   private generateClaudeCodeConfig(daemonPath: string): string {

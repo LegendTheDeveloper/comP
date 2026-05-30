@@ -40,7 +40,7 @@ describe("DependencyCodeLensProvider", () => {
   });
 
   describe("isSupportedLanguage", () => {
-    // private メソッドなので provideCodeLenses 経由でテスト
+    // Tested indirectly via provideCodeLenses since it is a private method
 
     it("should return empty array for unsupported language", async () => {
       const doc = {
@@ -85,7 +85,7 @@ describe("DependencyCodeLensProvider", () => {
     });
 
     it("should handle daemon errors gracefully", async () => {
-      // getSymbols が例外を投げる daemon のモック
+      // Mock daemon where getSymbols throws an exception
       const errorDaemon = {
         getSymbols: async (_path: string) => {
           throw new Error("Daemon unavailable");
