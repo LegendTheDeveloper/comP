@@ -8,6 +8,7 @@
 
 use log::info;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 mod indexer;
 mod graph;
@@ -22,15 +23,14 @@ use search::SearchEngine;
 /// Shared state across MCP server:
 /// - GraphDB: Persist code structure (SQLite)
 /// - SearchEngine: Semantic search and scoring
+/// - Token counters: run_pipeline 呼び出し毎に累積（セッションリセット許容）
 pub struct AppState {
     pub graph_db: Arc<GraphDB>,
     pub search_engine: Arc<tokio::sync::Mutex<SearchEngine>>,
+    pub tokens_sent: Arc<AtomicU64>,
+    pub tokens_saved: Arc<AtomicU64>,
+    pub queries_count: Arc<AtomicU64>,
 }
-
-// AppState is safe to share across threads
-// rusqlite::Connection is used within Arc, ensuring thread-safe access
-unsafe impl Send for AppState {}
-unsafe impl Sync for AppState {}
 
 impl AppState {
     /// Initialize application state
@@ -56,6 +56,9 @@ impl AppState {
         Ok(AppState {
             graph_db: Arc::new(graph_db),
             search_engine: Arc::new(tokio::sync::Mutex::new(search_engine)),
+            tokens_sent: Arc::new(AtomicU64::new(0)),
+            tokens_saved: Arc::new(AtomicU64::new(0)),
+            queries_count: Arc::new(AtomicU64::new(0)),
         })
     }
 }
@@ -75,29 +78,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let state = Arc::new(AppState::new(&workspace_root).await?);
     info!("Application state initialized");
 
-    // 初回 workspace 全体インデックス (MCP server 起動前に完了させる)
-    // WHY: デーモン起動時に DB は空。これを実行しないとファイル数=0 のまま固まる。
-    // tokio::spawn できないのは GraphDB 内部 (rusqlite Connection) が !Sync のため。
-    // Phase 3 で GraphDB を tokio::sync::Mutex<Connection> 化したら spawn 化可能。
-    // 現状は同期実行 → VSCode の getStats リトライ (5秒x10回=50秒) 内に完了する想定。
+    // バックグラウンドでインデックスを起動し、MCP サーバーをすぐに開始する
+    // WHY: GraphDB が Mutex<Connection> になったためスレッド間共有が安全。
+    // Claude Code は MCP 起動タイムアウト内にハンドシェイクを要求するため、
+    // 48秒かかるインデックスを待たず即座に応答する必要がある。
     {
-        info!("Starting initial workspace indexing...");
-        // WHY: 前回セッションの hash を DB から読み込み、変更ファイルだけ再インデックスする。
-        // None を渡すと全ファイルを毎回フルスキャンしてしまうため、セッション間の陳腐化を防ぐ。
-        let previous_hashes = state.graph_db.get_all_file_hashes().unwrap_or_default();
-        let mut indexer = indexer::Indexer::new(&workspace_root);
-        match indexer.index_workspace(Some(&previous_hashes), &state.graph_db).await {
-            Ok((total, indexed, symbols)) => {
-                info!(
-                    "Initial indexing complete: indexed {}/{} files, {} symbols",
-                    indexed, total, symbols
-                );
+        let state_for_idx = Arc::clone(&state);
+        let root_for_idx = workspace_root.clone();
+        tokio::spawn(async move {
+            info!("Starting initial workspace indexing...");
+            // WHY: 前回セッションの hash を DB から読み込み、変更ファイルだけ再インデックスする。
+            let previous_hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
+            let mut indexer = indexer::Indexer::new(&root_for_idx);
+            match indexer.index_workspace(Some(&previous_hashes), &state_for_idx.graph_db).await {
+                Ok((total, indexed, symbols)) => {
+                    info!(
+                        "Initial indexing complete: indexed {}/{} files, {} symbols",
+                        indexed, total, symbols
+                    );
+                }
+                Err(e) => log::error!("Initial indexing failed: {}", e),
             }
-            Err(e) => log::error!("Initial indexing failed: {}", e),
-        }
+        });
     }
 
-    // Start MCP server
+    // Start MCP server (indexing runs concurrently in background)
     // JSON-RPC 2.0 over stdio for AI agent communication
     let mcp_server = mcp::MCPServer::new(state);
     info!("MCP server started (listening on stdin/stdout)");
@@ -224,12 +229,13 @@ mod integration_tests {
         assert!(response["files"].is_array(), "files should be array");
         assert!(response["total_files"].is_number(), "total_files should be number");
 
-        // MCP Tool: get_token_usage (未実装ステータス)
+        // MCP Tool: get_token_usage
         let result = mcp_server.handle_get_token_usage().await;
         assert!(result.is_ok(), "get_token_usage failed");
         let response = result.unwrap();
-        assert_eq!(response["status"], "not_implemented");
         assert!(response["timestamp"].is_number());
+        assert!(response["queries_executed"].is_number());
+        assert!(response["efficiency"].is_string());
 
         // Cleanup
         let _ = std::fs::remove_dir_all(&temp_dir);

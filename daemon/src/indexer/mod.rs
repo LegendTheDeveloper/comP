@@ -109,7 +109,9 @@ impl Indexer {
         // 3. 削除されたファイルのエントリを DB から除去
         for path in &walk_result.deleted_files {
             if let Err(e) = db.delete_file(path) {
-                eprintln!("Warning: Failed to delete file entry {}: {}", path, e);
+                // WHY: 削除失敗時はエントリが DB に残り、存在しないファイルのシンボルが
+                // 検索結果に出続ける不整合になる。warn で記録して次回インデックス時の再試行を促す。
+                log::warn!("Failed to remove deleted file from index (stale entry may persist): {} — {}", path, e);
             }
         }
 
@@ -165,7 +167,16 @@ impl Indexer {
             let syms = DocumentParser::parse_parquet(&full_path)?;
             (syms, String::new()) // Binary files don't use string content for extraction later
         } else {
-            let content = fs::read_to_string(&full_path)?;
+            // WHY: InvalidData はほぼ UTF-8 以外のエンコーディング。
+            // ユーザーには無害なスキップとして debug ログだけ残し、caller の eprintln を避ける。
+            let content = match fs::read_to_string(&full_path) {
+                Ok(c) => c,
+                Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                    log::debug!("Skipping non-UTF-8 file: {} ({})", file_entry.path, e);
+                    return Ok(0);
+                }
+                Err(e) => return Err(e.into()),
+            };
             let syms = match file_entry.language.as_str() {
                 "json" => DocumentParser::parse_json(&content)?,
                 "jsonl" => DocumentParser::parse_jsonl(&content)?,

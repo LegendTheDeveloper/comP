@@ -12,6 +12,7 @@
 use anyhow::Result;
 use rusqlite::Connection;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 mod schema;
 
@@ -19,7 +20,9 @@ pub use schema::Schema;
 
 /// Graph database interface for storing code structure
 pub struct GraphDB {
-    conn: Connection,
+    // WHY: Mutex<Connection> にして Send+Sync を得る。
+    // tokio::spawn でインデックスを並行実行するために必要。
+    conn: Mutex<Connection>,
 }
 
 impl GraphDB {
@@ -40,7 +43,7 @@ impl GraphDB {
         // Open/create database
         let db_path = comp_dir.join("index.db");
         let conn = Connection::open(db_path)?;
-        let db = GraphDB { conn };
+        let db = GraphDB { conn: Mutex::new(conn) };
 
         // Initialize schema
         db.init_schema()?;
@@ -51,7 +54,8 @@ impl GraphDB {
     /// Initialize database schema (creates tables and indexes)
     fn init_schema(&self) -> Result<()> {
         // Apply all migrations from schema.rs
-        Schema::apply_all(&self.conn)?;
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        Schema::apply_all(&conn)?;
         Ok(())
     }
 
@@ -59,14 +63,15 @@ impl GraphDB {
     ///
     /// Returns the file ID for use in subsequent operations
     pub fn upsert_file(&self, path: &str, hash: &str, language: &str) -> Result<i64> {
-        self.conn.execute(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute(
             "INSERT OR REPLACE INTO files (path, hash, language, last_indexed)
              VALUES (?, ?, ?, strftime('%s', 'now'))",
             [path, hash, language],
         )?;
 
         // Get the inserted/updated file ID
-        let mut stmt = self.conn.prepare(
+        let mut stmt = conn.prepare(
             "SELECT id FROM files WHERE path = ?"
         )?;
         let file_id: i64 = stmt.query_row([path], |row| row.get(0))?;
@@ -86,20 +91,22 @@ impl GraphDB {
         col: i32,
         scope: Option<&str>,
     ) -> Result<i64> {
-        self.conn.execute(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute(
             "INSERT INTO nodes (file_id, name, kind, line, col, scope)
              VALUES (?, ?, ?, ?, ?, ?)",
             rusqlite::params![file_id, name, kind, line, col, scope],
         )?;
 
         // Get the inserted node ID
-        let last_id = self.conn.last_insert_rowid();
+        let last_id = conn.last_insert_rowid();
         Ok(last_id)
     }
 
     /// Insert a dependency edge between nodes
     pub fn insert_edge(&self, from_id: i64, to_id: i64, kind: &str) -> Result<()> {
-        self.conn.execute(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute(
             "INSERT OR IGNORE INTO edges (from_id, to_id, kind)
              VALUES (?, ?, ?)",
             rusqlite::params![from_id, to_id, kind],
@@ -111,7 +118,8 @@ impl GraphDB {
     ///
     /// Returns: Vec<(node_id, symbol_name)>
     pub fn get_dependents(&self, node_id: i64) -> Result<Vec<(i64, String)>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
             "SELECT edges.to_id, nodes.name FROM edges
              JOIN nodes ON edges.to_id = nodes.id
              WHERE edges.from_id = ?"
@@ -125,23 +133,73 @@ impl GraphDB {
         Ok(result)
     }
 
+    /// Atomically increment token stats in the metadata table
+    ///
+    /// WHY: run_pipeline は Claude Code が spawn する MCP daemon プロセスで実行され、
+    /// getStats は VSCode 拡張が spawn する別プロセスから呼ばれる。
+    /// in-memory AtomicU64 はプロセス間で共有されないため、共有 SQLite DB に永続化する。
+    pub fn increment_token_stats(&self, tokens_sent: u64, tokens_saved: u64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        for key in &["tokens_sent", "tokens_saved", "queries_count"] {
+            conn.execute(
+                "INSERT OR IGNORE INTO metadata (key, value) VALUES (?, '0')",
+                [key],
+            )?;
+        }
+        conn.execute(
+            "UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT) WHERE key = 'tokens_sent'",
+            [tokens_sent as i64],
+        )?;
+        conn.execute(
+            "UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT) WHERE key = 'tokens_saved'",
+            [tokens_saved as i64],
+        )?;
+        conn.execute(
+            "UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + 1 AS TEXT) WHERE key = 'queries_count'",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Read token stats from the metadata table
+    pub fn get_token_stats(&self) -> Result<(u64, u64, u64)> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let tokens_sent = conn.query_row(
+            "SELECT CAST(value AS INTEGER) FROM metadata WHERE key = 'tokens_sent'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) as u64;
+        let tokens_saved = conn.query_row(
+            "SELECT CAST(value AS INTEGER) FROM metadata WHERE key = 'tokens_saved'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) as u64;
+        let queries_count = conn.query_row(
+            "SELECT CAST(value AS INTEGER) FROM metadata WHERE key = 'queries_count'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).unwrap_or(0) as u64;
+        Ok((tokens_sent, tokens_saved, queries_count))
+    }
+
     /// Get total statistics about the index
     pub fn get_stats(&self) -> Result<(i64, i64, i64)> {
         // Returns: (file_count, node_count, edge_count)
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
 
-        let file_count: i64 = self.conn.query_row(
+        let file_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM files",
             [],
             |row| row.get(0)
         )?;
 
-        let node_count: i64 = self.conn.query_row(
+        let node_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM nodes",
             [],
             |row| row.get(0)
         )?;
 
-        let edge_count: i64 = self.conn.query_row(
+        let edge_count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM edges",
             [],
             |row| row.get(0)
@@ -154,7 +212,8 @@ impl GraphDB {
     ///
     /// WHY: handle_list_indexed_files が実データを返すために必要。
     pub fn list_files(&self) -> Result<Vec<(i64, String, String)>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
             "SELECT id, path, language FROM files ORDER BY path"
         )?;
         let rows = stmt.query_map([], |row| {
@@ -165,7 +224,8 @@ impl GraphDB {
 
     /// Count symbols (nodes) per file_id
     pub fn count_symbols_per_file(&self) -> Result<HashMap<i64, i64>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
             "SELECT file_id, COUNT(*) FROM nodes GROUP BY file_id"
         )?;
         let rows = stmt.query_map([], |row| {
@@ -190,7 +250,8 @@ impl GraphDB {
     ) -> Result<Vec<(String, String, String, i32)>> {
         // 返却: (file_path, symbol_name, kind, line)
         let pattern = format!("%{}%", query);
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
             "SELECT files.path, nodes.name, nodes.kind, nodes.line
              FROM nodes JOIN files ON nodes.file_id = files.id
              WHERE LOWER(nodes.name) LIKE LOWER(?)
@@ -209,7 +270,8 @@ impl GraphDB {
 
     /// Build symbol_id -> (name, file_path) map for impact analysis
     pub fn get_symbol_map(&self) -> Result<HashMap<i64, (String, String)>> {
-        let mut stmt = self.conn.prepare(
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
             "SELECT nodes.id, nodes.name, files.path
              FROM nodes JOIN files ON nodes.file_id = files.id"
         )?;
@@ -233,7 +295,8 @@ impl GraphDB {
     /// WHY: 「シンボル X を変更したら誰が影響を受けるか」は
     /// 「X を呼んでいる側 (from)」を逆引きする必要があるため。
     pub fn get_reverse_deps(&self) -> Result<HashMap<i64, Vec<i64>>> {
-        let mut stmt = self.conn.prepare("SELECT from_id, to_id FROM edges")?;
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT from_id, to_id FROM edges")?;
         let rows = stmt.query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
         })?;
@@ -247,9 +310,10 @@ impl GraphDB {
 
     /// Clear all indexed data (for force re-index)
     pub fn clear_index(&self) -> Result<()> {
-        self.conn.execute("DELETE FROM edges", [])?;
-        self.conn.execute("DELETE FROM nodes", [])?;
-        self.conn.execute("DELETE FROM files", [])?;
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute("DELETE FROM edges", [])?;
+        conn.execute("DELETE FROM nodes", [])?;
+        conn.execute("DELETE FROM files", [])?;
         Ok(())
     }
 
@@ -259,15 +323,17 @@ impl GraphDB {
     /// 統計が嘘の値になる。CASCADE を使わず明示的に edges → nodes → files の
     /// 順で削除する (SQLite の外部キー設定が無い前提)。
     pub fn delete_file(&self, path: &str) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+
         // file_id を取得 (存在しなければ no-op で 0 件)
-        let file_id: Option<i64> = self.conn
+        let file_id: Option<i64> = conn
             .query_row("SELECT id FROM files WHERE path = ?", [path], |row| row.get(0))
             .ok();
 
         let Some(fid) = file_id else { return Ok(0); };
 
         // 1. このファイルのノード ID をすべて取得
-        let mut stmt = self.conn.prepare("SELECT id FROM nodes WHERE file_id = ?")?;
+        let mut stmt = conn.prepare("SELECT id FROM nodes WHERE file_id = ?")?;
         let node_ids: Vec<i64> = stmt
             .query_map([fid], |row| row.get::<_, i64>(0))?
             .collect::<Result<Vec<_>, _>>()?;
@@ -275,17 +341,17 @@ impl GraphDB {
 
         // 2. 該当ノードを参照するエッジを削除 (from / to 両方)
         for nid in &node_ids {
-            self.conn.execute(
+            conn.execute(
                 "DELETE FROM edges WHERE from_id = ? OR to_id = ?",
                 rusqlite::params![nid, nid],
             )?;
         }
 
         // 3. ノード削除
-        self.conn.execute("DELETE FROM nodes WHERE file_id = ?", [fid])?;
+        conn.execute("DELETE FROM nodes WHERE file_id = ?", [fid])?;
 
         // 4. ファイル本体削除
-        let removed = self.conn.execute("DELETE FROM files WHERE id = ?", [fid])?;
+        let removed = conn.execute("DELETE FROM files WHERE id = ?", [fid])?;
 
         Ok(removed)
     }
@@ -296,7 +362,8 @@ impl GraphDB {
     /// content hash hasn't changed since the last session, avoiding a full
     /// re-index on every daemon restart.
     pub fn get_all_file_hashes(&self) -> Result<HashMap<String, String>> {
-        let mut stmt = self.conn.prepare("SELECT path, hash FROM files")?;
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT path, hash FROM files")?;
         let map = stmt
             .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
             .filter_map(|r| r.ok())

@@ -13,6 +13,7 @@ use anyhow::{Result, anyhow};
 use log::info;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 /// MCP Server
 ///
@@ -184,6 +185,12 @@ impl MCPServer {
         let hits = all_hits;
         let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
         let files_list = self.state.graph_db.list_files()?;
+        // WHY: language 情報を消費前に保存しておく。BM25 が Markdown ファイル一覧を必要とするため。
+        let markdown_paths: Vec<String> = files_list
+            .iter()
+            .filter(|(_, _, lang)| lang == "markdown")
+            .map(|(_, path, _)| path.clone())
+            .collect();
         let path_to_id: std::collections::HashMap<String, i64> = files_list
             .into_iter()
             .map(|(id, path, _)| (path, id))
@@ -212,6 +219,36 @@ impl MCPServer {
             }
         }
 
+        // BM25 フルテキスト検索（Markdown ファイル向け補完）
+        // WHY: シンボル LIKE 検索は見出し名のみヒット。本文キーワードは届かないため
+        // Markdown ファイルを実ファイルから読み込み BM25 でスコアリングして pivot に追加する。
+        if !markdown_paths.is_empty() && !keywords.is_empty() {
+            let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
+                .unwrap_or_else(|_| ".".to_string());
+            let bm25_hits = crate::indexer::doc_parser::Bm25Scorer::search_files(
+                &workspace_root,
+                &markdown_paths,
+                &keywords,
+                20,
+            );
+            for (path, _score) in bm25_hits {
+                if seen.insert(path.clone()) {
+                    let sym = path_to_id
+                        .get(&path)
+                        .and_then(|id| symbol_counts.get(id))
+                        .copied()
+                        .unwrap_or(0);
+                    let tokens = (sym as usize).saturating_mul(50);
+                    pivot_files.push(json!({
+                        "path": path.clone(),
+                        "symbols": sym,
+                        "tokens": tokens
+                    }));
+                    pivot_paths.push(path);
+                }
+            }
+        }
+
         let total_tokens: usize = pivot_files
             .iter()
             .filter_map(|v| v["tokens"].as_u64())
@@ -225,6 +262,14 @@ impl MCPServer {
         let savings = crate::search::TokenCounter::calculate_savings(full_workspace_tokens, total_tokens);
         let cost = crate::search::TokenCounter::estimate_cost(total_tokens, "sonnet");
 
+        // セッション累積トークン統計を更新
+        let saved_this_call = full_workspace_tokens.saturating_sub(total_tokens) as u64;
+        self.state.tokens_sent.fetch_add(total_tokens as u64, Ordering::Relaxed);
+        self.state.tokens_saved.fetch_add(saved_this_call, Ordering::Relaxed);
+        self.state.queries_count.fetch_add(1, Ordering::Relaxed);
+        // Persist to shared DB so the VSCode extension's daemon (separate process) can read these stats
+        let _ = self.state.graph_db.increment_token_stats(total_tokens as u64, saved_this_call);
+
         Ok(json!({
             "task": task,
             "pivot_files": pivot_files,
@@ -232,6 +277,8 @@ impl MCPServer {
             "total_tokens": total_tokens,
             "max_tokens": max_tokens,
             "savings": savings,
+            "compression_ratio": savings,
+            "full_workspace_tokens": full_workspace_tokens,
             "estimated_cost": cost
         }))
     }
@@ -440,22 +487,27 @@ impl MCPServer {
     /// 3. Calculate efficiency (context optimization benefit)
     /// 4. Add current timestamp
     pub async fn handle_get_token_usage(&self) -> Result<Value> {
-        // WHY: 内部トークン使用量カウンタは未実装。
-        // 嘘の数字を返すと AI エージェントの判断材料を歪めるため、
-        // status="not_implemented" を明示し、null を返す。
+        let sent = self.state.tokens_sent.load(Ordering::Relaxed);
+        let saved = self.state.tokens_saved.load(Ordering::Relaxed);
+        let queries = self.state.queries_count.load(Ordering::Relaxed);
+        let avg = if queries > 0 { sent / queries } else { 0 };
+        let efficiency = if sent + saved > 0 {
+            format!("{}%", (saved * 100) / (sent + saved))
+        } else {
+            "0%".to_string()
+        };
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
         Ok(json!({
-            "status": "not_implemented",
-            "message": "Token usage tracking is not yet implemented",
-            "total_tokens_consumed": Value::Null,
-            "queries_executed": Value::Null,
-            "average_tokens_per_query": Value::Null,
+            "total_tokens_consumed": sent,
+            "total_tokens_saved": saved,
+            "queries_executed": queries,
+            "average_tokens_per_query": avg,
             "timestamp": timestamp,
-            "efficiency": Value::Null
+            "efficiency": efficiency
         }))
     }
 
@@ -558,6 +610,15 @@ impl MCPServer {
         info!("handle_get_stats: called");
 
         let (file_count, node_count, edge_count) = self.state.graph_db.get_stats()?;
+        // Read from shared DB (not in-memory) so VSCode extension's daemon sees stats
+        // accumulated by the Claude Code MCP daemon in the same workspace
+        let (sent, saved, queries) = self.state.graph_db.get_token_stats().unwrap_or((0, 0, 0));
+        let efficiency = if sent + saved > 0 {
+            format!("{}%", (saved * 100) / (sent + saved))
+        } else {
+            "0%".to_string()
+        };
+        let avg_tokens_per_query = if queries > 0 { sent / queries } else { 0 };
 
         info!("handle_get_stats: returning stats - files: {}, nodes: {}, edges: {}",
               file_count, node_count, edge_count);
@@ -565,7 +626,13 @@ impl MCPServer {
         Ok(json!({
             "total_files": file_count,
             "total_nodes": node_count,
-            "total_edges": edge_count
+            "total_edges": edge_count,
+            "tokens_sent": sent,
+            "tokens_saved": saved,
+            "queries_count": queries,
+            "efficiency": efficiency,
+            "compression_ratio": efficiency,
+            "avg_tokens_per_query": avg_tokens_per_query
         }))
     }
 
@@ -838,10 +905,10 @@ mod tests {
         let server = MCPServer::new(state);
 
         let response = server.handle_get_token_usage().await.unwrap();
-        // 未実装ステータスを明示している前提
-        assert_eq!(response["status"], "not_implemented");
         assert!(response["timestamp"].is_number());
-        assert!(response["total_tokens_consumed"].is_null());
+        assert_eq!(response["total_tokens_consumed"].as_u64().unwrap(), 0);
+        assert_eq!(response["queries_executed"].as_u64().unwrap(), 0);
+        assert!(response["efficiency"].is_string());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
