@@ -7,6 +7,7 @@ Under Regulation (EU) 2024/2847 Art. 2(5)(a), non-commercial open-source softwar
 supplied outside the course of a commercial activity is **exempt** from CRA manufacturer obligations.
 
 **Evidence of exemption:**
+
 - License: MIT (permissive, no fee)
 - Distribution: GitHub Releases (free download)
 - Revenue model: none
