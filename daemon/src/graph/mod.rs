@@ -303,7 +303,7 @@ impl GraphDB {
         let mut map: HashMap<i64, Vec<i64>> = HashMap::new();
         for row in rows {
             let (from_id, to_id) = row?;
-            map.entry(to_id).or_insert_with(Vec::new).push(from_id);
+            map.entry(to_id).or_default().push(from_id);
         }
         Ok(map)
     }

@@ -14,6 +14,7 @@ use std::collections::HashMap;
 
 /// Dependency edge type
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum EdgeKind {
     /// import/require statement (file-level dependency)
     Import,
@@ -39,6 +40,7 @@ impl EdgeKind {
 
 /// Dependency extraction result
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Dependency {
     /// Source symbol name (or file if module-level)
     pub from: String,

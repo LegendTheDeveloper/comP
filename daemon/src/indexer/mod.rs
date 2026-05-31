@@ -6,7 +6,7 @@
 // - DocumentParser for JSON/XML/Markdown
 // - Integration: walk -> parse -> extract -> store
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -15,10 +15,10 @@ pub mod parser;
 pub mod doc_parser;
 pub mod dependency;
 
-pub use walker::{FileWalker, FileEntry, WalkerConfig, WalkerResult};
-pub use parser::{CodeParser, Symbol, SymbolKind};
+pub use walker::{FileWalker, FileEntry, WalkerConfig};
+pub use parser::CodeParser;
 pub use doc_parser::DocumentParser;
-pub use dependency::{DependencyAnalyzer, EdgeKind, Dependency};
+pub use dependency::DependencyAnalyzer;
 
 /// Main indexer orchestrator
 pub struct Indexer {
@@ -30,8 +30,10 @@ pub struct Indexer {
 impl Indexer {
     /// Create a new indexer for the given workspace
     pub fn new(workspace_root: &str) -> Self {
-        let mut config = WalkerConfig::default();
-        config.ignore_patterns = Self::load_ignore_patterns(workspace_root);
+        let config = WalkerConfig {
+            ignore_patterns: Self::load_ignore_patterns(workspace_root),
+            ..WalkerConfig::default()
+        };
 
         let walker = FileWalker::new(workspace_root, config);
         let parser = CodeParser::default();
@@ -307,6 +309,7 @@ impl Indexer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::dependency::{Dependency, EdgeKind};
 
     #[test]
     fn test_indexer_creation() {

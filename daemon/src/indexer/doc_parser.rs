@@ -118,9 +118,9 @@ impl DocumentParser {
     /// Parse Markdown and extract structure
     pub fn parse_markdown(content: &str) -> Result<Vec<Symbol>> {
         let mut symbols = Vec::new();
-        let mut line_num = 1u32;
 
-        for line in content.lines() {
+        for (i, line) in content.lines().enumerate() {
+            let line_num = (i + 1) as u32;
             let level = line.len() - line.trim_start_matches('#').len();
             if level > 0 && level <= 6 {
                 let heading = line.trim_start_matches('#').trim();
@@ -138,7 +138,6 @@ impl DocumentParser {
                     });
                 }
             }
-            line_num += 1;
         }
 
         Ok(symbols)
