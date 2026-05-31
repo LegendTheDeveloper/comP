@@ -18,6 +18,9 @@
 - [x] GitHub Actions のエラー解消とマルチプラットフォーム VSIX ビルド対応
   - 変更内容: `.gitignore` から `package-lock.json` と `Cargo.lock` を削除して Git 管理に移行。`DaemonManager.ts` のバイナリ探索ロジックを修正し、本番環境でプラットフォーム別バイナリ（`-win.exe`, `-macos`, `-linux`）を使用するように変更。`.vscodeignore` でこれらの同梱を許可。`release.yml` をマトリクスビルド化し、各OSでビルドされたバイナリを1つの VSIX に集約してリリースするフローに変更。
 
+- [x] SECURITY.md の MarkdownLint エラーの解消
+  - 変更内容: `SECURITY.md` のリスト前後に空行を追加し、CI 上での `MD032/blanks-around-lists` エラーを解消。
+
 ## 残タスク
 1. **コミットとプッシュ**
    - 管理ドキュメントの更新分および今回の修正一式をコミットし、リモート（GitHub）へプッシュ。

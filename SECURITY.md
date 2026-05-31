@@ -36,11 +36,13 @@ publishing details publicly.
 ## Scope
 
 In scope:
+
 - comP VSCode extension (`src/`)
 - Rust daemon (`daemon/`)
 - MCP protocol handling
 
 Out of scope:
+
 - VSCode itself
 - Dependencies (report to upstream maintainers)
 - Issues requiring physical access to the machine
