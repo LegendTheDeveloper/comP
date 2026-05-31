@@ -170,3 +170,18 @@
 
 ### 次回のタスク
 - 特になし（CI/CDワークフローの最適化完了）。
+
+---
+
+## 2026-05-31 (README.md および SECURITY.md の MarkdownLint エラー修正)
+### ユーザーからの要望
+- README.md および SECURITY.md 内の MD013 (Line length) および MD034 (Bare URL) エラーを修正してほしい。また、メールアドレスは非開示にしてほしい。
+
+### 実施内容
+1. メールアドレスの非開示対応：
+   - `SECURITY.md` からメールアドレスによる脆弱性報告の受付記述を削除し、GitHub の Private Vulnerability Reporting のみに統合。これによって `MD034/no-bare-urls` を解消。
+2. 行の長さの最適化（80文字制限）：
+   - `SECURITY.md` および `README.md` の該当行で、1行の長さが 80文字を超える部分（テーブル行、スポンサーリンク、メッセージ等）について、適切に改行または文章の表現を短縮し `MD013/line-length` エラーを解消。
+
+### 次回のタスク
+- 特になし（すべての Linter エラー解消完了）。

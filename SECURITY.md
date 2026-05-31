@@ -10,10 +10,10 @@
 
 **Do not report security vulnerabilities via GitHub Issues.**
 
-Please use one of the following:
+Please report security vulnerabilities using:
 
-- **GitHub Private Vulnerability Reporting**: [Security tab](https://github.com/tsucky230/comP/security/advisories/new) → "Report a vulnerability"
-- **Email**: tsuki80ke@gmail.com (subject: `[comP] Security`)
+- **GitHub Private Vulnerability Reporting**: Please use the
+  [Security tab](https://github.com/tsucky230/comP/security/advisories/new).
 
 ### What to include
 

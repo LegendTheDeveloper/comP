@@ -293,7 +293,7 @@ npm run lint:md:fix
 | **v0.2** | Word (.docx) support, advanced impact analysis | ⚪ Planning |
 | **v0.3** | Embedding-based search, cross-repo indexing | ⚪ Planning |
 | **v0.4** | Auto project docs generation, Git diff-aware context for PR review | ⚪ Planning |
-| **v1.0** | Stable API, wider agent support, community integrations | ⚪ Planning |
+| **v1.0** | Stable API, wider agent support, integrations | ⚪ Planning |
 
 ---
 
@@ -311,10 +311,12 @@ npm run lint:md:fix
 
 comP is free and open-source. If you find it valuable, consider supporting development:
 
-- ☕ **[GitHub Sponsors](https://github.com/sponsors/tsucky230)** — Support ongoing development (coming soon)
+- ☕ **[GitHub Sponsors](https://github.com/sponsors/tsucky230)** — Support
+  ongoing development (coming soon)
 - 💖 **Star this repository** — Help others discover comP
 
-Your support enables faster development, better maintenance, and new features. Thank you! 🙏
+Your support enables faster development, better maintenance, and new
+features. Thank you! 🙏
 
 ---
 
