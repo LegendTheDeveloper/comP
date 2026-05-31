@@ -1,6 +1,7 @@
 # ワークプラン（作業計画）
 
 ## 現在の進捗状況
+
 - [x] TypeScript のユニットテストエラー修正
   - 変更内容: `src/ui/tests/commands.test.ts` 内での `registerCommands` 呼び出しにおける第2引数を、最新の `getDaemonManager`（`() => DaemonManager | null`）に対応するよう `() => mockDaemon` に修正。
 - [x] バックエンド（Rust）とフロントエンド（TypeScript/VSCode）の未コミット変更の検証・整理
@@ -30,5 +31,6 @@
   - 変更内容: `rustsec/audit-action` から `actions-rust-lang/audit@v1` に変更し、`workingDirectory: daemon` を指定。
 
 ## 残タスク
+
 1. **コミットとプッシュ**
    - 管理ドキュメントの更新分および今回の修正一式をコミットし、リモート（GitHub）へプッシュ。

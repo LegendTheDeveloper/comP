@@ -80,7 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ## Versioning Policy
 
-**Major.Minor.Patch (MAJOR.MINOR.PATCH)**
+### Major.Minor.Patch (MAJOR.MINOR.PATCH)
 
 - **MAJOR**: Breaking changes to API or MCP tools
 - **MINOR**: New features that are backward compatible

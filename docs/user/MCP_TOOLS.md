@@ -19,6 +19,7 @@ graph, and returns ranked context files.
 ```
 
 Parameters:
+
 - `task` (string, required) — natural language description of the task
 - `max_tokens` (number, optional, default 8000) — result budget
 - `include_tests` (boolean, optional) — include test files in results

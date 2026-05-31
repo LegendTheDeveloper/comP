@@ -53,6 +53,7 @@ uv pip install -r requirements.txt       # 依存インストール
 ```
 
 **チェック**:
+
 - [ ] uv インストール済み
 - [ ] `.venv` が `.gitignore` 記載
 - [ ] `requirements.txt` が Git管理
