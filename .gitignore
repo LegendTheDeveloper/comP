@@ -4,14 +4,12 @@
 node_modules/
 npm-debug.log
 yarn-error.log
-package-lock.json
 yarn.lock
 dist/
 out/
 
 # ===== Rust (Daemon) =====
 daemon/target/
-Cargo.lock
 *.rlib
 *.so
 *.dylib

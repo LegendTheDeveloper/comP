@@ -104,3 +104,26 @@
 
 ### 次回のタスク
 - 管理ドキュメントの更新分および `package.json` の変更をコミットし、リモート（GitHub）へプッシュ。
+
+---
+
+## 2026-05-31 (GitHub Actionsエラーの解消およびマルチプラットフォームビルド対応)
+### ユーザーからの要望
+- GitHub Actions上での `npm ci` のエラー（`package-lock.json` がない）を解消し、`.github/` のワークフロー全体を見直して修正してほしい。
+
+### 実施内容
+1. ロックファイルのGit追跡開始：
+   - `.gitignore` から `package-lock.json` と `Cargo.lock` の除外設定を削除し、Gitでバージョン管理するように変更。これによりCI上での `npm ci` が動作可能になりました。
+2. デーモンのマルチプラットフォーム同梱対応：
+   - 本番（VSIX）環境では `comp-daemon-win.exe`、`comp-daemon-macos`、`comp-daemon-linux` のプラットフォーム別名バイナリを探すように [DaemonManager.ts](file:///e:/dev/comP/src/daemon/DaemonManager.ts) を修正。
+   - 開発（ローカル）環境では、従来の Cargo 標準出力名である `comp-daemon`/`comp-daemon.exe` の release/debug バイナリを優先して探すフォールバック処理を実装。
+3. `.vscodeignore` の修正：
+   - パッケージング時に3つのプラットフォーム別バイナリがすべて取り込まれるように設定を修正。
+4. `release.yml` ワークフローの再設計：
+   - ジョブを「デーモンビルド（マトリクス）」と「拡張機能パッケージ（Linux上）」に分離。
+   - 各 OS でビルドしたデーモンバイナリを Artifact にアップロードし、パッケージジョブでそれらをダウンロードして統合パッケージを生成、GitHub リリースにアタッチするフローに変更。
+5. 動作検証：
+   - ローカルでのビルド (`npm run compile`) およびユニットテスト (`npm run test`) が正常にパスすることを確認。
+
+### 次回のタスク
+- 特になし（全てのリリースフロー・パッケージ修正完了）。

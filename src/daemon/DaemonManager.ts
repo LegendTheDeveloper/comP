@@ -331,29 +331,40 @@ export class DaemonManager {
    * 2. Cargo build output (development)
    */
   private getDaemonPath(): string {
-    let binaryName = "comp-daemon";
+    // Production: bundled binary (different names per platform to support packaging all platforms in one VSIX)
+    let bundledBinaryName = "comp-daemon-linux";
     if (process.platform === "win32") {
-      binaryName += ".exe";
+      bundledBinaryName = "comp-daemon-win.exe";
+    } else if (process.platform === "darwin") {
+      bundledBinaryName = "comp-daemon-macos";
     }
 
-    // Production: bundled binary
     const bundledPath = path.join(
       this.context.extensionPath,
       "daemon",
       "target",
       "release",
-      binaryName
+      bundledBinaryName
     );
 
-    // Development: check workspace daemon build
+    // Development: check workspace daemon build (first release, then debug)
+    // In development, the local cargo build outputs default to comp-daemon or comp-daemon.exe
     const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspacePath) {
-      const devPath = path.join(workspacePath, "daemon", "target", "release", binaryName);
+      const devBinaryName = process.platform === "win32" ? "comp-daemon.exe" : "comp-daemon";
+      const devPath = path.join(workspacePath, "daemon", "target", "release", devBinaryName);
       try {
         readFileSync(devPath);
         return devPath;
       } catch {
-        // File doesn't exist, fall through
+        // Fallback to debug build if release build is not found
+        const debugPath = path.join(workspacePath, "daemon", "target", "debug", devBinaryName);
+        try {
+          readFileSync(debugPath);
+          return debugPath;
+        } catch {
+          // File doesn't exist, fall through
+        }
       }
     }
 

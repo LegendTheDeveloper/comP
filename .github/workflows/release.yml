@@ -6,25 +6,17 @@ on:
       - "v*.*.*"
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
+  build-daemon:
+    name: Build Daemon (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22.x
-
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache npm dependencies
-        uses: actions/cache@v3
-        with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
 
       - name: Cache Rust dependencies
         uses: actions/cache@v3
@@ -37,14 +29,66 @@ jobs:
             daemon/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Build Rust daemon
+        run: cargo build --release
+        working-directory: daemon
+
+      - name: Prepare binary for packaging (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist-bin
+          cp daemon/target/release/comp-daemon dist-bin/comp-daemon-${{ matrix.os == 'ubuntu-latest' && 'linux' || 'macos' }}
+
+      - name: Prepare binary for packaging (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-bin
+          Copy-Item daemon/target/release/comp-daemon.exe dist-bin/comp-daemon-win.exe
+
+      - name: Upload Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-${{ matrix.os }}
+          path: dist-bin/
+
+  package:
+    name: Package Extension
+    needs: build-daemon
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
       - name: Install dependencies
         run: npm ci
 
+      - name: Download all daemon artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: daemon-*
+          path: daemon-artifacts
+
+      - name: Place binaries in package structure
+        run: |
+          mkdir -p daemon/target/release
+          cp daemon-artifacts/daemon-ubuntu-latest/comp-daemon-linux daemon/target/release/
+          cp daemon-artifacts/daemon-macos-latest/comp-daemon-macos daemon/target/release/
+          cp daemon-artifacts/daemon-windows-latest/comp-daemon-win.exe daemon/target/release/
+          chmod +x daemon/target/release/comp-daemon-linux daemon/target/release/comp-daemon-macos
+
       - name: Build TypeScript (production)
         run: npm run vscode:prepublish
-
-      - name: Build Rust daemon (release)
-        run: npm run daemon:build
 
       - name: Install vsce (VSCode Extension CLI)
         run: npm install -g @vscode/vsce
@@ -74,10 +118,9 @@ jobs:
 
             ### Files
 
-            - **comP-${{ github.ref_name }}.vsix** — VSCode extension package
+            - **comP-${{ github.ref_name }}.vsix** — VSCode extension package (includes multi-platform daemon binaries)
             - **sbom.cdx.json** — Software Bill of Materials (CycloneDX 1.6)
             - **vex.cdx.json** — Vulnerability Exploitability eXchange
-            - **Daemon binary** — Included in VSIX package
 
             ### Installation
 
