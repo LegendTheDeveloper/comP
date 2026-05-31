@@ -88,10 +88,9 @@ jobs:
           components: clippy
 
       - name: Audit Rust dependencies
-        uses: rustsec/audit-action@v0.1.3
+        uses: actions-rust-lang/audit@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: daemon
+          workingDirectory: daemon
 
       - name: Run Clippy (Rust linter)
         run: cargo clippy --all --manifest-path daemon/Cargo.toml -- -D warnings

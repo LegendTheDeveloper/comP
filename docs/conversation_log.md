@@ -185,3 +185,17 @@
 
 ### 次回のタスク
 - 特になし（すべての Linter エラー解消完了）。
+
+---
+
+## 2026-05-31 (ci.yml 内の cargo audit アクションの修正)
+### ユーザーからの要望
+- `rustsec/audit-action` のリポジトリが見つからないエラーによるビルド失敗を解決してほしい。
+
+### 実施内容
+1. 正しいアクションの導入：
+   - 存在しない `rustsec/audit-action` から、推奨されている `actions-rust-lang/audit@v1` に差し替え。
+   - サブディレクトリにある `daemon/Cargo.lock` を対象にするため、`workingDirectory: daemon` パラメータを設定。
+
+### 次回のタスク
+- 特になし（CIのすべてのビルドステップの正常動作を確認予定）。

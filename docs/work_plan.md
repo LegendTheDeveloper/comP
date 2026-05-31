@@ -26,6 +26,8 @@
   - 変更内容: `ci.yml` の `sast` ジョブを最適化。Clippy コンポーネントを明示してエラーを防ぐとともに、`cargo-audit` を公式の `rustsec/audit-action` に変更しビルド時間を約10分短縮。
 - [x] README.md および SECURITY.md の MarkdownLint エラーの追加解消
   - 変更内容: メールアドレスの非開示対応（削除）により `MD034` を解消。各ファイルの1行が 80文字を超える箇所を改行・短縮し `MD013` を解消。
+- [x] ci.yml における cargo audit アクションの再修正
+  - 変更内容: `rustsec/audit-action` から `actions-rust-lang/audit@v1` に変更し、`workingDirectory: daemon` を指定。
 
 ## 残タスク
 1. **コミットとプッシュ**
