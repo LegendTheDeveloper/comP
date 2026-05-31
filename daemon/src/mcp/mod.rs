@@ -326,7 +326,7 @@ impl MCPServer {
 
         let results: Vec<Value> = hits
             .into_iter()
-            .filter(|(_, _, kind, _)| kind_filter.map_or(true, |f| f == kind))
+            .filter(|(_, _, kind, _)| kind_filter.is_none_or(|f| f == kind))
             .take(limit)
             .map(|(file, name, kind, line)| {
                 json!({
@@ -490,12 +490,10 @@ impl MCPServer {
         let sent = self.state.tokens_sent.load(Ordering::Relaxed);
         let saved = self.state.tokens_saved.load(Ordering::Relaxed);
         let queries = self.state.queries_count.load(Ordering::Relaxed);
-        let avg = if queries > 0 { sent / queries } else { 0 };
-        let efficiency = if sent + saved > 0 {
-            format!("{}%", (saved * 100) / (sent + saved))
-        } else {
-            "0%".to_string()
-        };
+        let avg = sent.checked_div(queries).unwrap_or(0);
+        let efficiency = (saved * 100).checked_div(sent + saved)
+            .map(|e| format!("{}%", e))
+            .unwrap_or_else(|| "0%".to_string());
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -611,12 +609,10 @@ impl MCPServer {
         // Read from shared DB (not in-memory) so VSCode extension's daemon sees stats
         // accumulated by the Claude Code MCP daemon in the same workspace
         let (sent, saved, queries) = self.state.graph_db.get_token_stats().unwrap_or((0, 0, 0));
-        let efficiency = if sent + saved > 0 {
-            format!("{}%", (saved * 100) / (sent + saved))
-        } else {
-            "0%".to_string()
-        };
-        let avg_tokens_per_query = if queries > 0 { sent / queries } else { 0 };
+        let efficiency = (saved * 100).checked_div(sent + saved)
+            .map(|e| format!("{}%", e))
+            .unwrap_or_else(|| "0%".to_string());
+        let avg_tokens_per_query = sent.checked_div(queries).unwrap_or(0);
 
         info!("handle_get_stats: returning stats - files: {}, nodes: {}, edges: {}",
               file_count, node_count, edge_count);

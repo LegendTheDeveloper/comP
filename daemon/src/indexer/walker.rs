@@ -28,6 +28,7 @@ pub struct FileEntry {
     /// Detected language (e.g., "rust", "typescript", "python")
     pub language: String,
     /// File modification time (Unix timestamp)
+    #[allow(dead_code)]
     pub modified_time: i64,
 }
 
@@ -212,8 +213,7 @@ impl FileWalker {
         if pattern.is_empty() {
             return false;
         }
-        if pattern.starts_with('*') {
-            let suffix = &pattern[1..];
+        if let Some(suffix) = pattern.strip_prefix('*') {
             return path.ends_with(suffix);
         }
         // Match any path segment (handles both files and directories)

@@ -108,7 +108,7 @@ impl SearchEngine {
         for (file_path, symbol_name, kind, line) in symbols {
             self.documents
                 .entry(file_path.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((symbol_name.clone(), kind.clone(), *line));
         }
 
@@ -135,7 +135,7 @@ impl SearchEngine {
 
             // Store in TF matrix
             for (term, freq) in term_freq {
-                tf_matrix.entry(term).or_insert_with(HashMap::new)
+                tf_matrix.entry(term).or_default()
                     .insert(file_path.clone(), freq);
             }
         }
@@ -345,7 +345,7 @@ impl SearchEngine {
             if let Some((name, file_path)) = symbol_map.get(&id) {
                 result
                     .entry(file_path.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(name.clone());
             }
         }
@@ -367,6 +367,7 @@ impl Default for SearchEngine {
 /// Token counter for LLM context budgeting
 pub struct TokenCounter;
 
+#[allow(dead_code)]
 impl TokenCounter {
     /// Count tokens in text using tiktoken
     /// 
@@ -388,7 +389,7 @@ impl TokenCounter {
         // Ok(tokens.len())
         
         // Estimate: ~4 characters per token
-        Ok((text.len() + 3) / 4)
+        Ok(text.len().div_ceil(4))
     }
 
     /// Estimate total tokens for a set of files

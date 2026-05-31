@@ -9,6 +9,7 @@ use tree_sitter::{Parser as TreeSitterParser, TreeCursor, Node};
 
 /// Symbol kind extracted from source code
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum SymbolKind {
     Function,
     Class,
@@ -48,6 +49,7 @@ impl SymbolKind {
 
 /// A symbol extracted from source code
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Symbol {
     pub name: String,
     pub kind: SymbolKind,
@@ -245,6 +247,7 @@ impl CodeParser {
     }
 
     /// Extract dependencies between symbols
+    #[allow(dead_code)]
     pub async fn extract_dependencies(
         &mut self,
         _language: &str,
