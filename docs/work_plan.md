@@ -22,6 +22,8 @@
   - 変更内容: `SECURITY.md` のリスト前後に空行を追加し、CI 上での `MD032/blanks-around-lists` エラーを解消。
 - [x] cargo audit での paste 警告（RUSTSEC-2024-0436）の除外設定
   - 変更内容: `daemon/audit.toml` を作成し、警告を除外設定。
+- [x] GitHub Actions CIワークフローの安定化・高速化
+  - 変更内容: `ci.yml` の `sast` ジョブを最適化。Clippy コンポーネントを明示してエラーを防ぐとともに、`cargo-audit` を公式の `rustsec/audit-action` に変更しビルド時間を約10分短縮。
 
 ## 残タスク
 1. **コミットとプッシュ**
