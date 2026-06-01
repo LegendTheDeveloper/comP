@@ -40,7 +40,11 @@
   - 変更内容: `zip` クレートと `quick-xml` クレートを使用し、`.docx`/`.pptx`/`.xlsx` ファイルからポータブルにテキストを抽出するパーサー（`extract_docx_text`, `extract_pptx_text`, `extract_xlsx_text` など）を実装。スライド番号やシート名などの疑似シンボルを SQLite に登録するようにし、BM25 全文検索の対象に Office ファイルを含めました。また、DB登録メソッド `GraphDB::insert_node` で `signature` および `is_exported` カラムの値が失われていた不具合を修正し、Office ファイルのプレビュー情報が正しく DB に永続化され、ツールから呼び出せるようにしました。
   - テスト結果: `npm run daemon:test` (66件)、`npm run test` (67件) がすべてパス。JSON-RPC 統合テストを実行し、Office ファイルがインデックスに乗り、その中身のキーワードで `run_pipeline` 検索結果にヒットすることを実証しました。
 
+- [x] GitHub Pages 公式紹介ページの追加および自動デプロイワークフローの導入、ロードマップ v0.3.0 への PDF サポートの追記
+  - 変更内容: HTML/CSS によるオシャレな comP 公式紹介ページ (`docs/index.html`, `docs/index.css`) を新規作成し、バナー画像や VSCode UI モックアップ画像を生成・配置。`main` ブランチへのプッシュ時に自動的に GitHub Pages に紹介ページをデプロイする GitHub Actions ワークフロー (`.github/workflows/pages.yml`) を作成しました。
+  - `README.md` および `README_ja.md` に公式 Web ページ（GitHub Pages）へのリンクを追加し、Roadmap の v0.3 に「PDFドキュメントのインデックスサポート」を追加しました。
+
 ## 残タスク
 
 1. **コミットとプッシュ**
-   - 今回実装したロードマップ 0.2.0 の Office インデックス機能、不具合修正、および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。
+   - 今回実装したロードマップ 0.2.0 (Office) および 0.3.0 (PDFロードマップ、GitHub Pages紹介ページ、自動デプロイワークフロー) に関連するすべての変更をコミットし、リモート（GitHub）へプッシュ。
