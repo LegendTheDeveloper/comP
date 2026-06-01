@@ -2,7 +2,7 @@
   "name": "comp-vscode",
   "displayName": "comP - Code Context Engine",
   "description": "Local-first code indexing engine for AI agents with MCP support. Open-source alternative to Vexp.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "tsucky230",
   "license": "MIT",
   "icon": "resources/comp-icon.png",
