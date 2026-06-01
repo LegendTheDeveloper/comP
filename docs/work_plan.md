@@ -36,8 +36,10 @@
   - 変更内容: 指定シンボルのコード・依存関係抽出、ファイル概要、プロジェクト全体の統計およびエクスポートシンボル一覧を Markdown で返却する 4 つ of MCP ツールを追加。テストのアサーションエラー（Total Files / Total Symbols のマークダウン太字フォーマット不整合）を修正し、すべてのユニットテストおよび JSON-RPC 結合動作検証が正常にパスすることを確認。
 - [x] MCP ツール（run_pipeline, get_context）の description 改善（英語翻訳の指示追記）
   - 変更内容: 日本語による質問の際に英語シンボル名にマッチしない問題を防ぐため、外部 AI エージェントが自動でクエリを英語に翻訳した上で呼び出すよう、ツール定義（`run_pipeline` の `task` パラメータ、`get_context` の `query` パラメータ）の description に英語での入力を促す重要指示（`IMPORTANT: The parameter MUST be in English.`）を追記しました。
+- [x] GitHub Copilot 向け MCP 自動設定機能の追加
+  - 変更内容: VS Code の GitHub Copilot 拡張機能で comP MCP サーバーを利用可能にするため、セットアップ用エージェントメニューに `"GitHub Copilot"` を追加。選択時にプロジェクト内の `.vscode/mcp.json` に対し、既存の設定を保持しながら `comp` サーバーの定義を自動でマージ生成して書き込む機能を `AgentSetup.ts` に実装。また、関連するユニットテストおよびコマンドの選択肢を追加しました。
 
 ## 残タスク
 
 1. **コミットとプッシュ**
-   - 実装した修正内容および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。
+   - 新規追加した GitHub Copilot 向け設定機能および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。

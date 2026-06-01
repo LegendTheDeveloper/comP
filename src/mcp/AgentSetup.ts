@@ -99,6 +99,13 @@ export class AgentSetupManager {
           template: (path) => this.generateAntigravityConfig(path),
         };
 
+      case "GitHub Copilot":
+        return {
+          name: "GitHub Copilot",
+          configPath: this.copilotConfigPath(),
+          template: (path) => this.generateCopilotConfig(path),
+        };
+
       default:
         return null;
     }
@@ -353,6 +360,41 @@ mcp_servers = {
     }
 
     existing.mcpServers["comp"] = {
+      command: daemonPath,
+      args: [],
+      env: {
+        COMP_WORKSPACE_ROOT: this.workspaceRoot,
+        RUST_LOG: "info",
+      },
+    };
+
+    return JSON.stringify(existing, null, 2);
+  }
+
+  private copilotConfigPath(): string {
+    return ".vscode/mcp.json";
+  }
+
+  /**
+   * Generate GitHub Copilot MCP configuration
+   *
+   * Writes to workspace .vscode/mcp.json, merging with existing config if present.
+   */
+  private generateCopilotConfig(daemonPath: string): string {
+    let existing: { servers: Record<string, unknown> } = { servers: {} };
+
+    const fullPath = path.join(this.workspaceRoot, this.copilotConfigPath());
+    try {
+      if (fs.existsSync(fullPath)) {
+        const raw = fs.readFileSync(fullPath, "utf-8");
+        const parsed = JSON.parse(raw);
+        existing = { servers: {}, ...parsed };
+      }
+    } catch {
+      // File absent or invalid — start from scratch
+    }
+
+    existing.servers["comp"] = {
       command: daemonPath,
       args: [],
       env: {

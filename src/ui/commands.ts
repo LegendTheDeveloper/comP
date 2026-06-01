@@ -26,7 +26,7 @@ export function registerCommands(
   // Setup MCP for AI agents (Claude Code, Cursor, Cline, etc.)
   context.subscriptions.push(
     vscode.commands.registerCommand("comp.setupAgents", async () => {
-      const agents = ["Claude Code", "Cursor", "Cline", "Windsurf", "Continue", "Antigravity"];
+      const agents = ["Claude Code", "Cursor", "Cline", "Windsurf", "Continue", "Antigravity", "GitHub Copilot"];
       const selected = await vscode.window.showQuickPick(agents, {
         placeHolder: "Select an AI agent to configure",
       });

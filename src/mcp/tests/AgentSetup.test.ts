@@ -70,6 +70,14 @@ describe("AgentSetupManager", () => {
       expect(config?.configPath).to.include("continue_config.py");
     });
 
+    it("should return GitHub Copilot config", () => {
+      const config = manager.getAgentConfig("GitHub Copilot");
+
+      expect(config).to.exist;
+      expect(config?.name).to.equal("GitHub Copilot");
+      expect(config?.configPath).to.include("mcp.json");
+    });
+
     it("should return null for unsupported agent", () => {
       const config = manager.getAgentConfig("UnsupportedAgent");
 
@@ -111,6 +119,19 @@ describe("AgentSetupManager", () => {
 
       expect(result.success).to.be.true;
       expect(result.configPath).to.include("windsurf_config.json");
+    });
+
+    it("should generate GitHub Copilot MCP configuration", async () => {
+      const result = await manager.generateConfig("GitHub Copilot");
+
+      expect(result.success).to.be.true;
+      expect(result.configPath).to.include("mcp.json");
+
+      // Verify content
+      const content = fs.readFileSync(result.configPath, "utf-8");
+      const config = JSON.parse(content);
+      expect(config.servers).to.exist;
+      expect(config.servers.comp).to.exist;
     });
 
     it("should fail for unsupported agent", async () => {

@@ -95,6 +95,14 @@ describe("registerCommands", () => {
     expect((vscode.window as any).showInformationMessage.called).to.be.false;
   });
 
+  it("comp.setupAgents with GitHub Copilot selection generates config", async () => {
+    (vscode.window as any).showQuickPick = sinon.stub().resolves("GitHub Copilot");
+    (vscode.window as any).showInformationMessage = sinon.stub().resolves("Done");
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
+    await handlers.get("comp.setupAgents")!();
+    expect((vscode.window as any).showInformationMessage.called).to.be.true;
+  });
+
   it("comp.generateContext with no input does nothing", async () => {
     (vscode.window as any).showInputBox = sinon.stub().resolves(undefined);
     registerCommands(mockContext, () => mockDaemon, mockStatusBar);
