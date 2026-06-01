@@ -1107,7 +1107,7 @@ impl MCPServer {
                     if start_line < lines.len() {
                         let actual_end = end_line.min(lines.len());
                         let code_slice = lines[start_line..actual_end].join("\n");
-                        let lang = relative_path.split('.').last().unwrap_or("");
+                        let lang = relative_path.split('.').next_back().unwrap_or("");
                         markdown.push_str("### Source Code\n");
                         markdown.push_str(&format!("```{}\n{}\n```\n\n", lang, code_slice));
                     }
@@ -1124,7 +1124,7 @@ impl MCPServer {
                     let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
                     markdown.push_str(&format!("- `{}` ({}): `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
                 }
-                markdown.push_str("\n");
+                markdown.push('\n');
             }
 
             // Dependents (inbound)
@@ -1137,7 +1137,7 @@ impl MCPServer {
                     let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
                     markdown.push_str(&format!("- `{}` ({}): `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
                 }
-                markdown.push_str("\n");
+                markdown.push('\n');
             }
             
             markdown.push_str("---\n\n");
@@ -1182,7 +1182,7 @@ impl MCPServer {
                         let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
                         markdown.push_str(&format!("- Depends on `{}` ({}) via `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
                     }
-                    markdown.push_str("\n");
+                    markdown.push('\n');
                 }
             } else {
                 let deps = self.state.graph_db.get_node_dependencies_in(sym.id)?;
@@ -1193,7 +1193,7 @@ impl MCPServer {
                         let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
                         markdown.push_str(&format!("- Depended on by `{}` ({}) via `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
                     }
-                    markdown.push_str("\n");
+                    markdown.push('\n');
                 }
             }
         }
@@ -1261,7 +1261,7 @@ impl MCPServer {
             let count = symbol_counts.get(id).copied().unwrap_or(0);
             markdown.push_str(&format!("| `{}` | {} | {} |\n", path, lang, count));
         }
-        markdown.push_str("\n");
+        markdown.push('\n');
 
         markdown.push_str("## Exported Symbols by File\n");
         let exported = self.state.graph_db.get_exported_symbols_grouped()?;
