@@ -278,3 +278,36 @@
 
 - 特になし（セッションメモリ機能の開発完了）。
 
+---
+
+## 2026-06-02 (Rustデーモンへの4つのMCPツール追加)
+
+### ユーザーからの要望
+
+Rustデーモン（`daemon/src/`）に以下の4つのMCPツールを追加する。
+- `get_symbol`: 指定シンボルのソースコード＋依存先＋依存元（Markdown）
+- `get_dependencies`: 指定シンボルの依存先または依存元一覧（Markdown）
+- `get_file_summary`: ファイル内の全シンボル名・種別・シグネチャ一覧（Markdown）
+- `get_project_overview`: ファイル数・シンボル数・エクスポートシンボルの概要（Markdown）
+
+### 実施内容
+
+1. **テストアサーションの不具合修正**:
+   - `test_new_mcp_tools` ユニットテストで起きていた `Total Files: 1` などのアサーション不整合（マークダウンの太字 `**` フォーマットの不一致）を修正し、テストが正常にパスするように変更。
+2. **デーモンプロセスのクリーンアップとビルド**:
+   - バックグラウンドでロックされていた旧 `comp-daemon.exe` プロセスを `taskkill` にて強制終了し、`npm run daemon:build`（`cargo build --release`）で正常ビルド完了。
+3. **テストの実行**:
+   - `npm run daemon:test` を実行し、Rust側テスト（65件）がすべてパスすることを確認。
+   - `npm run test` を実行し、TypeScript側のテスト（64件）がすべてパスすることを確認。
+4. **結合動作検証 (JSON-RPC)**:
+   - 一時検証用スクリプト `temp/test_new_mcp_rpc.py` を作成し、実際の `comp-daemon.exe` リリースプロセスに対して標準入出力 (JSON-RPC) 経由でリクエストを送信。
+   - `tools/list` にて新規 4 ツールが正しく公開されていることを確認。
+   - `get_project_overview`, `get_file_summary`, `get_dependencies` をそれぞれ呼び出し、仕様通りの Markdown 出力やエラーレスポンスが得られることを実証。
+5. **管理ドキュメントの更新**:
+   - `docs/conversation_log.md` および `docs/work_plan.md` を更新。
+
+### 次回のタスク
+
+- 変更内容を Git でコミットし、リモート（GitHub）へプッシュ。
+
+

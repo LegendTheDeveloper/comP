@@ -370,6 +370,216 @@ impl GraphDB {
             .collect();
         Ok(map)
     }
+
+    /// Get file ID by its relative path
+    pub fn get_file_id_by_path(&self, path: &str) -> Result<Option<i64>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT id FROM files WHERE path = ?")?;
+        let mut rows = stmt.query_map([path], |row| row.get(0))?;
+        if let Some(row) = rows.next() {
+            Ok(Some(row?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Find nodes matching symbol name and optional file_id
+    pub fn get_symbols_by_name(&self, name: &str, file_id: Option<i64>) -> Result<Vec<DbNode>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut result = Vec::new();
+        if let Some(fid) = file_id {
+            let mut stmt = conn.prepare(
+                "SELECT id, file_id, name, kind, line, col, scope, is_exported, signature 
+                 FROM nodes WHERE name = ? AND file_id = ?"
+            )?;
+            let mapped = stmt.query_map(rusqlite::params![name, fid], |row| {
+                Ok(DbNode {
+                    id: row.get(0)?,
+                    file_id: row.get(1)?,
+                    name: row.get(2)?,
+                    kind: row.get(3)?,
+                    line: row.get(4)?,
+                    col: row.get(5)?,
+                    scope: row.get(6)?,
+                    is_exported: row.get(7).unwrap_or(0),
+                    signature: row.get(8)?,
+                })
+            })?;
+            for item in mapped {
+                result.push(item?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, file_id, name, kind, line, col, scope, is_exported, signature 
+                 FROM nodes WHERE name = ?"
+            )?;
+            let mapped = stmt.query_map(rusqlite::params![name], |row| {
+                Ok(DbNode {
+                    id: row.get(0)?,
+                    file_id: row.get(1)?,
+                    name: row.get(2)?,
+                    kind: row.get(3)?,
+                    line: row.get(4)?,
+                    col: row.get(5)?,
+                    scope: row.get(6)?,
+                    is_exported: row.get(7).unwrap_or(0),
+                    signature: row.get(8)?,
+                })
+            })?;
+            for item in mapped {
+                result.push(item?);
+            }
+        }
+        Ok(result)
+    }
+
+    /// Get all nodes for a specific file, sorted by line
+    pub fn get_file_symbols_sorted(&self, file_id: i64) -> Result<Vec<DbNode>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, file_id, name, kind, line, col, scope, is_exported, signature 
+             FROM nodes WHERE file_id = ? ORDER BY line, col"
+        )?;
+        let mapped = stmt.query_map([file_id], |row| {
+            Ok(DbNode {
+                id: row.get(0)?,
+                file_id: row.get(1)?,
+                name: row.get(2)?,
+                kind: row.get(3)?,
+                line: row.get(4)?,
+                col: row.get(5)?,
+                scope: row.get(6)?,
+                is_exported: row.get(7).unwrap_or(0),
+                signature: row.get(8)?,
+            })
+        })?;
+        let mut result = Vec::new();
+        for item in mapped {
+            result.push(item?);
+        }
+        Ok(result)
+    }
+
+    /// Get nodes that this node depends on (outbound edges)
+    pub fn get_node_dependencies_out(&self, node_id: i64) -> Result<Vec<(DbNode, String)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT n.id, n.file_id, n.name, n.kind, n.line, n.col, n.scope, n.is_exported, n.signature, e.kind
+             FROM edges e
+             JOIN nodes n ON e.to_id = n.id
+             WHERE e.from_id = ?"
+        )?;
+        let mapped = stmt.query_map([node_id], |row| {
+            Ok((
+                DbNode {
+                    id: row.get(0)?,
+                    file_id: row.get(1)?,
+                    name: row.get(2)?,
+                    kind: row.get(3)?,
+                    line: row.get(4)?,
+                    col: row.get(5)?,
+                    scope: row.get(6)?,
+                    is_exported: row.get(7).unwrap_or(0),
+                    signature: row.get(8)?,
+                },
+                row.get(9)?,
+            ))
+        })?;
+        let mut result = Vec::new();
+        for item in mapped {
+            result.push(item?);
+        }
+        Ok(result)
+    }
+
+    /// Get nodes that depend on this node (inbound edges)
+    pub fn get_node_dependencies_in(&self, node_id: i64) -> Result<Vec<(DbNode, String)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT n.id, n.file_id, n.name, n.kind, n.line, n.col, n.scope, n.is_exported, n.signature, e.kind
+             FROM edges e
+             JOIN nodes n ON e.from_id = n.id
+             WHERE e.to_id = ?"
+        )?;
+        let mapped = stmt.query_map([node_id], |row| {
+            Ok((
+                DbNode {
+                    id: row.get(0)?,
+                    file_id: row.get(1)?,
+                    name: row.get(2)?,
+                    kind: row.get(3)?,
+                    line: row.get(4)?,
+                    col: row.get(5)?,
+                    scope: row.get(6)?,
+                    is_exported: row.get(7).unwrap_or(0),
+                    signature: row.get(8)?,
+                },
+                row.get(9)?,
+            ))
+        })?;
+        let mut result = Vec::new();
+        for item in mapped {
+            result.push(item?);
+        }
+        Ok(result)
+    }
+
+    /// Get file path by its ID
+    pub fn get_file_path_by_id(&self, file_id: i64) -> Result<String> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let path: String = conn.query_row(
+            "SELECT path FROM files WHERE id = ?",
+            [file_id],
+            |row| row.get(0)
+        )?;
+        Ok(path)
+    }
+
+    /// Get all exported symbols, ordered by file path
+    pub fn get_exported_symbols_grouped(&self) -> Result<Vec<(String, DbNode)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT f.path, n.id, n.file_id, n.name, n.kind, n.line, n.col, n.scope, n.is_exported, n.signature
+             FROM nodes n
+             JOIN files f ON n.file_id = f.id
+             WHERE n.is_exported = 1
+             ORDER BY f.path, n.name"
+        )?;
+        let mapped = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                DbNode {
+                    id: row.get(1)?,
+                    file_id: row.get(2)?,
+                    name: row.get(3)?,
+                    kind: row.get(4)?,
+                    line: row.get(5)?,
+                    col: row.get(6)?,
+                    scope: row.get(7)?,
+                    is_exported: row.get(8).unwrap_or(0),
+                    signature: row.get(9)?,
+                },
+            ))
+        })?;
+        let mut result = Vec::new();
+        for item in mapped {
+            result.push(item?);
+        }
+        Ok(result)
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DbNode {
+    pub id: i64,
+    pub file_id: i64,
+    pub name: String,
+    pub kind: String,
+    pub line: i32,
+    pub col: i32,
+    pub scope: Option<String>,
+    pub is_exported: i32,
+    pub signature: Option<String>,
 }
 
 #[cfg(test)]

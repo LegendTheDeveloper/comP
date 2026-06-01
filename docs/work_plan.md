@@ -32,8 +32,10 @@
 
 - [x] セッションメモリ機能（session_recall）の実装
   - 変更内容: `.comp/session-memory.json` に MCP ツール呼び出し（`run_pipeline`, `get_context`）履歴を永続化し、VSCode 拡張側のファイル監視フック（`setupFileWatchers`）を通じてコード変更時に自動で `stale` マークする仕組みを構築。また、過去履歴を Markdown 形式で返却する新しい MCP ツール `session_recall` を Rust デーモン側に実装。
+- [x] Rustデーモンへの4つの新しいMCPツール（get_symbol, get_dependencies, get_file_summary, get_project_overview）の追加
+  - 変更内容: 指定シンボルのコード・依存関係抽出、ファイル概要、プロジェクト全体の統計およびエクスポートシンボル一覧を Markdown で返却する 4 つの MCP ツールを追加。テストのアサーションエラー（Total Files / Total Symbols のマークダウン太字フォーマット不整合）を修正し、すべてのユニットテストおよび JSON-RPC 結合動作検証が正常にパスすることを確認。
 
 ## 残タスク
 
 1. **コミットとプッシュ**
-   - 管理ドキュメントの更新分および今回の修正一式をコミットし、リモート（GitHub）へプッシュ。
+   - 新規 MCP ツールの実装および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。

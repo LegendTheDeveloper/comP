@@ -187,6 +187,10 @@ impl MCPServer {
                 "indexFile" => self.handle_index_file(params).await,
                 "removeFile" => self.handle_remove_file(params).await,
                 "session_recall" => self.handle_session_recall(params).await,
+                "get_symbol" => self.handle_get_symbol(params).await,
+                "get_dependencies" => self.handle_get_dependencies(params).await,
+                "get_file_summary" => self.handle_get_file_summary(params).await,
+                "get_project_overview" => self.handle_get_project_overview().await,
                 _ => Err(anyhow!("Unknown method: {}", method)),
             };
 
@@ -867,6 +871,65 @@ impl MCPServer {
                             }
                         }
                     }
+                },
+                {
+                    "name": "get_symbol",
+                    "description": "Get source code, outbound dependencies, and inbound dependents for a specific symbol by name. Useful when you need to inspect a function, class, or type definition.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Symbol name (e.g. 'authenticate' or 'MCPServer')"
+                            },
+                            "file_path": {
+                                "type": "string",
+                                "description": "Optional file path relative to workspace root to narrow search"
+                            }
+                        },
+                        "required": ["name"]
+                    }
+                },
+                {
+                    "name": "get_dependencies",
+                    "description": "Retrieve dependencies of a symbol. Direction 'out' returns symbols that this symbol depends on. Direction 'in' returns symbols that depend on this symbol.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "Symbol name"
+                            },
+                            "direction": {
+                                "type": "string",
+                                "enum": ["in", "out"],
+                                "description": "Dependency direction. 'in' for incoming dependencies (dependents), 'out' for outgoing dependencies."
+                            }
+                        },
+                        "required": ["name", "direction"]
+                    }
+                },
+                {
+                    "name": "get_file_summary",
+                    "description": "List all symbol names, their kinds (function, class, etc.), and signatures inside a specific file. Excludes body content.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "File path relative to workspace root (e.g., 'src/extension.ts')"
+                            }
+                        },
+                        "required": ["file_path"]
+                    }
+                },
+                {
+                    "name": "get_project_overview",
+                    "description": "Get a high-level summary of the workspace: total file count, symbol count, and lists of exported symbols grouped by file.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {}
+                    }
                 }
             ]
         }))
@@ -889,6 +952,10 @@ impl MCPServer {
             "list_indexed_files" => self.handle_list_indexed_files().await?,
             "get_token_usage" => self.handle_get_token_usage().await?,
             "session_recall" => self.handle_session_recall(args).await?,
+            "get_symbol" => self.handle_get_symbol(args).await?,
+            "get_dependencies" => self.handle_get_dependencies(args).await?,
+            "get_file_summary" => self.handle_get_file_summary(args).await?,
+            "get_project_overview" => self.handle_get_project_overview().await?,
             _ => return Err(anyhow!("Unknown tool: {}", name)),
         };
 
@@ -969,6 +1036,241 @@ impl MCPServer {
                 markdown.push_str("No matching past invocations found for the query.");
             } else {
                 markdown.push_str("No past invocations recorded in the current session.");
+            }
+        }
+
+        Ok(Value::String(markdown))
+    }
+
+    /// Tool 7: get_symbol
+    ///
+    /// Get source code, outbound dependencies, and inbound dependents for a specific symbol by name.
+    pub async fn handle_get_symbol(&self, params: Value) -> Result<Value> {
+        let name = params["name"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'name' parameter"))?;
+        let file_path = params["file_path"].as_str();
+
+        let file_id = if let Some(fp) = file_path {
+            self.state.graph_db.get_file_id_by_path(fp)?
+        } else {
+            None
+        };
+
+        let symbols = self.state.graph_db.get_symbols_by_name(name, file_id)?;
+
+        if symbols.is_empty() {
+            return Ok(Value::String(format!("Symbol '{}' not found.", name)));
+        }
+
+        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
+            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+            .unwrap_or_else(|_| ".".to_string());
+
+        let mut markdown = String::new();
+        markdown.push_str(&format!("# Symbol: {}\n\n", name));
+
+        for sym in symbols {
+            let relative_path = self.state.graph_db.get_file_path_by_id(sym.file_id)?;
+            let absolute_path = std::path::Path::new(&workspace_root).join(&relative_path);
+
+            markdown.push_str(&format!("## Definition in `{}`\n", relative_path));
+            markdown.push_str(&format!("- **Kind**: {}\n", sym.kind));
+            if let Some(ref scope) = sym.scope {
+                markdown.push_str(&format!("- **Scope**: {}\n", scope));
+            }
+            if let Some(ref sig) = sym.signature {
+                markdown.push_str(&format!("- **Signature**: `{}`\n", sig));
+            }
+            markdown.push_str(&format!("- **Location**: Line {}, Col {}\n\n", sym.line, sym.col));
+
+            // Extract source code
+            if absolute_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&absolute_path) {
+                    let file_symbols = self.state.graph_db.get_file_symbols_sorted(sym.file_id)?;
+                    let lines: Vec<&str> = content.lines().collect();
+
+                    let start_line = (sym.line as usize).saturating_sub(1);
+                    let mut end_line = lines.len();
+                    if let Some(pos) = file_symbols.iter().position(|x| x.id == sym.id) {
+                        if pos + 1 < file_symbols.len() {
+                            let next_sym = &file_symbols[pos + 1];
+                            end_line = (next_sym.line as usize).saturating_sub(1);
+                        }
+                    }
+
+                    if start_line < lines.len() {
+                        let actual_end = end_line.min(lines.len());
+                        let code_slice = lines[start_line..actual_end].join("\n");
+                        let lang = relative_path.split('.').last().unwrap_or("");
+                        markdown.push_str("### Source Code\n");
+                        markdown.push_str(&format!("```{}\n{}\n```\n\n", lang, code_slice));
+                    }
+                }
+            }
+
+            // Dependencies (outbound)
+            let out_deps = self.state.graph_db.get_node_dependencies_out(sym.id)?;
+            markdown.push_str("### Outbound Dependencies (Depends On)\n");
+            if out_deps.is_empty() {
+                markdown.push_str("This symbol does not depend on any other symbols.\n\n");
+            } else {
+                for (dep, edge_kind) in out_deps {
+                    let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
+                    markdown.push_str(&format!("- `{}` ({}): `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
+                }
+                markdown.push_str("\n");
+            }
+
+            // Dependents (inbound)
+            let in_deps = self.state.graph_db.get_node_dependencies_in(sym.id)?;
+            markdown.push_str("### Inbound Dependents (Depended On By)\n");
+            if in_deps.is_empty() {
+                markdown.push_str("No other symbols depend on this symbol.\n\n");
+            } else {
+                for (dep, edge_kind) in in_deps {
+                    let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
+                    markdown.push_str(&format!("- `{}` ({}): `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
+                }
+                markdown.push_str("\n");
+            }
+            
+            markdown.push_str("---\n\n");
+        }
+
+        Ok(Value::String(markdown))
+    }
+
+    /// Tool 8: get_dependencies
+    ///
+    /// Retrieve dependencies of a symbol (inbound or outbound).
+    pub async fn handle_get_dependencies(&self, params: Value) -> Result<Value> {
+        let name = params["name"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'name' parameter"))?;
+        let direction = params["direction"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'direction' parameter"))?;
+
+        if direction != "in" && direction != "out" {
+            return Err(anyhow!("Invalid direction: '{}'. Must be 'in' or 'out'", direction));
+        }
+
+        let symbols = self.state.graph_db.get_symbols_by_name(name, None)?;
+        if symbols.is_empty() {
+            return Ok(Value::String(format!("Symbol '{}' not found.", name)));
+        }
+
+        let mut markdown = String::new();
+        markdown.push_str(&format!("# Dependencies for `{}` (direction: {})\n\n", name, direction));
+
+        for sym in symbols {
+            let relative_path = self.state.graph_db.get_file_path_by_id(sym.file_id)?;
+            markdown.push_str(&format!("## Symbol `{}` in `{}`\n", sym.name, relative_path));
+
+            if direction == "out" {
+                let deps = self.state.graph_db.get_node_dependencies_out(sym.id)?;
+                if deps.is_empty() {
+                    markdown.push_str("No outgoing dependencies.\n\n");
+                } else {
+                    for (dep, edge_kind) in deps {
+                        let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
+                        markdown.push_str(&format!("- Depends on `{}` ({}) via `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
+                    }
+                    markdown.push_str("\n");
+                }
+            } else {
+                let deps = self.state.graph_db.get_node_dependencies_in(sym.id)?;
+                if deps.is_empty() {
+                    markdown.push_str("No incoming dependencies.\n\n");
+                } else {
+                    for (dep, edge_kind) in deps {
+                        let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
+                        markdown.push_str(&format!("- Depended on by `{}` ({}) via `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
+                    }
+                    markdown.push_str("\n");
+                }
+            }
+        }
+
+        Ok(Value::String(markdown))
+    }
+
+    /// Tool 9: get_file_summary
+    ///
+    /// List all symbols inside a specific file.
+    pub async fn handle_get_file_summary(&self, params: Value) -> Result<Value> {
+        let file_path = params["file_path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'file_path' parameter"))?;
+
+        let normalized_path = file_path.replace('\\', "/");
+
+        let file_id = self.state.graph_db.get_file_id_by_path(&normalized_path)?;
+        let Some(fid) = file_id else {
+            return Ok(Value::String(format!("File '{}' not found in index.", file_path)));
+        };
+
+        let symbols = self.state.graph_db.get_file_symbols_sorted(fid)?;
+
+        let mut markdown = String::new();
+        markdown.push_str(&format!("# File Summary: `{}`\n\n", file_path));
+        markdown.push_str("| Line | Symbol Name | Kind | Exported | Scope | Signature |\n");
+        markdown.push_str("| --- | --- | --- | --- | --- | --- |\n");
+
+        for sym in symbols {
+            let exported_str = if sym.is_exported == 1 { "Yes" } else { "No" };
+            let scope_str = sym.scope.clone().unwrap_or_else(|| "-".to_string());
+            let sig_str = sym.signature.clone().unwrap_or_else(|| "-".to_string());
+            
+            markdown.push_str(&format!(
+                "| {} | `{}` | {} | {} | {} | `{}` |\n",
+                sym.line, sym.name, sym.kind, exported_str, scope_str, sig_str
+            ));
+        }
+
+        Ok(Value::String(markdown))
+    }
+
+    /// Tool 10: get_project_overview
+    ///
+    /// High-level summary of the workspace structure.
+    pub async fn handle_get_project_overview(&self) -> Result<Value> {
+        let (file_count, node_count, edge_count) = self.state.graph_db.get_stats()?;
+        let files = self.state.graph_db.list_files()?;
+        let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
+
+        let mut markdown = String::new();
+        markdown.push_str("# Project Overview\n\n");
+        
+        markdown.push_str("## Project Statistics\n");
+        markdown.push_str(&format!("- **Total Files**: {}\n", file_count));
+        markdown.push_str(&format!("- **Total Symbols (Nodes)**: {}\n", node_count));
+        markdown.push_str(&format!("- **Total Dependencies (Edges)**: {}\n\n", edge_count));
+
+        markdown.push_str("## Files Breakdown\n");
+        markdown.push_str("| File Path | Language | Symbols Count |\n");
+        markdown.push_str("| --- | --- | --- |\n");
+
+        for (id, path, lang) in &files {
+            let count = symbol_counts.get(id).copied().unwrap_or(0);
+            markdown.push_str(&format!("| `{}` | {} | {} |\n", path, lang, count));
+        }
+        markdown.push_str("\n");
+
+        markdown.push_str("## Exported Symbols by File\n");
+        let exported = self.state.graph_db.get_exported_symbols_grouped()?;
+        if exported.is_empty() {
+            markdown.push_str("No exported symbols indexed.\n");
+        } else {
+            let mut current_file = String::new();
+            for (file_path, sym) in exported {
+                if file_path != current_file {
+                    current_file = file_path.clone();
+                    markdown.push_str(&format!("\n### `{}`\n", current_file));
+                }
+                let sig_str = sym.signature.map(|s| format!(" `{}`", s)).unwrap_or_default();
+                markdown.push_str(&format!("- `{}` ({}){}\n", sym.name, sym.kind, sig_str));
             }
         }
 
@@ -1203,6 +1505,56 @@ mod tests {
 
         let result = server.handle_session_recall(json!({ "query": "nomatch" })).await.unwrap();
         assert!(result.as_str().unwrap().contains("No matching past invocations"));
+
+        std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_new_mcp_tools() {
+        let temp_dir = std::env::temp_dir().join("comP_test_new_mcp_tools");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", temp_dir.to_str().unwrap());
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state.clone());
+
+        // Insert mock data into DB
+        let file_id = state.graph_db.upsert_file("src/test_mcp.rs", "hash1", "rust").unwrap();
+        let node_id_1 = state.graph_db.insert_node(file_id, "my_mcp_func", "function", 10, 5, None).unwrap();
+        let node_id_2 = state.graph_db.insert_node(file_id, "caller_func", "function", 20, 5, None).unwrap();
+
+        // Add edge
+        state.graph_db.insert_edge(node_id_2, node_id_1, "calls").unwrap();
+
+        // 1. Test get_symbol
+        let result = server.handle_get_symbol(json!({ "name": "my_mcp_func" })).await.unwrap();
+        let markdown = result.as_str().unwrap();
+        assert!(markdown.contains("# Symbol: my_mcp_func"));
+        assert!(markdown.contains("src/test_mcp.rs"));
+        assert!(markdown.contains("caller_func"));
+
+        // 2. Test get_dependencies
+        let result_out = server.handle_get_dependencies(json!({ "name": "caller_func", "direction": "out" })).await.unwrap();
+        assert!(result_out.as_str().unwrap().contains("my_mcp_func"));
+
+        let result_in = server.handle_get_dependencies(json!({ "name": "my_mcp_func", "direction": "in" })).await.unwrap();
+        assert!(result_in.as_str().unwrap().contains("caller_func"));
+
+        // 3. Test get_file_summary
+        let result_summary = server.handle_get_file_summary(json!({ "file_path": "src/test_mcp.rs" })).await.unwrap();
+        // Wait, handle_get_file_summary returns Result<Value>. It's Value::String.
+        let summary_md = result_summary.as_str().unwrap();
+        assert!(summary_md.contains("my_mcp_func"));
+        assert!(summary_md.contains("caller_func"));
+
+        // 4. Test get_project_overview
+        let result_overview = server.handle_get_project_overview().await.unwrap();
+        let overview_md = result_overview.as_str().unwrap();
+        assert!(overview_md.contains("Total Files**: 1"));
+        assert!(overview_md.contains("Total Symbols (Nodes)**: 2"));
 
         std::env::remove_var("COMP_WORKSPACE_ROOT");
         let _ = std::fs::remove_dir_all(&temp_dir);
