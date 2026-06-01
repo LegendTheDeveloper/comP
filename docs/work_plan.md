@@ -33,9 +33,11 @@
 - [x] セッションメモリ機能（session_recall）の実装
   - 変更内容: `.comp/session-memory.json` に MCP ツール呼び出し（`run_pipeline`, `get_context`）履歴を永続化し、VSCode 拡張側のファイル監視フック（`setupFileWatchers`）を通じてコード変更時に自動で `stale` マークする仕組みを構築。また、過去履歴を Markdown 形式で返却する新しい MCP ツール `session_recall` を Rust デーモン側に実装。
 - [x] Rustデーモンへの4つの新しいMCPツール（get_symbol, get_dependencies, get_file_summary, get_project_overview）の追加
-  - 変更内容: 指定シンボルのコード・依存関係抽出、ファイル概要、プロジェクト全体の統計およびエクスポートシンボル一覧を Markdown で返却する 4 つの MCP ツールを追加。テストのアサーションエラー（Total Files / Total Symbols のマークダウン太字フォーマット不整合）を修正し、すべてのユニットテストおよび JSON-RPC 結合動作検証が正常にパスすることを確認。
+  - 変更内容: 指定シンボルのコード・依存関係抽出、ファイル概要、プロジェクト全体の統計およびエクスポートシンボル一覧を Markdown で返却する 4 つ of MCP ツールを追加。テストのアサーションエラー（Total Files / Total Symbols のマークダウン太字フォーマット不整合）を修正し、すべてのユニットテストおよび JSON-RPC 結合動作検証が正常にパスすることを確認。
+- [x] MCP ツール（run_pipeline, get_context）の description 改善（英語翻訳の指示追記）
+  - 変更内容: 日本語による質問の際に英語シンボル名にマッチしない問題を防ぐため、外部 AI エージェントが自動でクエリを英語に翻訳した上で呼び出すよう、ツール定義（`run_pipeline` の `task` パラメータ、`get_context` の `query` パラメータ）の description に英語での入力を促す重要指示（`IMPORTANT: The parameter MUST be in English.`）を追記しました。
 
 ## 残タスク
 
 1. **コミットとプッシュ**
-   - 新規 MCP ツールの実装および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。
+   - 実装した修正内容および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。

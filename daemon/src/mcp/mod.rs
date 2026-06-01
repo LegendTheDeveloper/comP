@@ -791,13 +791,13 @@ impl MCPServer {
             "tools": [
                 {
                     "name": "run_pipeline",
-                    "description": "Call at the START of a new coding task (bug fix, feature, refactor) to retrieve the most relevant files and symbols for that task. Do NOT call mid-implementation or for general questions. Returns pivot files and related symbols ranked by relevance.",
+                    "description": "Call at the START of a new coding task (bug fix, feature, refactor) to retrieve the most relevant files and symbols for that task. Do NOT call mid-implementation or for general questions. Returns pivot files and related symbols ranked by relevance. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "task": {
                                 "type": "string",
-                                "description": "One sentence describing what you are about to implement or fix. Example: 'fix JWT token expiry bug in auth middleware'"
+                                "description": "One sentence describing what you are about to implement or fix. IMPORTANT: The task description MUST be in English. Translate to English if needed. Example: 'fix JWT token expiry bug in auth middleware'"
                             },
                             "max_tokens": {
                                 "type": "integer",
@@ -813,13 +813,13 @@ impl MCPServer {
                 },
                 {
                     "name": "get_context",
-                    "description": "Search for specific symbols (functions, classes, types) by name or keyword. Use when you know the exact name to look up. Do NOT use for starting a new task — use run_pipeline instead.",
+                    "description": "Search for specific symbols (functions, classes, types) by name or keyword. Use when you know the exact name to look up. Do NOT use for starting a new task — use run_pipeline instead. IMPORTANT: The 'query' parameter MUST be in English or match exact symbol names.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Symbol name or keyword. Example: 'authenticate' or 'UserRepository'"
+                                "description": "Symbol name or keyword. IMPORTANT: The query MUST be in English or match exact symbol names in the code. Example: 'authenticate' or 'UserRepository'"
                             },
                             "limit": {
                                 "type": "integer",
