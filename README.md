@@ -8,7 +8,13 @@
 
 🌐 **[Official Website](https://tsucky230.github.io/comP/)**
 
-comP enables Claude Code, Cursor, Cline, and other AI agents to understand and analyze your codebase efficiently. It indexes your project, builds a semantic code graph, and estimates token usage—all running locally on your machine.
+> **AI coding agents burn tokens browsing your files.**
+> comP stops that by automatically indexing your entire codebase and building a semantic code graph.
+> Instead of reading dozens of files, agents query the graph and get exactly what they need—
+> **reducing LLM token consumption by up to 60–80%.** Everything runs 100% locally.
+
+comP works with Claude Code, Cursor, Cline, Antigravity, GitHub Copilot,
+and any MCP-compatible agent.
 
 ---
 
