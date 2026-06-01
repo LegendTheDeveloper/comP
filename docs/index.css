@@ -138,6 +138,25 @@ img {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.lang-toggle-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  padding: 0.35rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all var(--transition-speed);
+}
+
+.lang-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--text-color);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 /* Hero Section */
 .hero {
   position: relative;

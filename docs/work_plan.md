@@ -42,9 +42,10 @@
 
 - [x] GitHub Pages 公式紹介ページの追加および自動デプロイワークフローの導入、ロードマップ v0.3.0 への PDF サポートの追記
   - 変更内容: HTML/CSS によるオシャレな comP 公式紹介ページ (`docs/index.html`, `docs/index.css`) を新規作成し、バナー画像や VSCode UI モックアップ画像を生成・配置。`main` ブランチへのプッシュ時に自動的に GitHub Pages に紹介ページをデプロイする GitHub Actions ワークフロー (`.github/workflows/pages.yml`) を作成しました。
+  - **多言語対応の導入**: 英語版の紹介ページ (`docs/index.html`) と日本語版の紹介ページ (`docs/index_ja.html`) に分割し、ブラウザの言語設定（`navigator.language`）に応じた自動判定リダイレクト処理を実装。また、ヘッダーに手動での言語切り替え用ボタンを配置し、ユーザーの優先設定を `localStorage` に保持する仕組みを構築しました。
   - `README.md` および `README_ja.md` に公式 Web ページ（GitHub Pages）へのリンクを追加し、Roadmap の v0.3 に「PDFドキュメントのインデックスサポート」を追加しました。
 
 ## 残タスク
 
 1. **コミットとプッシュ**
-   - 今回実装したロードマップ 0.2.0 (Office) および 0.3.0 (PDFロードマップ、GitHub Pages紹介ページ、自動デプロイワークフロー) に関連するすべての変更をコミットし、リモート（GitHub）へプッシュ。
+   - 今回実装したロードマップ 0.2.0 (Office)、0.3.0 (PDFロードマップ、GitHub Pages紹介ページの多言語化・自動デプロイワークフロー) に関連するすべての変更をコミットし、リモート（GitHub）へプッシュ。

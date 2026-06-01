@@ -1,10 +1,22 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>comP — 超軽量ローカルコンテキストインデクサー拡張機能</title>
-  <meta name="description" content="comPはVSCode上で動作する、ローカルLLMおよび外部AIエージェント向けの超軽量・高性能なシンボルグラフ・コンテキストインデクサーです。">
+  <title>comP — Ultra-lightweight Local Code Context Indexer Extension</title>
+  <meta name="description" content="comP is a local-first code context indexing engine for VSCode that provides AI agents with optimal semantic symbols and code graph traversal.">
+  
+  <!-- Auto-redirect to Japanese if preferred or if browser language is Japanese -->
+  <script>
+    (function() {
+      const preferred = localStorage.getItem('comp-lang');
+      const browserLang = navigator.language || navigator.userLanguage;
+      if (preferred === 'ja' || (!preferred && browserLang.startsWith('ja'))) {
+        window.location.href = 'index_ja.html';
+      }
+    })();
+  </script>
+
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,10 +33,11 @@
         <span class="logo-accent">com</span>P
       </div>
       <ul class="nav-links">
-        <li><a href="#features">機能・特徴</a></li>
-        <li><a href="#roadmap">ロードマップ</a></li>
-        <li><a href="#install">導入方法</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#roadmap">Roadmap</a></li>
+        <li><a href="#install">Installation</a></li>
         <li><a href="https://github.com/tsucky230/comP" class="nav-btn-github" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+        <li><button class="lang-toggle-btn" onclick="setLanguage('ja')">日本語</button></li>
       </ul>
     </div>
   </nav>
@@ -33,14 +46,14 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.2.0 リリース</div>
-        <h1 class="animate-fade-in">あなたのAIエージェントに、<br><span class="gradient-text">完璧なローカルコード文脈</span>を。</h1>
-        <p class="hero-desc animate-fade-in">comP（コンプ）は、AIエージェントがコードの構造、依存関係、全文情報を完全に把握できるように支援する、VSCode拡張機能およびRust製バックエンドデーモンです。</p>
+        <div class="badge animate-fade-in">v0.2.0 Released</div>
+        <h1 class="animate-fade-in">Empower Your AI Agents with <br><span class="gradient-text">Flawless Local Code Context</span></h1>
+        <p class="hero-desc animate-fade-in">comP is a local-first indexing engine and VSCode extension that helps AI coding agents understand your codebase structure, dependency graphs, and full-text content.</p>
         <div class="hero-cta animate-fade-in">
-          <a href="#install" class="btn btn-primary">使ってみる</a>
+          <a href="#install" class="btn btn-primary">Get Started</a>
           <a href="https://github.com/tsucky230/comP" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">
             <svg class="icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            GitHubで見る
+            GitHub
           </a>
         </div>
       </div>
@@ -54,29 +67,29 @@
   <section id="features" class="features section">
     <div class="container">
       <div class="section-header">
-        <h2>主な機能とテクノロジー</h2>
-        <p>100%ローカルで動作し、エージェントへ提供するトークンサイズを最大80%節約します。</p>
+        <h2>Core Features & Technology</h2>
+        <p>Runs 100% locally on your machine, saving up to 80% on context token costs.</p>
       </div>
       <div class="features-grid">
         <div class="feature-card">
           <div class="feature-icon">🔍</div>
-          <h3>インテリジェントBM25検索</h3>
-          <p>マークダウンやコード、Officeドキュメント（Word, Excel, PowerPoint）のテキスト情報を正確にトークン化し、高精度な全文キーワード検索を可能にします。</p>
+          <h3>Intelligent BM25 Search</h3>
+          <p>Accurately tokenizes and searches through Markdown, code, and Office documents (Word, Excel, PowerPoint) to deliver precise full-text keyword matching.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">⚡</div>
-          <h3>Rust製超高速デーモン</h3>
-          <p>裏で動作する軽量バックエンドはRust製。数千ファイル規模のリポジトリもSQLite上に高速にグラフデータベース化し、エージェントの問合せに即時に応答します。</p>
+          <h3>Ultra-fast Rust Daemon</h3>
+          <p>The lightweight Rust backend builds a SQLite-powered semantic code graph for thousands of files, ensuring near-instant response times for AI agents.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">🛡️</div>
-          <h3>堅牢なエラーハンドリング</h3>
-          <p>ドキュメントファイルの一部が破損していても、デーモンはエラーをスキップしてスキャンを継続します。クラッシュフリーで信頼性の高いインデックス作成を実現します。</p>
+          <h3>Robust Error Handling</h3>
+          <p>Keeps parsing and indexing even if some documents are corrupted. Ensures crash-free, reliable workspace scans.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">💼</div>
-          <h3>Officeドキュメント対応</h3>
-          <p>`.docx` (Word), `.pptx` (PowerPoint), `.xlsx` (Excel) などのOfficeファイル内のシート名やスライドテキスト、テーブル情報を自動インデックス。非コード文脈もエージェントに提供します。</p>
+          <h3>Office Document Indexing</h3>
+          <p>Automatically indexes sheet names in Excel (.xlsx), slide contents in PowerPoint (.pptx), and Word documents (.docx) to capture non-code context.</p>
         </div>
       </div>
 
@@ -86,9 +99,9 @@
           <img src="comp_ui_mockup.png" alt="comP VSCode UI Mockup" class="detail-image">
         </div>
         <div class="detail-content">
-          <h3>VSCodeに完全統合</h3>
-          <p>VSCodeサイドバーからボタンひとつで簡単に開始でき、コードの変更を監視してリアルタイムにインデックスを差分更新（stale状態の自動付与）します。</p>
-          <p>Claude Code, Cursor, Cline, Windsurf, GitHub Copilotなど、あらゆる主要AIエージェントのMCP（Model Context Protocol）設定を自動生成し、シームレスに連携可能です。</p>
+          <h3>Deep Integration with VSCode</h3>
+          <p>Starts with a single click from the sidebar and watches workspace changes to keep indexes incrementally updated with 'stale' status tracking.</p>
+          <p>Generates Model Context Protocol (MCP) server configuration for Claude Code, Cursor, Cline, Windsurf, GitHub Copilot, and other major AI agents.</p>
         </div>
       </div>
     </div>
@@ -98,40 +111,40 @@
   <section id="roadmap" class="roadmap section section-alt">
     <div class="container">
       <div class="section-header">
-        <h2>ロードマップ (Roadmap)</h2>
-        <p>comPは継続的に進化し、より包括的なローカルAI体験を提供します。</p>
+        <h2>Roadmap</h2>
+        <p>comP continues to evolve to deliver a more comprehensive local AI workspace experience.</p>
       </div>
       <div class="roadmap-timeline">
         <div class="roadmap-item completed">
           <div class="roadmap-badge">v0.1</div>
           <div class="roadmap-content">
-            <h4>コア機能の確立</h4>
-            <p>30以上のプログラム言語対応、マークダウン/JSON/XMLのサポート、バックグラウンドインデックス、MCPサーバーの構築、トークン節約量統計機能。</p>
-            <span class="status-tag">✅ リリース済み</span>
+            <h4>Core Indexing & MCP</h4>
+            <p>30+ programming languages support, JSON/XML/Markdown parsing, background indexing, MCP server integration, and token usage statistics.</p>
+            <span class="status-tag">✅ Released</span>
           </div>
         </div>
         <div class="roadmap-item completed">
           <div class="roadmap-badge">v0.2</div>
           <div class="roadmap-content">
-            <h4>Officeドキュメント & BM25検索の統合</h4>
-            <p>Word (.docx), PowerPoint (.pptx), Excel (.xlsx) の自動抽出・インデックス化に対応。BM25によるリッチなテキスト検索、およびシンボルシグネチャの永続化。</p>
-            <span class="status-tag">✅ リリース済み</span>
+            <h4>Office Support & BM25</h4>
+            <p>Word (.docx), PowerPoint (.pptx), and Excel (.xlsx) automatic extraction and indexing. BM25 full-text search capability, and symbol signature persistence.</p>
+            <span class="status-tag">✅ Released</span>
           </div>
         </div>
         <div class="roadmap-item">
           <div class="roadmap-badge">v0.3</div>
           <div class="roadmap-content">
-            <h4>文書サポート拡張 & 依存関係解析の高度化</h4>
-            <p><strong>PDFファイル (.pdf) の自動インデックスサポート</strong>。より高度な影響範囲分析（Advanced Impact Analysis）、セマンティック検索のさらなる向上、マルチリポジトリインデックス。</p>
-            <span class="status-tag">⚪ 計画中</span>
+            <h4>Extended Docs & Deeper Graph</h4>
+            <p><strong>PDF document (.pdf) automatic indexing support</strong>. Advanced impact analysis, embedding-based search, and cross-repository indexing.</p>
+            <span class="status-tag">⚪ Planning</span>
           </div>
         </div>
         <div class="roadmap-item">
           <div class="roadmap-badge">v0.4</div>
           <div class="roadmap-content">
-            <h4>自動ドキュメント生成 & Gitコンテキスト</h4>
-            <p>プロジェクト解説書の自動作成、Gitの差分（Diff）に対応したプルリクエスト用コンテキスト生成、コードベースの構造変化による影響範囲検知の自動化。</p>
-            <span class="status-tag">⚪ 計画中</span>
+            <h4>Auto Docs & Git Context</h4>
+            <p>Automatic project documentation generation, pull request code review context, and change-triggered impact detection.</p>
+            <span class="status-tag">⚪ Planning</span>
           </div>
         </div>
       </div>
@@ -142,25 +155,25 @@
   <section id="install" class="install section">
     <div class="container">
       <div class="section-header">
-        <h2>クイックスタート (Quick Start)</h2>
-        <p>数ステップであなたのVSCode環境にAIコンテキストインデクサーを導入できます。</p>
+        <h2>Quick Start</h2>
+        <p>Get up and running with comP in three easy steps.</p>
       </div>
       <div class="install-steps">
         <div class="step">
           <span class="step-num">1</span>
-          <h4>拡張機能のインストール</h4>
-          <p>リリースされた `.vsix` ファイルをダウンロードし、VSCodeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
+          <h4>Install the Extension</h4>
+          <p>Download the release `.vsix` file and drag-and-drop it into VSCode, or install via command line:</p>
           <pre><code>code --install-extension comP-0.2.0.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>
-          <h4>プロジェクトでデーモンを起動</h4>
-          <p>プロジェクトフォルダを開き、VSCodeサイドバーの「Start comP」ボタンを押すことで、バックエンドのインデクサーが起動し、自動的にインデックスが開始されます。</p>
+          <h4>Start Daemon in Project</h4>
+          <p>Open your workspace folder and click "Start comP" from the sidebar to launch the local backend indexer and begin scanning.</p>
         </div>
         <div class="step">
           <span class="step-num">3</span>
-          <h4>エージェントを紐付ける</h4>
-          <p>コマンドパレットから <code>comP: Setup Agent Config</code> を起動し、利用したいエージェント（Cline, Cursor, Copilot等）を選択して、MCP設定を自動マージ・出力します。</p>
+          <h4>Link Your Coding Agent</h4>
+          <p>Open the Command Palette and search for <code>comP: Setup Agent Config</code>, select your agent (Cline, Cursor, Copilot, etc.), and merge the MCP configuration.</p>
         </div>
       </div>
     </div>
@@ -177,6 +190,14 @@
       </div>
     </div>
   </footer>
+
+  <!-- Language Switch Script -->
+  <script>
+    function setLanguage(lang) {
+      localStorage.setItem('comp-lang', lang);
+      window.location.href = lang === 'en' ? 'index.html' : 'index_ja.html';
+    }
+  </script>
 
 </body>
 </html>
