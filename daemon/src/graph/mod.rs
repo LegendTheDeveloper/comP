@@ -82,6 +82,7 @@ impl GraphDB {
     /// Insert a symbol node
     ///
     /// Returns the node ID for use in dependency tracking
+    #[allow(clippy::too_many_arguments)] // 引数が多いが、全フィールドが必須のため構造体化による分割は過剰
     pub fn insert_node(
         &self,
         file_id: i64,

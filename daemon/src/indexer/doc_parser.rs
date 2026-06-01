@@ -191,12 +191,10 @@ impl DocumentParser {
                 Ok(Event::End(ref e)) if e.name().as_ref() == b"w:t" => {
                     in_text = false;
                 }
-                Ok(Event::Text(ref e)) => {
-                    if in_text {
+                Ok(Event::Text(ref e)) if in_text => {
                         text.push_str(&e.decode()?);
                         text.push(' ');
                     }
-                }
                 Ok(Event::Eof) => break,
                 Err(_) => break,
                 _ => {}
@@ -240,12 +238,10 @@ impl DocumentParser {
                     Ok(Event::End(ref e)) if e.name().as_ref() == b"a:t" => {
                         in_text = false;
                     }
-                    Ok(Event::Text(ref e)) => {
-                        if in_text {
+                    Ok(Event::Text(ref e)) if in_text => {
                             text.push_str(&e.decode()?);
                             text.push(' ');
                         }
-                    }
                     Ok(Event::Eof) => break,
                     Err(_) => break,
                     _ => {}
@@ -279,12 +275,10 @@ impl DocumentParser {
                     Ok(Event::End(ref e)) if e.name().as_ref() == b"t" => {
                         in_text = false;
                     }
-                    Ok(Event::Text(ref e)) => {
-                        if in_text {
+                    Ok(Event::Text(ref e)) if in_text => {
                             text.push_str(&e.decode()?);
                             text.push(' ');
                         }
-                    }
                     Ok(Event::Eof) => break,
                     Err(_) => break,
                     _ => {}
@@ -358,12 +352,10 @@ impl DocumentParser {
                     Ok(Event::End(ref e)) if e.name().as_ref() == b"a:t" => {
                         in_text = false;
                     }
-                    Ok(Event::Text(ref e)) => {
-                        if in_text {
+                    Ok(Event::Text(ref e)) if in_text => {
                             slide_text.push_str(&e.decode()?);
                             slide_text.push(' ');
                         }
-                    }
                     Ok(Event::Eof) => break,
                     Err(_) => break,
                     _ => {}
@@ -399,6 +391,7 @@ impl DocumentParser {
     }
 
     /// Parse Excel document (.xlsx) and return sheet-based symbols
+    #[allow(deprecated)] // WHY: quick_xml の unescape_value() は deprecated だが normalized_value() は XmlVersion 引数が必要で安定 API がないため
     pub fn parse_xlsx(path: &Path) -> Result<Vec<Symbol>> {
         let file = File::open(path)?;
         let mut archive = zip::ZipArchive::new(file)?;
@@ -416,12 +409,10 @@ impl DocumentParser {
                 match reader.read_event_into(&mut buf) {
                     Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"sheet" => {
                         let mut name = format!("Sheet{}", sheet_num);
-                        for attr in e.attributes() {
-                            if let Ok(attr) = attr {
-                                if attr.key.as_ref() == b"name" {
-                                    name = attr.unescape_value()?.to_string();
-                                    break;
-                                }
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"name" {
+                                name = attr.unescape_value()?.to_string();
+                                break;
                             }
                         }
 
