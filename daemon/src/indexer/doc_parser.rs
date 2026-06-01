@@ -298,7 +298,7 @@ impl DocumentParser {
 
     /// Parse Word document (.docx) and return pseudoclass/module symbols
     pub fn parse_docx(path: &Path) -> Result<Vec<Symbol>> {
-        let text = Self::extract_docx_text(path).unwrap_or_default();
+        let text = Self::extract_docx_text(path)?;
         let sig = if text.is_empty() {
             None
         } else {
