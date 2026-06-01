@@ -15,6 +15,7 @@ import { StatusBar } from "./ui/StatusBar";
 import { SidebarPanel } from "./ui/SidebarPanel";
 import { DependencyCodeLensProvider } from "./ui/CodeLens";
 import { registerCommands } from "./ui/commands";
+import { SessionMemoryManager } from "./mcp/sessionMemory";
 
 /** Global context */
 let daemonManager: DaemonManager | null = null;
@@ -194,6 +195,9 @@ function setupFileWatchers(
     return null;
   }
 
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const sessionMemoryManager = workspaceRoot ? new SessionMemoryManager(workspaceRoot) : null;
+
   // Debounce timer for rapid file changes
   let debounceTimer: NodeJS.Timeout | null = null;
 
@@ -214,6 +218,12 @@ function setupFileWatchers(
         // Invalidate CodeLens cache for this file
         codeLensProvider.invalidateFile(uri.fsPath);
         codeLensProvider.refresh();
+
+        // Mark session memory entries as stale if they depend on this file
+        if (sessionMemoryManager) {
+          const relativePath = vscode.workspace.asRelativePath(uri, false);
+          sessionMemoryManager.markStaleForFile(relativePath);
+        }
       } catch (error) {
         console.error("[comP] Error indexing file:", error);
       }
@@ -227,6 +237,12 @@ function setupFileWatchers(
       // Invalidate CodeLens cache for deleted file
       codeLensProvider.invalidateFile(uri.fsPath);
       codeLensProvider.refresh();
+
+      // Mark session memory entries as stale if they depend on this file
+      if (sessionMemoryManager) {
+        const relativePath = vscode.workspace.asRelativePath(uri, false);
+        sessionMemoryManager.markStaleForFile(relativePath);
+      }
     } catch (error) {
       console.error("[comP] Error removing file from index:", error);
     }

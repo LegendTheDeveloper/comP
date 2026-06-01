@@ -243,3 +243,38 @@
 ### 次回のタスク
 
 - 特になし（CIのすべてのビルドステップの正常動作を確認予定）。
+
+---
+
+## 2026-06-02 (セッションメモリ機能の実装)
+
+### ユーザーからの要望
+
+- 過去の MCP ツール呼び出し（クエリ・返却シンボル名・トークン数）をセッションごとにファイルへ永続化する
+- クエリ後にコードが変更された場合、そのエントリを自動で "stale" マークする
+- 新しい MCP ツール session_recall を src/mcp/ に追加する
+  - input: { query?: string } // 省略時はサマリー返却
+  - output: 過去観測の Markdown リスト（stale フラグ付き）
+- Rust デーモン側ではなく TypeScript 拡張側で管理し、.comp/session-memory.json に保存する
+- DaemonManager のファイル変更通知をフックして stale 検知に利用する
+
+### 実施内容
+
+1. **セッションメモリ管理モジュールの新規追加**:
+   - TypeScript側で `src/mcp/sessionMemory.ts` に `SessionMemoryManager` を実装。`.comp/session-memory.json` のロード、セーブ、およびファイル変更フックに応じた `stale` マークの付与を行います。
+   - `src/mcp/tests/sessionMemory.test.ts` にて `SessionMemoryManager` のユニットテスト（3件）を記述。
+2. **ファイル変更通知へのフック**:
+   - VSCode拡張機能の `src/extension.ts` 内の `setupFileWatchers` でファイル変更（onDidChange / onDidDelete）をフックし、`SessionMemoryManager.markStaleForFile()` を呼び出して該当するクエリ履歴を自動で stale マークする処理を追加。
+3. **Rust デーモン側セッション永続化とツールの実装**:
+   - `daemon/src/main.rs` で起動時のタイムスタンプを用いて `session_id` を発行し `AppState` に保持。
+   - `run_pipeline`（`task` をクエリとする）と `get_context`（`query` をクエリとする）の処理時に、実行クエリ、ヒットしたシンボル名、ファイルパス、推定トークン数を `.comp/session-memory.json` に追記保存。
+   - 新しい MCP ツール `session_recall` を `daemon/src/mcp/mod.rs` に追加。`.comp/session-memory.json` 内の現在のセッションの履歴を Markdown リストに整形して返却（オプション引数 `query` による大文字小文字を区別しない部分一致フィルタも実装）。
+   - `test_session_recall` ユニットテストを追加。
+4. **動作テストと検証**:
+   - `npm run test`（TSテスト 64件）および `npm run daemon:test`（Rustテスト 64件）を実行し、すべて正常にパスすることを確認。
+   - 結合動作検証として `test_session_recall.py` スクリプトを用いて JSON-RPC 経由で MCP ツールの疎通と `.comp/session-memory.json` への永続化、Markdown 出力が要件通り動作することを実証。
+
+### 次回のタスク
+
+- 特になし（セッションメモリ機能の開発完了）。
+

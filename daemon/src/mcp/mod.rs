@@ -15,6 +15,100 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SessionCall {
+    pub query: String,
+    pub symbols: Vec<String>,
+    pub files: Vec<String>,
+    pub tokens: u64,
+    pub stale: bool,
+    pub timestamp: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct Session {
+    pub id: String,
+    pub timestamp: u64,
+    pub calls: Vec<SessionCall>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct SessionMemory {
+    pub sessions: Vec<Session>,
+}
+
+fn get_session_memory_path() -> std::path::PathBuf {
+    let root = std::env::var("COMP_WORKSPACE_ROOT")
+        .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+        .unwrap_or_else(|_| ".".to_string());
+    std::path::Path::new(&root).join(".comp").join("session-memory.json")
+}
+
+fn record_mcp_call(
+    session_id: &str,
+    query: String,
+    symbols: Vec<String>,
+    files: Vec<String>,
+    tokens: u64,
+) -> Result<()> {
+    let path = get_session_memory_path();
+    
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut memory: SessionMemory = if path.exists() {
+        let file = std::fs::File::open(&path)?;
+        let reader = std::io::BufReader::new(file);
+        serde_json::from_reader(reader).unwrap_or(SessionMemory { sessions: Vec::new() })
+    } else {
+        SessionMemory { sessions: Vec::new() }
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let mut found = false;
+    for session in &mut memory.sessions {
+        if session.id == session_id {
+            session.calls.push(SessionCall {
+                query: query.clone(),
+                symbols: symbols.clone(),
+                files: files.clone(),
+                tokens,
+                stale: false,
+                timestamp: now,
+            });
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        memory.sessions.push(Session {
+            id: session_id.to_string(),
+            timestamp: now,
+            calls: vec![SessionCall {
+                query,
+                symbols,
+                files,
+                tokens,
+                stale: false,
+                timestamp: now,
+            }],
+        });
+    }
+
+    let file = std::fs::File::create(&path)?;
+    let writer = std::io::BufWriter::new(file);
+    serde_json::to_writer_pretty(writer, &memory)?;
+
+    Ok(())
+}
+
+
 /// MCP Server
 ///
 /// Listens on stdin for JSON-RPC 2.0 requests
@@ -92,6 +186,7 @@ impl MCPServer {
                 "forceReindex" => self.handle_force_reindex().await,
                 "indexFile" => self.handle_index_file(params).await,
                 "removeFile" => self.handle_remove_file(params).await,
+                "session_recall" => self.handle_session_recall(params).await,
                 _ => Err(anyhow!("Unknown method: {}", method)),
             };
 
@@ -200,7 +295,11 @@ impl MCPServer {
         let mut seen = std::collections::HashSet::new();
         let mut pivot_files = Vec::new();
         let mut pivot_paths: Vec<String> = Vec::new();
-        for (file, _name, _kind, _line) in hits {
+        let mut recorded_symbols = Vec::new();
+        let mut recorded_files = Vec::new();
+        for (file, name, _kind, _line) in hits {
+            recorded_symbols.push(name.clone());
+            recorded_files.push(file.clone());
             if seen.insert(file.clone()) {
                 let sym = path_to_id
                     .get(&file)
@@ -232,6 +331,7 @@ impl MCPServer {
                 20,
             );
             for (path, _score) in bm25_hits {
+                recorded_files.push(path.clone());
                 if seen.insert(path.clone()) {
                     let sym = path_to_id
                         .get(&path)
@@ -269,6 +369,19 @@ impl MCPServer {
         self.state.queries_count.fetch_add(1, Ordering::Relaxed);
         // Persist to shared DB so the VSCode extension's daemon (separate process) can read these stats
         let _ = self.state.graph_db.increment_token_stats(total_tokens as u64, saved_this_call);
+
+        // Record this call to session memory
+        recorded_symbols.sort();
+        recorded_symbols.dedup();
+        recorded_files.sort();
+        recorded_files.dedup();
+        let _ = record_mcp_call(
+            &self.state.session_id,
+            task.to_string(),
+            recorded_symbols,
+            recorded_files,
+            total_tokens as u64,
+        );
 
         Ok(json!({
             "task": task,
@@ -340,6 +453,31 @@ impl MCPServer {
             .collect();
 
         let count = results.len();
+
+        // Record this call to session memory
+        let mut recorded_symbols = Vec::new();
+        let mut recorded_files = Vec::new();
+        for res in &results {
+            if let Some(sym) = res["symbol"].as_str() {
+                recorded_symbols.push(sym.to_string());
+            }
+            if let Some(file) = res["file"].as_str() {
+                recorded_files.push(file.to_string());
+            }
+        }
+        recorded_symbols.sort();
+        recorded_symbols.dedup();
+        recorded_files.sort();
+        recorded_files.dedup();
+        let estimated_tokens = (count as u64) * 50;
+        let _ = record_mcp_call(
+            &self.state.session_id,
+            query.to_string(),
+            recorded_symbols,
+            recorded_files,
+            estimated_tokens,
+        );
+
         Ok(json!({
             "query": query,
             "results": results,
@@ -716,6 +854,19 @@ impl MCPServer {
                         "type": "object",
                         "properties": {}
                     }
+                },
+                {
+                    "name": "session_recall",
+                    "description": "Recall past MCP tool invocations (queries, symbols, tokens) for the current session. Returns a Markdown list with stale status. If query is provided, filters the history by query similarity or matching.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "Optional search query to filter past invocations"
+                            }
+                        }
+                    }
                 }
             ]
         }))
@@ -737,13 +888,91 @@ impl MCPServer {
             "get_impact_graph" => self.handle_get_impact_graph(args).await?,
             "list_indexed_files" => self.handle_list_indexed_files().await?,
             "get_token_usage" => self.handle_get_token_usage().await?,
+            "session_recall" => self.handle_session_recall(args).await?,
             _ => return Err(anyhow!("Unknown tool: {}", name)),
         };
 
+        let text_content = if let Some(s) = result.as_str() {
+            s.to_string()
+        } else {
+            result.to_string()
+        };
+
         Ok(json!({
-            "content": [{ "type": "text", "text": result.to_string() }],
+            "content": [{ "type": "text", "text": text_content }],
             "isError": false
         }))
+    }
+
+    /// Tool 6: session_recall
+    ///
+    /// Recall past MCP tool invocations for the current session.
+    pub async fn handle_session_recall(&self, params: Value) -> Result<Value> {
+        let query_filter = params["query"].as_str().map(|q| q.to_lowercase());
+        let path = get_session_memory_path();
+
+        let mut markdown = String::new();
+        markdown.push_str("### Session Recall\n\n");
+
+        if !path.exists() {
+            if query_filter.is_some() {
+                markdown.push_str("No matching past invocations found for the query.");
+            } else {
+                markdown.push_str("No past invocations recorded in the current session.");
+            }
+            return Ok(Value::String(markdown));
+        }
+
+        let file = std::fs::File::open(&path)?;
+        let reader = std::io::BufReader::new(file);
+        let memory: SessionMemory = serde_json::from_reader(reader).unwrap_or(SessionMemory { sessions: Vec::new() });
+
+        let current_session = memory.sessions.iter().find(|s| s.id == self.state.session_id);
+
+        let calls = match current_session {
+            Some(s) => &s.calls,
+            None => &vec![],
+        };
+
+        let mut filtered_count = 0;
+
+        for call in calls {
+            if let Some(ref q_filter) = query_filter {
+                if !call.query.to_lowercase().contains(q_filter) {
+                    continue;
+                }
+            }
+
+            filtered_count += 1;
+
+            let stale_flag = if call.stale { " [Stale]" } else { "" };
+            markdown.push_str(&format!(
+                "- **Query**: \"{}\" (Tokens: {}){}\n",
+                call.query, call.tokens, stale_flag
+            ));
+            if !call.symbols.is_empty() {
+                markdown.push_str(&format!(
+                    "  - **Symbols**: {}\n",
+                    call.symbols.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", ")
+                ));
+            }
+            if !call.files.is_empty() {
+                markdown.push_str(&format!(
+                    "  - **Files**: {}\n",
+                    call.files.iter().map(|f| format!("`{}`", f)).collect::<Vec<_>>().join(", ")
+                ));
+            }
+        }
+
+        if filtered_count == 0 {
+            if query_filter.is_some() {
+                markdown.push_str("No matching past invocations found for the query.");
+            } else {
+                markdown.push_str("No past invocations recorded in the current session.");
+            }
+        }
+
+        Ok(Value::String(markdown))
     }
 }
 
@@ -939,5 +1168,43 @@ mod tests {
         assert!(response["total_files"].as_i64().unwrap_or(-1) >= 0);
         assert!(response["total_nodes"].as_i64().unwrap_or(-1) >= 0);
         assert!(response["total_edges"].as_i64().unwrap_or(-1) >= 0);
+    }
+
+    #[tokio::test]
+    async fn test_session_recall() {
+        let temp_dir = std::env::temp_dir().join("comP_test_session_recall");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", temp_dir.to_str().unwrap());
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state.clone());
+
+        let result = server.handle_session_recall(json!({})).await.unwrap();
+        assert!(result.as_str().unwrap().contains("No past invocations recorded"));
+
+        record_mcp_call(
+            &state.session_id,
+            "test task".to_string(),
+            vec!["test_symbol".to_string()],
+            vec!["src/test.rs".to_string()],
+            100,
+        ).unwrap();
+
+        let result = server.handle_session_recall(json!({})).await.unwrap();
+        let markdown = result.as_str().unwrap();
+        assert!(markdown.contains("test task"));
+        assert!(markdown.contains("Tokens: 100"));
+        assert!(markdown.contains("test_symbol"));
+
+        let result = server.handle_session_recall(json!({ "query": "task" })).await.unwrap();
+        assert!(result.as_str().unwrap().contains("test task"));
+
+        let result = server.handle_session_recall(json!({ "query": "nomatch" })).await.unwrap();
+        assert!(result.as_str().unwrap().contains("No matching past invocations"));
+
+        std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -30,6 +30,9 @@
 - [x] ci.yml における cargo audit アクションの再修正
   - 変更内容: `rustsec/audit-action` から `actions-rust-lang/audit@v1` に変更し、`workingDirectory: daemon` を指定。
 
+- [x] セッションメモリ機能（session_recall）の実装
+  - 変更内容: `.comp/session-memory.json` に MCP ツール呼び出し（`run_pipeline`, `get_context`）履歴を永続化し、VSCode 拡張側のファイル監視フック（`setupFileWatchers`）を通じてコード変更時に自動で `stale` マークする仕組みを構築。また、過去履歴を Markdown 形式で返却する新しい MCP ツール `session_recall` を Rust デーモン側に実装。
+
 ## 残タスク
 
 1. **コミットとプッシュ**

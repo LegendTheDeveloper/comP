@@ -30,6 +30,7 @@ pub struct AppState {
     pub tokens_sent: Arc<AtomicU64>,
     pub tokens_saved: Arc<AtomicU64>,
     pub queries_count: Arc<AtomicU64>,
+    pub session_id: String,
 }
 
 impl AppState {
@@ -53,12 +54,18 @@ impl AppState {
         let search_engine = SearchEngine::new();
         info!("SearchEngine initialized");
 
+        let session_id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis().to_string())
+            .unwrap_or_else(|_| "0".to_string());
+
         Ok(AppState {
             graph_db: Arc::new(graph_db),
             search_engine: Arc::new(tokio::sync::Mutex::new(search_engine)),
             tokens_sent: Arc::new(AtomicU64::new(0)),
             tokens_saved: Arc::new(AtomicU64::new(0)),
             queries_count: Arc::new(AtomicU64::new(0)),
+            session_id,
         })
     }
 }
