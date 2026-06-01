@@ -13,6 +13,7 @@ use std::path::Path;
 use std::fs::File;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
+use std::io::Read;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 
 use super::parser::Symbol;
@@ -168,6 +169,285 @@ impl DocumentParser {
         }
         Ok(symbols)
     }
+
+    /// Extract plain text from a Word (.docx) file
+    pub fn extract_docx_text(path: &Path) -> Result<String> {
+        let file = File::open(path)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let mut doc_file = archive.by_name("word/document.xml")?;
+        let mut xml_content = String::new();
+        doc_file.read_to_string(&mut xml_content)?;
+
+        let mut reader = Reader::from_str(&xml_content);
+        let mut buf = Vec::new();
+        let mut text = String::new();
+        let mut in_text = false;
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) if e.name().as_ref() == b"w:t" => {
+                    in_text = true;
+                }
+                Ok(Event::End(ref e)) if e.name().as_ref() == b"w:t" => {
+                    in_text = false;
+                }
+                Ok(Event::Text(ref e)) => {
+                    if in_text {
+                        text.push_str(&e.decode()?);
+                        text.push(' ');
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(_) => break,
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        Ok(text)
+    }
+
+    /// Extract plain text from a PowerPoint (.pptx) file
+    pub fn extract_pptx_text(path: &Path) -> Result<String> {
+        let file = File::open(path)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let mut text = String::new();
+
+        let mut slide_names = Vec::new();
+        for i in 0..archive.len() {
+            let f = archive.by_index(i)?;
+            let name = f.name().to_string();
+            if name.starts_with("ppt/slides/slide") && name.ends_with(".xml") {
+                slide_names.push(name);
+            }
+        }
+        slide_names.sort();
+
+        for name in slide_names {
+            let mut f = archive.by_name(&name)?;
+            let mut xml_content = String::new();
+            f.read_to_string(&mut xml_content)?;
+
+            let mut reader = Reader::from_str(&xml_content);
+            let mut buf = Vec::new();
+            let mut in_text = false;
+
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(ref e)) if e.name().as_ref() == b"a:t" => {
+                        in_text = true;
+                    }
+                    Ok(Event::End(ref e)) if e.name().as_ref() == b"a:t" => {
+                        in_text = false;
+                    }
+                    Ok(Event::Text(ref e)) => {
+                        if in_text {
+                            text.push_str(&e.decode()?);
+                            text.push(' ');
+                        }
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(_) => break,
+                    _ => {}
+                }
+                buf.clear();
+            }
+        }
+
+        Ok(text)
+    }
+
+    /// Extract plain text from an Excel (.xlsx) file (via sharedStrings.xml)
+    pub fn extract_xlsx_text(path: &Path) -> Result<String> {
+        let file = File::open(path)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let mut text = String::new();
+
+        if let Ok(mut f) = archive.by_name("xl/sharedStrings.xml") {
+            let mut xml_content = String::new();
+            f.read_to_string(&mut xml_content)?;
+
+            let mut reader = Reader::from_str(&xml_content);
+            let mut buf = Vec::new();
+            let mut in_text = false;
+
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(ref e)) if e.name().as_ref() == b"t" => {
+                        in_text = true;
+                    }
+                    Ok(Event::End(ref e)) if e.name().as_ref() == b"t" => {
+                        in_text = false;
+                    }
+                    Ok(Event::Text(ref e)) => {
+                        if in_text {
+                            text.push_str(&e.decode()?);
+                            text.push(' ');
+                        }
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(_) => break,
+                    _ => {}
+                }
+                buf.clear();
+            }
+        }
+
+        Ok(text)
+    }
+
+    /// Parse Word document (.docx) and return pseudoclass/module symbols
+    pub fn parse_docx(path: &Path) -> Result<Vec<Symbol>> {
+        let text = Self::extract_docx_text(path).unwrap_or_default();
+        let sig = if text.is_empty() {
+            None
+        } else {
+            let text_trimmed = text.trim();
+            let mut preview = text_trimmed.chars().take(200).collect::<String>();
+            if text_trimmed.chars().count() > 200 {
+                preview.push_str("...");
+            }
+            Some(preview)
+        };
+
+        Ok(vec![Symbol {
+            name: "Word Document".to_string(),
+            kind: super::parser::SymbolKind::Module,
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 1,
+            signature: sig,
+            is_exported: true,
+            scope: None,
+        }])
+    }
+
+    /// Parse PowerPoint document (.pptx) and return slide-based symbols
+    pub fn parse_pptx(path: &Path) -> Result<Vec<Symbol>> {
+        let file = File::open(path)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let mut symbols = Vec::new();
+
+        let mut slide_names = Vec::new();
+        for i in 0..archive.len() {
+            let f = archive.by_index(i)?;
+            let name = f.name().to_string();
+            if name.starts_with("ppt/slides/slide") && name.ends_with(".xml") {
+                slide_names.push(name);
+            }
+        }
+        slide_names.sort();
+
+        for (idx, name) in slide_names.iter().enumerate() {
+            let slide_num = idx + 1;
+            let mut f = archive.by_name(name)?;
+            let mut xml_content = String::new();
+            f.read_to_string(&mut xml_content)?;
+
+            let mut reader = Reader::from_str(&xml_content);
+            let mut buf = Vec::new();
+            let mut in_text = false;
+            let mut slide_text = String::new();
+
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(ref e)) if e.name().as_ref() == b"a:t" => {
+                        in_text = true;
+                    }
+                    Ok(Event::End(ref e)) if e.name().as_ref() == b"a:t" => {
+                        in_text = false;
+                    }
+                    Ok(Event::Text(ref e)) => {
+                        if in_text {
+                            slide_text.push_str(&e.decode()?);
+                            slide_text.push(' ');
+                        }
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(_) => break,
+                    _ => {}
+                }
+                buf.clear();
+            }
+
+            let sig = if slide_text.is_empty() {
+                None
+            } else {
+                let text_trimmed = slide_text.trim();
+                let mut preview = text_trimmed.chars().take(200).collect::<String>();
+                if text_trimmed.chars().count() > 200 {
+                    preview.push_str("...");
+                }
+                Some(preview)
+            };
+
+            symbols.push(Symbol {
+                name: format!("Slide {}", slide_num),
+                kind: super::parser::SymbolKind::Module,
+                line: slide_num as u32,
+                column: 1,
+                end_line: slide_num as u32,
+                end_column: 1,
+                signature: sig,
+                is_exported: true,
+                scope: None,
+            });
+        }
+
+        Ok(symbols)
+    }
+
+    /// Parse Excel document (.xlsx) and return sheet-based symbols
+    pub fn parse_xlsx(path: &Path) -> Result<Vec<Symbol>> {
+        let file = File::open(path)?;
+        let mut archive = zip::ZipArchive::new(file)?;
+        let mut symbols = Vec::new();
+
+        if let Ok(mut workbook_file) = archive.by_name("xl/workbook.xml") {
+            let mut xml_content = String::new();
+            workbook_file.read_to_string(&mut xml_content)?;
+
+            let mut reader = Reader::from_str(&xml_content);
+            let mut buf = Vec::new();
+            let mut sheet_num = 1;
+
+            loop {
+                match reader.read_event_into(&mut buf) {
+                    Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) if e.name().as_ref() == b"sheet" => {
+                        let mut name = format!("Sheet{}", sheet_num);
+                        for attr in e.attributes() {
+                            if let Ok(attr) = attr {
+                                if attr.key.as_ref() == b"name" {
+                                    name = attr.unescape_value()?.to_string();
+                                    break;
+                                }
+                            }
+                        }
+
+                        symbols.push(Symbol {
+                            name: format!("Sheet: {}", name),
+                            kind: super::parser::SymbolKind::Module,
+                            line: sheet_num,
+                            column: 1,
+                            end_line: sheet_num,
+                            end_column: 1,
+                            signature: None,
+                            is_exported: true,
+                            scope: None,
+                        });
+                        sheet_num += 1;
+                    }
+                    Ok(Event::Eof) => break,
+                    Err(_) => break,
+                    _ => {}
+                }
+                buf.clear();
+            }
+        }
+
+        Ok(symbols)
+    }
 }
 
 /// BM25 full-text scorer for document files.
@@ -205,7 +485,15 @@ impl Bm25Scorer {
             .iter()
             .filter_map(|path| {
                 let full = Path::new(workspace_root).join(path);
-                let content = std::fs::read_to_string(&full).ok()?;
+                let content = if path.ends_with(".docx") {
+                    DocumentParser::extract_docx_text(&full).ok()?
+                } else if path.ends_with(".pptx") {
+                    DocumentParser::extract_pptx_text(&full).ok()?
+                } else if path.ends_with(".xlsx") {
+                    DocumentParser::extract_xlsx_text(&full).ok()?
+                } else {
+                    std::fs::read_to_string(&full).ok()?
+                };
                 let tokens = Self::tokenize(&content);
                 if tokens.is_empty() { return None; }
                 Some((path.clone(), tokens))
@@ -320,6 +608,61 @@ mod tests {
         assert!(symbols.iter().any(|s| s.name == "element1"));
         assert!(symbols.iter().any(|s| s.name == "element2"));
         
+        Ok(())
+    }
+
+    #[test]
+    fn test_office_document_parsers() -> Result<()> {
+        use tempfile::NamedTempFile;
+        use std::io::Write;
+        use zip::write::FileOptions;
+
+        // 1. Mock DOCX
+        let docx_file = NamedTempFile::new()?;
+        let mut zip = zip::ZipWriter::new(docx_file.as_file());
+        zip.start_file("word/document.xml", FileOptions::default())?;
+        zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hello from Word docx</w:t></w:r></w:p></w:body></w:document>"#)?;
+        zip.finish()?;
+
+        let text = DocumentParser::extract_docx_text(docx_file.path())?;
+        assert!(text.contains("Hello from Word docx"));
+
+        let symbols = DocumentParser::parse_docx(docx_file.path())?;
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "Word Document");
+        assert!(symbols[0].signature.as_ref().unwrap().contains("Hello from Word docx"));
+
+        // 2. Mock PPTX
+        let pptx_file = NamedTempFile::new()?;
+        let mut zip = zip::ZipWriter::new(pptx_file.as_file());
+        zip.start_file("ppt/slides/slide1.xml", FileOptions::default())?;
+        zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>Hello from Slide 1</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#)?;
+        zip.finish()?;
+
+        let text = DocumentParser::extract_pptx_text(pptx_file.path())?;
+        assert!(text.contains("Hello from Slide 1"));
+
+        let symbols = DocumentParser::parse_pptx(pptx_file.path())?;
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "Slide 1");
+        assert!(symbols[0].signature.as_ref().unwrap().contains("Hello from Slide 1"));
+
+        // 3. Mock XLSX
+        let xlsx_file = NamedTempFile::new()?;
+        let mut zip = zip::ZipWriter::new(xlsx_file.as_file());
+        zip.start_file("xl/workbook.xml", FileOptions::default())?;
+        zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheets><sheet name="Sales" sheetId="1" r:id="rId1"/></sheets></workbook>"#)?;
+        zip.start_file("xl/sharedStrings.xml", FileOptions::default())?;
+        zip.write_all(br#"<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="1" uniqueCount="1"><si><t>Hello from Excel cell</t></si></sst>"#)?;
+        zip.finish()?;
+
+        let text = DocumentParser::extract_xlsx_text(xlsx_file.path())?;
+        assert!(text.contains("Hello from Excel cell"));
+
+        let symbols = DocumentParser::parse_xlsx(xlsx_file.path())?;
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name, "Sheet: Sales");
+
         Ok(())
     }
 }

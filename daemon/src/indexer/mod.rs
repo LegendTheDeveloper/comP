@@ -163,10 +163,19 @@ impl Indexer {
         // 1. Read file content based on type
         let full_path = Path::new(&self.workspace_root).join(&file_entry.path);
         
-        let is_binary = file_entry.language.as_str() == "parquet";
+        let is_binary = matches!(
+            file_entry.language.as_str(),
+            "parquet" | "docx" | "pptx" | "xlsx"
+        );
         
         let (symbols, content_str) = if is_binary {
-            let syms = DocumentParser::parse_parquet(&full_path)?;
+            let syms = match file_entry.language.as_str() {
+                "parquet" => DocumentParser::parse_parquet(&full_path)?,
+                "docx" => DocumentParser::parse_docx(&full_path)?,
+                "pptx" => DocumentParser::parse_pptx(&full_path)?,
+                "xlsx" => DocumentParser::parse_xlsx(&full_path)?,
+                _ => Vec::new(),
+            };
             (syms, String::new()) // Binary files don't use string content for extraction later
         } else {
             // WHY: InvalidData usually indicates non-UTF-8 encoding.
@@ -205,6 +214,8 @@ impl Indexer {
                 symbol.line as i32,
                 symbol.column as i32,
                 symbol.scope.as_deref(),
+                symbol.is_exported,
+                symbol.signature.as_deref(),
             )?;
             symbol_map.insert(symbol.name.clone(), node_id);
         }
@@ -297,6 +308,9 @@ impl Indexer {
                 "xml" => "xml",
                 "md" => "markdown",
                 "parquet" => "parquet",
+                "docx" => "docx",
+                "pptx" => "pptx",
+                "xlsx" => "xlsx",
                 _ => "unknown",
             }
         } else {
@@ -325,6 +339,9 @@ mod tests {
         assert_eq!(indexer.walker_detect_language("app.ts"), "typescript");
         assert_eq!(indexer.walker_detect_language("index.json"), "json");
         assert_eq!(indexer.walker_detect_language("README.md"), "markdown");
+        assert_eq!(indexer.walker_detect_language("report.docx"), "docx");
+        assert_eq!(indexer.walker_detect_language("slides.pptx"), "pptx");
+        assert_eq!(indexer.walker_detect_language("data.xlsx"), "xlsx");
     }
 
     #[tokio::test]

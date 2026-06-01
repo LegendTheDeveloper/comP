@@ -36,10 +36,11 @@
   - 変更内容: 指定シンボルのコード・依存関係抽出、ファイル概要、プロジェクト全体の統計およびエクスポートシンボル一覧を Markdown で返却する 4 つ of MCP ツールを追加。テストのアサーションエラー（Total Files / Total Symbols のマークダウン太字フォーマット不整合）を修正し、すべてのユニットテストおよび JSON-RPC 結合動作検証が正常にパスすることを確認。
 - [x] MCP ツール（run_pipeline, get_context）の description 改善（英語翻訳の指示追記）
   - 変更内容: 日本語による質問の際に英語シンボル名にマッチしない問題を防ぐため、外部 AI エージェントが自動でクエリを英語に翻訳した上で呼び出すよう、ツール定義（`run_pipeline` の `task` パラメータ、`get_context` の `query` パラメータ）の description に英語での入力を促す重要指示（`IMPORTANT: The parameter MUST be in English.`）を追記しました。
-- [x] GitHub Copilot 向け MCP 自動設定機能の追加
-  - 変更内容: VS Code の GitHub Copilot 拡張機能で comP MCP サーバーを利用可能にするため、セットアップ用エージェントメニューに `"GitHub Copilot"` を追加。選択時にプロジェクト内の `.vscode/mcp.json` に対し、既存の設定を保持しながら `comp` サーバーの定義を自動でマージ生成して書き込む機能を `AgentSetup.ts` に実装。また、関連するユニットテストおよびコマンドの選択肢を追加しました。
+- [x] ロードマップ 0.2.0 に向けた Word, PowerPoint, Excel の自動インデックスと BM25 検索のサポート
+  - 変更内容: `zip` クレートと `quick-xml` クレートを使用し、`.docx`/`.pptx`/`.xlsx` ファイルからポータブルにテキストを抽出するパーサー（`extract_docx_text`, `extract_pptx_text`, `extract_xlsx_text` など）を実装。スライド番号やシート名などの疑似シンボルを SQLite に登録するようにし、BM25 全文検索の対象に Office ファイルを含めました。また、DB登録メソッド `GraphDB::insert_node` で `signature` および `is_exported` カラムの値が失われていた不具合を修正し、Office ファイルのプレビュー情報が正しく DB に永続化され、ツールから呼び出せるようにしました。
+  - テスト結果: `npm run daemon:test` (66件)、`npm run test` (67件) がすべてパス。JSON-RPC 統合テストを実行し、Office ファイルがインデックスに乗り、その中身のキーワードで `run_pipeline` 検索結果にヒットすることを実証しました。
 
 ## 残タスク
 
 1. **コミットとプッシュ**
-   - 新規追加した GitHub Copilot 向け設定機能および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。
+   - 今回実装したロードマップ 0.2.0 の Office インデックス機能、不具合修正、および管理ドキュメントの更新分をコミットし、リモート（GitHub）へプッシュ。

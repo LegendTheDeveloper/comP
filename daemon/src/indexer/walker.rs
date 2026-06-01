@@ -265,6 +265,9 @@ impl FileWalker {
                 "yaml" | "yml" => "yaml",
                 "xml" => "xml",
                 "md" => "markdown",
+                "docx" => "docx",
+                "pptx" => "pptx",
+                "xlsx" => "xlsx",
                 _ => "unknown",
             }
         } else {
@@ -297,6 +300,9 @@ mod tests {
         assert_eq!(walker.detect_language("script.py"), "python");
         assert_eq!(walker.detect_language("main.go"), "go");
         assert_eq!(walker.detect_language("unknown.xyz"), "unknown");
+        assert_eq!(walker.detect_language("doc.docx"), "docx");
+        assert_eq!(walker.detect_language("slides.pptx"), "pptx");
+        assert_eq!(walker.detect_language("sheet.xlsx"), "xlsx");
     }
 
     #[test]

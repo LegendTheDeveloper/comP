@@ -90,12 +90,15 @@ impl GraphDB {
         line: i32,
         col: i32,
         scope: Option<&str>,
+        is_exported: bool,
+        signature: Option<&str>,
     ) -> Result<i64> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let is_exported_int = if is_exported { 1 } else { 0 };
         conn.execute(
-            "INSERT INTO nodes (file_id, name, kind, line, col, scope)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            rusqlite::params![file_id, name, kind, line, col, scope],
+            "INSERT INTO nodes (file_id, name, kind, line, col, scope, is_exported, signature)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![file_id, name, kind, line, col, scope, is_exported_int, signature],
         )?;
 
         // Get the inserted node ID

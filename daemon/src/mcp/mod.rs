@@ -284,10 +284,15 @@ impl MCPServer {
         let hits = all_hits;
         let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
         let files_list = self.state.graph_db.list_files()?;
-        // WHY: Save language info before consuming. BM25 requires the list of Markdown files.
-        let markdown_paths: Vec<String> = files_list
+        // WHY: Save language info before consuming. BM25 requires the list of Markdown and Office files.
+        let doc_paths: Vec<String> = files_list
             .iter()
-            .filter(|(_, _, lang)| lang == "markdown")
+            .filter(|(_, _, lang)| {
+                matches!(
+                    lang.as_str(),
+                    "markdown" | "docx" | "pptx" | "xlsx"
+                )
+            })
             .map(|(_, path, _)| path.clone())
             .collect();
         let path_to_id: std::collections::HashMap<String, i64> = files_list
@@ -322,15 +327,15 @@ impl MCPServer {
             }
         }
 
-        // BM25 full-text search (complements search for Markdown files)
+        // BM25 full-text search (complements search for Markdown and Office files)
         // WHY: Symbol LIKE queries only match headings, missing body content keywords.
-        //      We read Markdown files and score using BM25, then add to pivot files.
-        if !markdown_paths.is_empty() && !keywords.is_empty() {
+        //      We read Markdown/Office files and score using BM25, then add to pivot files.
+        if !doc_paths.is_empty() && !keywords.is_empty() {
             let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
                 .unwrap_or_else(|_| ".".to_string());
             let bm25_hits = crate::indexer::doc_parser::Bm25Scorer::search_files(
                 &workspace_root,
-                &markdown_paths,
+                &doc_paths,
                 &keywords,
                 20,
             );
@@ -1523,8 +1528,8 @@ mod tests {
 
         // Insert mock data into DB
         let file_id = state.graph_db.upsert_file("src/test_mcp.rs", "hash1", "rust").unwrap();
-        let node_id_1 = state.graph_db.insert_node(file_id, "my_mcp_func", "function", 10, 5, None).unwrap();
-        let node_id_2 = state.graph_db.insert_node(file_id, "caller_func", "function", 20, 5, None).unwrap();
+        let node_id_1 = state.graph_db.insert_node(file_id, "my_mcp_func", "function", 10, 5, None, true, None).unwrap();
+        let node_id_2 = state.graph_db.insert_node(file_id, "caller_func", "function", 20, 5, None, true, None).unwrap();
 
         // Add edge
         state.graph_db.insert_edge(node_id_2, node_id_1, "calls").unwrap();
