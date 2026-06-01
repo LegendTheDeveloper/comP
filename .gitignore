@@ -112,3 +112,8 @@ resources/comp-icon-activitybar.svg
 
 # ===== Daemon Build Artifacts =====
 daemon/build_output.txt
+
+# ===== Private Development Docs (local only, do NOT publish) =====
+# これらはローカル専用の開発メモ。GitHubには上げない。
+docs/conversation_log.md
+docs/work_plan.md
