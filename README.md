@@ -300,7 +300,7 @@ npm run lint:md:fix
 | **v0.1** | Core indexing, basic MCP, 30 languages, JSON/XML/Markdown, background indexing, and token stats. | ✅ **Released** |
 | **v0.2** | Word (.docx), PowerPoint (.pptx), and Excel (.xlsx) automatic indexing, BM25 search. | ✅ **Released** |
 | **v0.3** | PDF (.pdf) support, advanced impact analysis, embedding-based search, cross-repo indexing | ⚪ Planning |
-| **v0.4** | Auto project docs generation, Git diff-aware context for PR review | ⚪ Planning |
+| **v0.4** | Auto project docs generation, AST-based token compression (context optimization), Git diff-aware context for PR review | ⚪ Planning |
 | **v1.0** | Stable API, wider agent support, integrations | ⚪ Planning |
 
 ---
