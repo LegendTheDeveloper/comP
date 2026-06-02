@@ -145,6 +145,6 @@ jobs:
         # VSCE_PAT secret が設定されている場合のみ公開する
         # （forkやPRからの実行で secret が存在しない場合はスキップ）
         if: ${{ secrets.VSCE_PAT != '' }}
-        run: vsce publish --pat ${{ secrets.VSCE_PAT }}
+        run: vsce publish --package comP-${{ github.ref_name }}.vsix --pat ${{ secrets.VSCE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
