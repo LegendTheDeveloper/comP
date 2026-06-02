@@ -5,6 +5,9 @@ on:
     tags:
       - "v*.*.*"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build-daemon:
     name: Build Daemon (${{ matrix.os }})
@@ -144,6 +147,6 @@ jobs:
       - name: Publish to VS Code Marketplace
         # secretsはif条件式で直接参照できないため、本家リポジトリの実行時のみ公開するように制御します
         if: github.repository == 'tsucky230/comP'
-        run: vsce publish --package comP-${{ github.ref_name }}.vsix --pat ${{ secrets.VSCE_PAT }}
+        run: vsce publish -i comP-${{ github.ref_name }}.vsix --pat ${{ secrets.VSCE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
