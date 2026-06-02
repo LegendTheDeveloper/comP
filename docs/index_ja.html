@@ -46,7 +46,7 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.2.0 リリース</div>
+        <div class="badge animate-fade-in">v0.3.0 リリース</div>
         <h1 class="animate-fade-in">あなたのAIエージェントに、<br><span class="gradient-text">完璧なローカルコード文脈</span>を。</h1>
         <p class="hero-desc animate-fade-in">comP（コンプ）は、AIエージェントがコードの構造、依存関係、全文情報を完全に把握できるように支援する、VSCode拡張機能およびRust製バックエンドデーモンです。</p>
         <div class="hero-cta animate-fade-in">
@@ -131,12 +131,12 @@
             <span class="status-tag">✅ リリース済み</span>
           </div>
         </div>
-        <div class="roadmap-item">
+        <div class="roadmap-item completed">
           <div class="roadmap-badge">v0.3</div>
           <div class="roadmap-content">
             <h4>文書サポート拡張 & 依存関係解析の高度化</h4>
-            <p><strong>PDFファイル (.pdf) の自動インデックスサポート</strong>。より高度な影響範囲分析（Advanced Impact Analysis）、セマンティック検索のさらなる向上、マルチリポジトリインデックス。</p>
-            <span class="status-tag">⚪ 計画中</span>
+            <p>PDF (.pdf) 自動インデックス、高度な影響範囲分析（<code>max_depth</code>）、TF-IDF を <code>run_pipeline</code> に接続、マルチパスインデックス、<code>get_symbol</code> AST 圧縮。</p>
+            <span class="status-tag">✅ リリース済み</span>
           </div>
         </div>
         <div class="roadmap-item">
@@ -163,7 +163,7 @@
           <span class="step-num">1</span>
           <h4>拡張機能のインストール</h4>
           <p>リリースされた `.vsix` ファイルをダウンロードし、VSCodeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
-          <pre><code>code --install-extension comP-0.2.0.vsix</code></pre>
+          <pre><code>code --install-extension comP-0.3.0.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>
