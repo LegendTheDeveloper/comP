@@ -15,6 +15,7 @@ use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use std::io::Read;
 use parquet::file::reader::{FileReader, SerializedFileReader};
+use lopdf::content::{Content, Operation};
 
 use super::parser::Symbol;
 
@@ -439,6 +440,104 @@ impl DocumentParser {
 
         Ok(symbols)
     }
+
+    /// Extract plain text from a PDF file.
+    ///
+    /// WHY: PDFs store text in content streams using Tj/TJ operators. We decompress
+    /// all streams first, then scan for string operands to reconstruct readable text.
+    /// Does not handle complex font encodings (ToUnicode maps) — best-effort for
+    /// standard text-encoded PDFs.
+    pub fn extract_pdf_text(path: &Path) -> Result<String> {
+        let mut doc = lopdf::Document::load(path)?;
+        doc.decompress();
+
+        let pages: Vec<_> = doc.get_pages().into_iter().map(|(n, id)| (n, id)).collect();
+        let mut text = String::new();
+
+        for (_page_num, page_id) in pages {
+            if let Ok(content_data) = doc.get_page_content(page_id) {
+                if let Ok(content) = Content::decode(&content_data) {
+                    Self::extract_text_from_operations(&content.operations, &mut text);
+                }
+            }
+        }
+
+        Ok(text)
+    }
+
+    fn extract_text_from_operations(ops: &[Operation], text: &mut String) {
+        for op in ops {
+            match op.operator.as_str() {
+                "Tj" | "'" | "\"" => {
+                    if let Some(lopdf::Object::String(bytes, _)) = op.operands.first() {
+                        let s = String::from_utf8_lossy(bytes);
+                        if !s.trim().is_empty() {
+                            text.push_str(s.trim());
+                            text.push(' ');
+                        }
+                    }
+                }
+                "TJ" => {
+                    if let Some(lopdf::Object::Array(array)) = op.operands.first() {
+                        for item in array {
+                            if let lopdf::Object::String(bytes, _) = item {
+                                let s = String::from_utf8_lossy(bytes);
+                                if !s.trim().is_empty() {
+                                    text.push_str(s.trim());
+                                }
+                            }
+                        }
+                        text.push(' ');
+                    }
+                }
+                "ET" => text.push('\n'),
+                _ => {}
+            }
+        }
+    }
+
+    /// Parse a PDF and return page-based symbols (one symbol per page).
+    pub fn parse_pdf(path: &Path) -> Result<Vec<Symbol>> {
+        let text = Self::extract_pdf_text(path).unwrap_or_default();
+        let page_count = {
+            let mut doc = lopdf::Document::load(path)?;
+            doc.decompress();
+            doc.get_pages().len()
+        };
+
+        let mut symbols = Vec::new();
+        if page_count == 0 {
+            return Ok(symbols);
+        }
+
+        // One symbol per page, with the first 200 chars of full-doc text in page 1
+        let preview = if text.is_empty() {
+            None
+        } else {
+            let t = text.trim();
+            let mut s = t.chars().take(200).collect::<String>();
+            if t.chars().count() > 200 {
+                s.push_str("...");
+            }
+            Some(s)
+        };
+
+        for page in 1..=page_count {
+            symbols.push(Symbol {
+                name: format!("Page {}", page),
+                kind: super::parser::SymbolKind::Module,
+                line: page as u32,
+                column: 1,
+                end_line: page as u32,
+                end_column: 1,
+                signature: if page == 1 { preview.clone() } else { None },
+                is_exported: true,
+                scope: None,
+            });
+        }
+
+        Ok(symbols)
+    }
 }
 
 /// BM25 full-text scorer for document files.
@@ -482,6 +581,8 @@ impl Bm25Scorer {
                     DocumentParser::extract_pptx_text(&full).ok()?
                 } else if path.ends_with(".xlsx") {
                     DocumentParser::extract_xlsx_text(&full).ok()?
+                } else if path.ends_with(".pdf") {
+                    DocumentParser::extract_pdf_text(&full).ok()?
                 } else {
                     std::fs::read_to_string(&full).ok()?
                 };

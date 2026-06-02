@@ -92,12 +92,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let state_for_idx = Arc::clone(&state);
         let root_for_idx = workspace_root.clone();
+        // Read additional paths before spawning (no async needed)
+        let additional_paths = indexer::Indexer::read_additional_paths(&workspace_root);
         tokio::spawn(async move {
             info!("Starting initial workspace indexing...");
             // WHY: Load hashes from previous session database to only re-index modified files.
             let previous_hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
-            let mut indexer = indexer::Indexer::new(&root_for_idx);
-            match indexer.index_workspace(Some(&previous_hashes), &state_for_idx.graph_db).await {
+            let mut main_indexer = indexer::Indexer::new(&root_for_idx);
+            match main_indexer.index_workspace(Some(&previous_hashes), &state_for_idx.graph_db).await {
                 Ok((total, indexed, symbols)) => {
                     info!(
                         "Initial indexing complete: indexed {}/{} files, {} symbols",
@@ -105,6 +107,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 Err(e) => log::error!("Initial indexing failed: {}", e),
+            }
+
+            // Index additional paths (monorepo / multi-root support)
+            for extra_root in &additional_paths {
+                info!("Indexing additional path: {}", extra_root);
+                let extra_hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
+                let mut extra_indexer = indexer::Indexer::new(extra_root);
+                match extra_indexer.index_workspace(Some(&extra_hashes), &state_for_idx.graph_db).await {
+                    Ok((t, i, s)) => info!("Additional path {}: indexed {}/{} files, {} symbols", extra_root, i, t, s),
+                    Err(e) => log::warn!("Failed to index additional path {}: {}", extra_root, e),
+                }
+            }
+
+            // Rebuild TF-IDF index after all indexing (main + additional) is complete
+            if let Ok(all_symbols) = state_for_idx.graph_db.get_all_symbols_for_search() {
+                let mut se = state_for_idx.search_engine.lock().await;
+                match se.build_index(&all_symbols) {
+                    Ok(()) => info!("TF-IDF index built: {} symbols", all_symbols.len()),
+                    Err(e) => log::warn!("TF-IDF index build failed: {}", e),
+                }
             }
         });
     }

@@ -539,6 +539,27 @@ impl GraphDB {
         Ok(path)
     }
 
+    /// Get all symbols for building the TF-IDF search index
+    ///
+    /// WHY: SearchEngine.build_index requires all (file_path, name, kind, line) tuples.
+    /// Called once after indexing completes to populate the in-memory TF-IDF matrix.
+    pub fn get_all_symbols_for_search(&self) -> Result<Vec<(String, String, String, u32)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT files.path, nodes.name, nodes.kind, nodes.line
+             FROM nodes JOIN files ON nodes.file_id = files.id"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i32>(3)? as u32,
+            ))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// Get all exported symbols, ordered by file path
     pub fn get_exported_symbols_grouped(&self) -> Result<Vec<(String, DbNode)>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;

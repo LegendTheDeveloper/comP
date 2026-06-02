@@ -1,6 +1,6 @@
 [package]
 name = "comp-daemon"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 authors = ["comP Contributors"]
 license = "MIT"
@@ -32,6 +32,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-python = "0.23"
 tree-sitter-go = "0.23"
 tree-sitter-html = "0.23"
+lopdf = "0.32"
 
 [dev-dependencies]
 tempfile = "3.8"

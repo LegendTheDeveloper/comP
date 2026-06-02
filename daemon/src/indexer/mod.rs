@@ -56,6 +56,25 @@ impl Indexer {
             .collect()
     }
 
+    /// Read additional workspace paths from `.comp/config.json`.
+    ///
+    /// WHY: Monorepos or multi-root workspaces need all sub-paths indexed into
+    /// a single graph DB so cross-path dependencies can be resolved.
+    pub fn read_additional_paths(workspace_root: &str) -> Vec<String> {
+        let path = std::path::Path::new(workspace_root).join(".comp/config.json");
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+        json["additional_paths"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Load node limit settings from .comp/config.json
     /// Returns (max_nodes, on_limit_exceeded)
     fn load_comp_config(workspace_root: &str) -> (i64, String) {
@@ -165,15 +184,16 @@ impl Indexer {
         
         let is_binary = matches!(
             file_entry.language.as_str(),
-            "parquet" | "docx" | "pptx" | "xlsx"
+            "parquet" | "docx" | "pptx" | "xlsx" | "pdf"
         );
-        
+
         let (symbols, content_str) = if is_binary {
             let syms = match file_entry.language.as_str() {
                 "parquet" => DocumentParser::parse_parquet(&full_path)?,
                 "docx" => DocumentParser::parse_docx(&full_path)?,
                 "pptx" => DocumentParser::parse_pptx(&full_path)?,
                 "xlsx" => DocumentParser::parse_xlsx(&full_path)?,
+                "pdf" => DocumentParser::parse_pdf(&full_path)?,
                 _ => Vec::new(),
             };
             (syms, String::new()) // Binary files don't use string content for extraction later
@@ -311,6 +331,7 @@ impl Indexer {
                 "docx" => "docx",
                 "pptx" => "pptx",
                 "xlsx" => "xlsx",
+                "pdf" => "pdf",
                 _ => "unknown",
             }
         } else {

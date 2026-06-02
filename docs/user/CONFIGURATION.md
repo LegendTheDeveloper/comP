@@ -3,7 +3,7 @@
 All settings are under `comp.*` in VSCode settings (`Ctrl+,`).
 
 | Setting | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `comp.maxTokens` | number | `8000` | Maximum tokens for `run_pipeline` context capsule |
 | `comp.enableCodeLens` | boolean | `true` | Show dependency counts as CodeLens above symbols |
 | `comp.autoIndex` | boolean | `true` | Automatically index files on workspace open |
@@ -12,6 +12,25 @@ All settings are under `comp.*` in VSCode settings (`Ctrl+,`).
 
 Settings can be applied at user level (`~/.config/Code/User/settings.json`) or
 per-workspace (`.vscode/settings.json`). Workspace settings take precedence.
+
+## Multi-path indexing (monorepo / multi-root)
+
+Create `.comp/config.json` in the workspace root to index additional directories
+into the same graph database:
+
+```json
+{
+  "additional_paths": [
+    "../shared-lib",
+    "/absolute/path/to/another-project"
+  ]
+}
+```
+
+All paths are indexed into the primary workspace's `.comp/index.db`.
+Relative paths are resolved from the workspace root.
+
+---
 
 ## Excluding files from indexing
 

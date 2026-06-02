@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.3.0] - 2026-06-02
+
+### Added
+
+- **PDF support**: lopdf-based text extraction; PDFs indexed as page-level symbols with BM25 full-text search
+- **Advanced impact analysis**: `max_depth` parameter for `get_impact_graph` — limits BFS hop count (0 = unlimited)
+- **TF-IDF search wired to `run_pipeline`**: After indexing, `SearchEngine.build_index()` is called; `run_pipeline` now merges LIKE + TF-IDF results for better recall
+- **Multi-path support**: `additional_paths` array in `.comp/config.json` — index monorepo sub-directories or sibling projects into the same graph DB
+- **AST-based compression** (`get_symbol` `compression_level` param):
+  - Level 0: full source (no-op)
+  - Level 1 (compact): comments and blank lines removed via tree-sitter
+  - Level 2 (skeleton): function/class bodies replaced with `{ ... }`
+- **Slim Markdown output for `get_symbol`**: more concise format with one-liner dependency summaries
+
+---
+
+## [0.2.1] - 2026-05-31
+
+### Fixed
+
+- CI release workflow: fixed vsce publish option and suppressed Node 20 deprecation warnings
+- Resolved invalid secrets reference in release.yml
+
+---
+
+## [0.2.0] - 2026-05-28
+
+### Added
+
+- Word (.docx), PowerPoint (.pptx), and Excel (.xlsx) automatic indexing
+- BM25 full-text search for Markdown and Office documents
+- New MCP tools: `get_symbol`, `get_dependencies`, `get_file_summary`, `get_project_overview`, `session_recall`
+- Token compression roadmap preparation
+
+---
+
 ## [0.1.0] - 2026-05-21
 
 ### Added

@@ -317,31 +317,42 @@ impl SearchEngine {
         reverse_deps: &HashMap<i64, Vec<i64>>,
         symbol_map: &HashMap<i64, (String, String)>,
     ) -> Result<Vec<(String, Vec<String>)>> {
-        let mut affected = std::collections::HashSet::new();
-        let mut queue = VecDeque::new();
+        self.get_impact_graph_depth(symbol_id, reverse_deps, symbol_map, 0)
+    }
 
-        // BFS: Find all nodes that depend on symbol_id
-        queue.push_back(symbol_id);
-        affected.insert(symbol_id);
+    /// BFS impact graph with configurable depth limit.
+    /// max_depth=0 means unlimited (traverse all transitive dependents).
+    pub fn get_impact_graph_depth(
+        &self,
+        symbol_id: i64,
+        reverse_deps: &HashMap<i64, Vec<i64>>,
+        symbol_map: &HashMap<i64, (String, String)>,
+        max_depth: usize,
+    ) -> Result<Vec<(String, Vec<String>)>> {
+        let mut affected: HashMap<i64, usize> = HashMap::new(); // id -> depth
+        let mut queue: VecDeque<(i64, usize)> = VecDeque::new();
 
-        while let Some(current_id) = queue.pop_front() {
-            // Find all symbols that depend on current_id
+        queue.push_back((symbol_id, 0));
+        affected.insert(symbol_id, 0);
+
+        while let Some((current_id, depth)) = queue.pop_front() {
+            if max_depth > 0 && depth >= max_depth {
+                continue;
+            }
             if let Some(dependents) = reverse_deps.get(&current_id) {
                 for &dependent_id in dependents {
-                    if !affected.contains(&dependent_id) {
-                        affected.insert(dependent_id);
-                        queue.push_back(dependent_id);
+                    if !affected.contains_key(&dependent_id) {
+                        affected.insert(dependent_id, depth + 1);
+                        queue.push_back((dependent_id, depth + 1));
                     }
                 }
             }
         }
 
-        // Remove the original symbol from affected list
         affected.remove(&symbol_id);
 
-        // Group by file
         let mut result: HashMap<String, Vec<String>> = HashMap::new();
-        for &id in &affected {
+        for (&id, _depth) in &affected {
             if let Some((name, file_path)) = symbol_map.get(&id) {
                 result
                     .entry(file_path.clone())
@@ -350,7 +361,6 @@ impl SearchEngine {
             }
         }
 
-        // Convert to Vec and sort for consistent output
         let mut impact_vec: Vec<_> = result.into_iter().collect();
         impact_vec.sort_by(|a, b| a.0.cmp(&b.0));
 

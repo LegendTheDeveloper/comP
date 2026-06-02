@@ -281,6 +281,14 @@ impl MCPServer {
             }
             merged
         };
+        // Augment LIKE hits with TF-IDF semantic results (may find files not matched by exact LIKE)
+        {
+            let se = self.state.search_engine.lock().await;
+            for hit in se.search(task, 20).unwrap_or_default() {
+                all_hits.push((hit.file_path, hit.symbol_name, hit.kind, hit.line as i32));
+            }
+        }
+
         // Sort files by first occurrence before applying limits
         all_hits.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         let hits = all_hits;
@@ -292,7 +300,7 @@ impl MCPServer {
             .filter(|(_, _, lang)| {
                 matches!(
                     lang.as_str(),
-                    "markdown" | "docx" | "pptx" | "xlsx"
+                    "markdown" | "docx" | "pptx" | "xlsx" | "pdf"
                 )
             })
             .map(|(_, path, _)| path.clone())
@@ -533,13 +541,14 @@ impl MCPServer {
             .as_i64()
             .ok_or_else(|| anyhow!("Missing 'symbol_id' parameter"))?;
         let symbol_name = params["symbol_name"].as_str().unwrap_or("unknown");
+        let max_depth = params["max_depth"].as_u64().unwrap_or(0) as usize;
 
         // Build reverse dependency & symbol maps from GraphDB and invoke SearchEngine BFS
         let reverse_deps = self.state.graph_db.get_reverse_deps()?;
         let symbol_map = self.state.graph_db.get_symbol_map()?;
 
         let search_engine = self.state.search_engine.lock().await;
-        let impact = search_engine.get_impact_graph(symbol_id, &reverse_deps, &symbol_map)?;
+        let impact = search_engine.get_impact_graph_depth(symbol_id, &reverse_deps, &symbol_map, max_depth)?;
         drop(search_engine);
 
         let mut affected_obj = serde_json::Map::new();
@@ -853,6 +862,11 @@ impl MCPServer {
                             "symbol_name": {
                                 "type": "string",
                                 "description": "Human-readable name for display purposes only"
+                            },
+                            "max_depth": {
+                                "type": "integer",
+                                "default": 0,
+                                "description": "Maximum traversal depth for transitive impact (0 = unlimited, 1 = direct dependents only, N = N hops)"
                             }
                         },
                         "required": ["symbol_id"]

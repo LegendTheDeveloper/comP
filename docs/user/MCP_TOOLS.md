@@ -41,8 +41,14 @@ Search symbols by query string. Returns ranked matches with file paths and line 
 Show all files affected by changes to a symbol (blast radius analysis).
 
 ```json
-{ "symbol": "request", "file": "src/daemon/DaemonManager.ts" }
+{ "symbol": "request", "file": "src/daemon/DaemonManager.ts", "max_depth": 3 }
 ```
+
+Parameters:
+
+- `symbol` (string, required) — symbol name to analyze
+- `file` (string, optional) — narrow to a specific file when the symbol appears in multiple files
+- `max_depth` (number, optional, default 0) — BFS hop limit; 0 means unlimited transitive traversal
 
 ---
 
@@ -53,6 +59,25 @@ List all indexed files with symbol counts and detected language.
 ```json
 {}
 ```
+
+---
+
+### `get_symbol`
+
+Return full source of a specific symbol with optional compression.
+
+```json
+{ "symbol": "authenticate", "file": "src/auth.rs", "compression_level": 1 }
+```
+
+Parameters:
+
+- `symbol` (string, required) — exact symbol name
+- `file` (string, optional) — narrow to a specific file
+- `compression_level` (number, optional, default 0):
+  - `0` — full source (no change)
+  - `1` — compact: comments and blank lines removed
+  - `2` — skeleton: function/class bodies replaced with `{ ... }`
 
 ---
 

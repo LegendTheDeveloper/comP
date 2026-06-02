@@ -268,6 +268,7 @@ impl FileWalker {
                 "docx" => "docx",
                 "pptx" => "pptx",
                 "xlsx" => "xlsx",
+                "pdf" => "pdf",
                 _ => "unknown",
             }
         } else {
