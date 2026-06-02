@@ -1,6 +1,6 @@
 # MCP Tools Reference
 
-comP exposes 5 tools via the Model Context Protocol (JSON-RPC 2.0 over stdio).
+comP exposes tools via the Model Context Protocol (JSON-RPC 2.0 over stdio).
 
 ## Setup
 
@@ -23,6 +23,11 @@ Parameters:
 - `task` (string, required) — natural language description of the task
 - `max_tokens` (number, optional, default 8000) — result budget
 - `include_tests` (boolean, optional) — include test files in results
+- `include_content` (boolean, optional) — if true, each pivot_file entry includes a `content` field with the file contents
+- `compression_level` (0/1/2, optional, default 0) — content compression applied when `include_content` is true:
+  - `0` — full source (no change)
+  - `1` — compact: comments and blank lines removed (~20-35% smaller)
+  - `2` — skeleton: function/class bodies replaced with `{ ... }` (~50-70% smaller)
 
 ---
 
@@ -88,3 +93,19 @@ Return total file, node, and edge counts (index health check).
 ```json
 {}
 ```
+
+---
+
+### `get_git_diff_context`
+
+Get context for files changed in a git diff. Runs `git diff --name-only <base_ref>` and maps each changed file to its indexed symbols.
+
+```json
+{ "base_ref": "main" }
+```
+
+Parameters:
+
+- `base_ref` (string, optional, default `HEAD~1`) — git ref to diff against. Use `main` or `master` for branch comparisons.
+
+Returns a Markdown table of changed files with language, symbol count, and whether each file is indexed.

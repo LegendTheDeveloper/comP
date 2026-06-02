@@ -46,7 +46,7 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.3.0 リリース</div>
+        <div class="badge animate-fade-in">v0.4.0 リリース</div>
         <h1 class="animate-fade-in">あなたのAIエージェントに、<br><span class="gradient-text">完璧なローカルコード文脈</span>を。</h1>
         <p class="hero-desc animate-fade-in">comP（コンプ）は、AIエージェントがコードの構造、依存関係、全文情報を完全に把握できるように支援する、VSCode拡張機能およびRust製バックエンドデーモンです。</p>
         <div class="hero-cta animate-fade-in">
@@ -139,12 +139,12 @@
             <span class="status-tag">✅ リリース済み</span>
           </div>
         </div>
-        <div class="roadmap-item">
+        <div class="roadmap-item completed">
           <div class="roadmap-badge">v0.4</div>
           <div class="roadmap-content">
-            <h4>自動ドキュメント生成 & トークン圧縮</h4>
-            <p>プロジェクト解説書の自動作成、ASTベースのトークン圧縮（コンテキスト最適化）、およびGitの差分（Diff）に対応したプルリクエスト用コンテキスト生成。</p>
-            <span class="status-tag">⚪ 計画中</span>
+            <h4>コンテンツモード & Git差分コンテキスト</h4>
+            <p><code>run_pipeline</code> コンテンツモードでファイル内容を圧縮してインラインで返却。PR レビュー用 <code>get_git_diff_context</code> ツール追加。言語分布対応 <code>get_project_overview</code> 拡張。</p>
+            <span class="status-tag">✅ リリース済み</span>
           </div>
         </div>
       </div>
@@ -163,7 +163,7 @@
           <span class="step-num">1</span>
           <h4>拡張機能のインストール</h4>
           <p>リリースされた `.vsix` ファイルをダウンロードし、VSCodeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
-          <pre><code>code --install-extension comP-0.3.0.vsix</code></pre>
+          <pre><code>code --install-extension comP-0.4.0.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>

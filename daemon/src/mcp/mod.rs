@@ -193,6 +193,7 @@ impl MCPServer {
                 "get_dependencies" => self.handle_get_dependencies(params).await,
                 "get_file_summary" => self.handle_get_file_summary(params).await,
                 "get_project_overview" => self.handle_get_project_overview().await,
+                "get_git_diff_context" => self.handle_get_git_diff_context(params).await,
                 _ => Err(anyhow!("Unknown method: {}", method)),
             };
 
@@ -263,6 +264,8 @@ impl MCPServer {
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'task' parameter"))?;
         let max_tokens = params["max_tokens"].as_u64().unwrap_or(8000) as usize;
+        let include_content = params["include_content"].as_bool().unwrap_or(false);
+        let compression_level = params["compression_level"].as_i64().unwrap_or(0);
 
         // 1. Split task into words and query symbol name LIKE for each keyword -> pivot candidates
         // WHY: A LIKE query on the entire task string (e.g. "fix auth bug") would return 0 hits.
@@ -305,9 +308,14 @@ impl MCPServer {
             })
             .map(|(_, path, _)| path.clone())
             .collect();
+        // WHY: Save language per path before consuming files_list — needed for content compression.
+        let mut path_to_lang: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let path_to_id: std::collections::HashMap<String, i64> = files_list
             .into_iter()
-            .map(|(id, path, _)| (path, id))
+            .map(|(id, path, lang)| {
+                path_to_lang.insert(path.clone(), lang);
+                (path, id)
+            })
             .collect();
 
         // 2. Deduplicate matched files to build pivot files list
@@ -328,11 +336,21 @@ impl MCPServer {
                 // WHY: sym*20 is an underestimation. An average function has ~50 lines x ~1 token/line, closer to sym*50.
                 //      We estimate based on line count approximations since file sizes aren't stored in DB.
                 let tokens = (sym as usize).saturating_mul(50);
-                pivot_files.push(json!({
+                let mut entry = json!({
                     "path": file.clone(),
                     "symbols": sym,
                     "tokens": tokens
-                }));
+                });
+                if include_content {
+                    let ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
+                    let full_path = std::path::Path::new(&ws).join(&file);
+                    let lang = path_to_lang.get(&file).map(|s| s.as_str()).unwrap_or("");
+                    let level = compress::CompressionLevel::from_i64(compression_level);
+                    if let Ok(raw) = std::fs::read_to_string(&full_path) {
+                        entry["content"] = Value::String(compress::compress(&raw, lang, level));
+                    }
+                }
+                pivot_files.push(entry);
                 pivot_paths.push(file);
             }
         }
@@ -358,11 +376,21 @@ impl MCPServer {
                         .copied()
                         .unwrap_or(0);
                     let tokens = (sym as usize).saturating_mul(50);
-                    pivot_files.push(json!({
+                    let mut entry = json!({
                         "path": path.clone(),
                         "symbols": sym,
                         "tokens": tokens
-                    }));
+                    });
+                    if include_content {
+                        let ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
+                        let full_path = std::path::Path::new(&ws).join(&path);
+                        let lang = path_to_lang.get(&path).map(|s| s.as_str()).unwrap_or("");
+                        let level = compress::CompressionLevel::from_i64(compression_level);
+                        if let Ok(raw) = std::fs::read_to_string(&full_path) {
+                            entry["content"] = Value::String(compress::compress(&raw, lang, level));
+                        }
+                    }
+                    pivot_files.push(entry);
                     pivot_paths.push(path);
                 }
             }
@@ -822,6 +850,16 @@ impl MCPServer {
                             "include_tests": {
                                 "type": "boolean",
                                 "description": "Include test files in results. Default: false"
+                            },
+                            "include_content": {
+                                "type": "boolean",
+                                "description": "If true, include compressed file content in each pivot_file entry. Default: false"
+                            },
+                            "compression_level": {
+                                "type": "integer",
+                                "enum": [0, 1, 2],
+                                "default": 0,
+                                "description": "0=full source (default), 1=compact (comments removed, 20-35% smaller), 2=skeleton (signatures only, 50-70% smaller)"
                             }
                         },
                         "required": ["task"]
@@ -952,10 +990,23 @@ impl MCPServer {
                 },
                 {
                     "name": "get_project_overview",
-                    "description": "Get a high-level summary of the workspace: total file count, symbol count, and lists of exported symbols grouped by file.",
+                    "description": "Get a high-level summary of the workspace: total file count, symbol count, language distribution, top files by symbol count, and lists of exported symbols.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {}
+                    }
+                },
+                {
+                    "name": "get_git_diff_context",
+                    "description": "Get context for files changed in a git diff. Useful for PR review or understanding recent changes. Returns a table of changed files with symbol counts.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "base_ref": {
+                                "type": "string",
+                                "description": "Git ref to diff against. Default: HEAD~1. Use 'main' or 'master' for branch diffs."
+                            }
+                        }
                     }
                 }
             ]
@@ -983,6 +1034,7 @@ impl MCPServer {
             "get_dependencies" => self.handle_get_dependencies(args).await?,
             "get_file_summary" => self.handle_get_file_summary(args).await?,
             "get_project_overview" => self.handle_get_project_overview().await?,
+            "get_git_diff_context" => self.handle_get_git_diff_context(args).await?,
             _ => return Err(anyhow!("Unknown tool: {}", name)),
         };
 
@@ -1258,6 +1310,36 @@ impl MCPServer {
         markdown.push_str(&format!("- **Total Symbols (Nodes)**: {}\n", node_count));
         markdown.push_str(&format!("- **Total Dependencies (Edges)**: {}\n\n", edge_count));
 
+        // Language distribution
+        let mut lang_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for (_, _, lang) in &files {
+            *lang_counts.entry(lang.clone()).or_insert(0) += 1;
+        }
+        let mut lang_sorted: Vec<(String, usize)> = lang_counts.into_iter().collect();
+        lang_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+
+        markdown.push_str("## Language Distribution\n");
+        for (lang, count) in &lang_sorted {
+            markdown.push_str(&format!("- **{}**: {} files\n", lang, count));
+        }
+        markdown.push('\n');
+
+        // Top 10 files by symbol count
+        let mut top_files: Vec<(String, i64)> = files
+            .iter()
+            .map(|(id, path, _)| (path.clone(), symbol_counts.get(id).copied().unwrap_or(0)))
+            .collect();
+        top_files.sort_by(|a, b| b.1.cmp(&a.1));
+        top_files.truncate(10);
+
+        markdown.push_str("## Top Files by Symbol Count\n");
+        markdown.push_str("| File | Symbols |\n");
+        markdown.push_str("| --- | --- |\n");
+        for (path, count) in &top_files {
+            markdown.push_str(&format!("| `{}` | {} |\n", path, count));
+        }
+        markdown.push('\n');
+
         markdown.push_str("## Files Breakdown\n");
         markdown.push_str("| File Path | Language | Symbols Count |\n");
         markdown.push_str("| --- | --- | --- |\n");
@@ -1285,6 +1367,91 @@ impl MCPServer {
         }
 
         Ok(Value::String(markdown))
+    }
+
+    /// Tool 11: get_git_diff_context
+    ///
+    /// Get context for files changed in a git diff.
+    /// Runs `git diff --name-only <base_ref>` and maps changed files to indexed symbols.
+    pub async fn handle_get_git_diff_context(&self, params: Value) -> Result<Value> {
+        let base_ref = params["base_ref"].as_str().unwrap_or("HEAD~1");
+        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
+
+        let output = std::process::Command::new("git")
+            .args(["diff", "--name-only", base_ref])
+            .current_dir(&workspace_root)
+            .output()
+            .map_err(|e| anyhow!("Failed to run git diff: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("git diff failed: {}", stderr.trim()));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let changed_files: Vec<String> = stdout
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        let files_list = self.state.graph_db.list_files()?;
+        let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
+        let indexed: std::collections::HashMap<String, (i64, String)> = files_list
+            .into_iter()
+            .map(|(id, path, lang)| (path, (id, lang)))
+            .collect();
+
+        let mut diff_files = Vec::new();
+        for rel_path in &changed_files {
+            match indexed.get(rel_path) {
+                Some((id, lang)) => {
+                    let sym_count = symbol_counts.get(id).copied().unwrap_or(0);
+                    diff_files.push(json!({
+                        "path": rel_path,
+                        "language": lang,
+                        "symbols": sym_count,
+                        "indexed": true
+                    }));
+                }
+                None => {
+                    diff_files.push(json!({
+                        "path": rel_path,
+                        "language": "unknown",
+                        "symbols": 0,
+                        "indexed": false
+                    }));
+                }
+            }
+        }
+
+        let mut markdown = String::new();
+        markdown.push_str(&format!("# Git Diff Context (base: `{}`)\n\n", base_ref));
+        markdown.push_str(&format!("**{} files changed**\n\n", changed_files.len()));
+
+        if diff_files.is_empty() {
+            markdown.push_str("No changes detected.\n");
+        } else {
+            markdown.push_str("| File | Language | Symbols | Indexed |\n");
+            markdown.push_str("| --- | --- | --- | --- |\n");
+            for f in &diff_files {
+                let indexed_icon = if f["indexed"].as_bool().unwrap_or(false) { "✅" } else { "⚠️" };
+                markdown.push_str(&format!(
+                    "| `{}` | {} | {} | {} |\n",
+                    f["path"].as_str().unwrap_or(""),
+                    f["language"].as_str().unwrap_or(""),
+                    f["symbols"].as_i64().unwrap_or(0),
+                    indexed_icon
+                ));
+            }
+        }
+
+        Ok(json!({
+            "base_ref": base_ref,
+            "changed_files": diff_files,
+            "total_changed": changed_files.len(),
+            "markdown": markdown
+        }))
     }
 }
 

@@ -2,11 +2,12 @@
 
 ## Supported Versions
 
-| Version | Supported  |
-| ------- | ---------- |
-| 0.3.x   | ✅         |
-| 0.2.x   | ✅         |
-| 0.1.x   | ⚠️ 非推奨  |
+| Version | Supported |
+| ------- | --------- |
+| 0.4.x   | ✅        |
+| 0.3.x   | ✅        |
+| 0.2.x   | ⚠️ 非推奨 |
+| 0.1.x   | ❌        |
 
 ## Reporting a Vulnerability
 
