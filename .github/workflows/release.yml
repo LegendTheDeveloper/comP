@@ -142,9 +142,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish to VS Code Marketplace
-        # VSCE_PAT secret が設定されている場合のみ公開する
-        # （forkやPRからの実行で secret が存在しない場合はスキップ）
-        if: ${{ secrets.VSCE_PAT != '' }}
+        # secretsはif条件式で直接参照できないため、本家リポジトリの実行時のみ公開するように制御します
+        if: github.repository == 'tsucky230/comP'
         run: vsce publish --package comP-${{ github.ref_name }}.vsix --pat ${{ secrets.VSCE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
