@@ -9,6 +9,8 @@
 //
 // Protocol: JSON-RPC 2.0 over stdio
 
+mod compress;
+
 use anyhow::{Result, anyhow};
 use log::info;
 use serde_json::{json, Value};
@@ -890,6 +892,12 @@ impl MCPServer {
                             "file_path": {
                                 "type": "string",
                                 "description": "Optional file path relative to workspace root to narrow search"
+                            },
+                            "compression_level": {
+                                "type": "integer",
+                                "enum": [0, 1, 2],
+                                "default": 0,
+                                "description": "0=full source (default), 1=compact (comments+blank lines removed, 20-35% smaller), 2=skeleton (signatures only, 50-70% smaller)"
                             }
                         },
                         "required": ["name"]
@@ -1050,11 +1058,15 @@ impl MCPServer {
     /// Tool 7: get_symbol
     ///
     /// Get source code, outbound dependencies, and inbound dependents for a specific symbol by name.
+    /// compression_level: 0=full (default), 1=compact (no comments/blanks), 2=skeleton (signatures only)
     pub async fn handle_get_symbol(&self, params: Value) -> Result<Value> {
         let name = params["name"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'name' parameter"))?;
         let file_path = params["file_path"].as_str();
+        let level = compress::CompressionLevel::from_i64(
+            params["compression_level"].as_i64().unwrap_or(0),
+        );
 
         let file_id = if let Some(fp) = file_path {
             self.state.graph_db.get_file_id_by_path(fp)?
@@ -1073,23 +1085,15 @@ impl MCPServer {
             .unwrap_or_else(|_| ".".to_string());
 
         let mut markdown = String::new();
-        markdown.push_str(&format!("# Symbol: {}\n\n", name));
+        markdown.push_str(&format!("## {}\n\n", name));
 
         for sym in symbols {
             let relative_path = self.state.graph_db.get_file_path_by_id(sym.file_id)?;
             let absolute_path = std::path::Path::new(&workspace_root).join(&relative_path);
 
-            markdown.push_str(&format!("## Definition in `{}`\n", relative_path));
-            markdown.push_str(&format!("- **Kind**: {}\n", sym.kind));
-            if let Some(ref scope) = sym.scope {
-                markdown.push_str(&format!("- **Scope**: {}\n", scope));
-            }
-            if let Some(ref sig) = sym.signature {
-                markdown.push_str(&format!("- **Signature**: `{}`\n", sig));
-            }
-            markdown.push_str(&format!("- **Location**: Line {}, Col {}\n\n", sym.line, sym.col));
+            markdown.push_str(&format!("`{}` L{} ({})\n\n", relative_path, sym.line, sym.kind));
 
-            // Extract source code
+            // Extract and compress source code
             if absolute_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&absolute_path) {
                     let file_symbols = self.state.graph_db.get_file_symbols_sorted(sym.file_id)?;
@@ -1099,48 +1103,35 @@ impl MCPServer {
                     let mut end_line = lines.len();
                     if let Some(pos) = file_symbols.iter().position(|x| x.id == sym.id) {
                         if pos + 1 < file_symbols.len() {
-                            let next_sym = &file_symbols[pos + 1];
-                            end_line = (next_sym.line as usize).saturating_sub(1);
+                            end_line = (file_symbols[pos + 1].line as usize).saturating_sub(1);
                         }
                     }
 
                     if start_line < lines.len() {
                         let actual_end = end_line.min(lines.len());
                         let code_slice = lines[start_line..actual_end].join("\n");
-                        let lang = relative_path.split('.').next_back().unwrap_or("");
-                        markdown.push_str("### Source Code\n");
-                        markdown.push_str(&format!("```{}\n{}\n```\n\n", lang, code_slice));
+                        let ext = relative_path.split('.').next_back().unwrap_or("");
+                        let compressed = compress::compress(&code_slice, ext, level);
+                        markdown.push_str(&format!("```{}\n{}\n```\n\n", ext, compressed));
                     }
                 }
             }
 
-            // Dependencies (outbound)
+            // Outbound dependencies — compact one-liner, omit if empty
             let out_deps = self.state.graph_db.get_node_dependencies_out(sym.id)?;
-            markdown.push_str("### Outbound Dependencies (Depends On)\n");
-            if out_deps.is_empty() {
-                markdown.push_str("This symbol does not depend on any other symbols.\n\n");
-            } else {
-                for (dep, edge_kind) in out_deps {
-                    let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
-                    markdown.push_str(&format!("- `{}` ({}): `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
-                }
-                markdown.push('\n');
+            if !out_deps.is_empty() {
+                let names: Vec<String> = out_deps.iter().map(|(d, _)| d.name.clone()).collect();
+                markdown.push_str(&format!("→ {}\n", names.join(", ")));
             }
 
-            // Dependents (inbound)
+            // Inbound dependents — compact one-liner, omit if empty
             let in_deps = self.state.graph_db.get_node_dependencies_in(sym.id)?;
-            markdown.push_str("### Inbound Dependents (Depended On By)\n");
-            if in_deps.is_empty() {
-                markdown.push_str("No other symbols depend on this symbol.\n\n");
-            } else {
-                for (dep, edge_kind) in in_deps {
-                    let dep_file = self.state.graph_db.get_file_path_by_id(dep.file_id)?;
-                    markdown.push_str(&format!("- `{}` ({}): `{}` in `{}`\n", dep.name, dep.kind, edge_kind, dep_file));
-                }
-                markdown.push('\n');
+            if !in_deps.is_empty() {
+                let names: Vec<String> = in_deps.iter().map(|(d, _)| d.name.clone()).collect();
+                markdown.push_str(&format!("← {}\n", names.join(", ")));
             }
-            
-            markdown.push_str("---\n\n");
+
+            markdown.push_str("\n---\n\n");
         }
 
         Ok(Value::String(markdown))
@@ -1534,10 +1525,10 @@ mod tests {
         // Add edge
         state.graph_db.insert_edge(node_id_2, node_id_1, "calls").unwrap();
 
-        // 1. Test get_symbol
+        // 1. Test get_symbol (new slim format: ## name, → deps, ← callers)
         let result = server.handle_get_symbol(json!({ "name": "my_mcp_func" })).await.unwrap();
         let markdown = result.as_str().unwrap();
-        assert!(markdown.contains("# Symbol: my_mcp_func"));
+        assert!(markdown.contains("## my_mcp_func"));
         assert!(markdown.contains("src/test_mcp.rs"));
         assert!(markdown.contains("caller_func"));
 
@@ -1560,6 +1551,34 @@ mod tests {
         let overview_md = result_overview.as_str().unwrap();
         assert!(overview_md.contains("Total Files**: 1"));
         assert!(overview_md.contains("Total Symbols (Nodes)**: 2"));
+
+        std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_symbol_compression_levels() {
+        let temp_dir = std::env::temp_dir().join("comP_test_compression");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        std::env::set_var("COMP_WORKSPACE_ROOT", temp_dir.to_str().unwrap());
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.unwrap());
+        let server = MCPServer::new(state.clone());
+
+        let file_id = state.graph_db.upsert_file("src/test.rs", "hash1", "rust").unwrap();
+        state.graph_db.insert_node(file_id, "compress_test_fn", "function", 1, 1, None, true, None).unwrap();
+
+        // All compression levels should succeed without error
+        for level in [0i64, 1, 2] {
+            let result = server
+                .handle_get_symbol(json!({ "name": "compress_test_fn", "compression_level": level }))
+                .await;
+            assert!(result.is_ok(), "compression_level={} should not error", level);
+            let markdown = result.unwrap();
+            let md = markdown.as_str().unwrap();
+            assert!(md.contains("## compress_test_fn"), "header missing for level {}", level);
+        }
 
         std::env::remove_var("COMP_WORKSPACE_ROOT");
         let _ = std::fs::remove_dir_all(&temp_dir);
