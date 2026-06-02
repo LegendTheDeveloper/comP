@@ -451,7 +451,7 @@ impl DocumentParser {
         let mut doc = lopdf::Document::load(path)?;
         doc.decompress();
 
-        let pages: Vec<_> = doc.get_pages().into_iter().map(|(n, id)| (n, id)).collect();
+        let pages: Vec<_> = doc.get_pages().into_iter().collect();
         let mut text = String::new();
 
         for (_page_num, page_id) in pages {

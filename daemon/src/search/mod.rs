@@ -341,8 +341,8 @@ impl SearchEngine {
             }
             if let Some(dependents) = reverse_deps.get(&current_id) {
                 for &dependent_id in dependents {
-                    if !affected.contains_key(&dependent_id) {
-                        affected.insert(dependent_id, depth + 1);
+                    if let std::collections::hash_map::Entry::Vacant(e) = affected.entry(dependent_id) {
+                        e.insert(depth + 1);
                         queue.push_back((dependent_id, depth + 1));
                     }
                 }
@@ -352,7 +352,7 @@ impl SearchEngine {
         affected.remove(&symbol_id);
 
         let mut result: HashMap<String, Vec<String>> = HashMap::new();
-        for (&id, _depth) in &affected {
+        for &id in affected.keys() {
             if let Some((name, file_path)) = symbol_map.get(&id) {
                 result
                     .entry(file_path.clone())
