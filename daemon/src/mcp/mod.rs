@@ -194,6 +194,7 @@ impl MCPServer {
                 "get_file_summary" => self.handle_get_file_summary(params).await,
                 "get_project_overview" => self.handle_get_project_overview().await,
                 "get_git_diff_context" => self.handle_get_git_diff_context(params).await,
+                "compressFile" => self.handle_compress_file(params).await,
                 _ => Err(anyhow!("Unknown method: {}", method)),
             };
 
@@ -1453,6 +1454,31 @@ impl MCPServer {
             "markdown": markdown
         }))
     }
+
+    /// Compress a single file using AST compression
+    pub async fn handle_compress_file(&self, params: Value) -> Result<Value> {
+        let path_str = params["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
+        let compression_level = params["compression_level"].as_i64().unwrap_or(0);
+
+        let path = std::path::Path::new(path_str);
+        if !path.exists() {
+            return Err(anyhow!("File not found: {}", path_str));
+        }
+
+        let content = std::fs::read_to_string(path)?;
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+
+        let level = compress::CompressionLevel::from_i64(compression_level);
+        let compressed = compress::compress(&content, ext, level);
+
+        Ok(json!({
+            "compressed_text": compressed
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -1762,6 +1788,43 @@ mod tests {
         }
 
         std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_handle_compress_file() {
+        let temp_dir = std::env::temp_dir().join("comP_test_compress_file");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let file_path = temp_dir.join("test_file.rs");
+        let code = "fn my_test_func() {\n    // some comment\n    let x = 42;\n}\n";
+        std::fs::write(&file_path, code).unwrap();
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.unwrap());
+        let server = MCPServer::new(state);
+
+        // Test level 1 (Compact) -> should remove comment
+        let params = json!({
+            "path": file_path.to_str().unwrap(),
+            "compression_level": 1
+        });
+        let result = server.handle_compress_file(params).await.unwrap();
+        let compressed = result["compressed_text"].as_str().unwrap();
+        assert!(compressed.contains("fn my_test_func()"));
+        assert!(compressed.contains("let x = 42;"));
+        assert!(!compressed.contains("some comment"));
+
+        // Test level 2 (Skeleton) -> should replace body
+        let params_sk = json!({
+            "path": file_path.to_str().unwrap(),
+            "compression_level": 2
+        });
+        let result_sk = server.handle_compress_file(params_sk).await.unwrap();
+        let compressed_sk = result_sk["compressed_text"].as_str().unwrap();
+        assert!(compressed_sk.contains("fn my_test_func() { ... }") || compressed_sk.contains("fn my_test_func()  { ... }"));
+        assert!(!compressed_sk.contains("let x = 42;"));
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

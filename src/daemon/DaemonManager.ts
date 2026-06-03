@@ -324,6 +324,24 @@ export class DaemonManager {
   }
 
   /**
+   * Compress a single file using AST compression
+   */
+  async compressFile(filePath: string, compressionLevel: number): Promise<string> {
+    const result = await this.request("compressFile", {
+      path: filePath,
+      compression_level: compressionLevel,
+    });
+    if (!result || typeof result !== "object") {
+      throw new Error("Invalid response from daemon for compressFile");
+    }
+    const res = result as Record<string, unknown>;
+    if (typeof res["compressed_text"] !== "string") {
+      throw new Error("Missing compressed_text in response");
+    }
+    return res["compressed_text"];
+  }
+
+  /**
    * Get path to daemon binary
    *
    * Checks:

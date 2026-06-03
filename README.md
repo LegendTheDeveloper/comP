@@ -199,6 +199,7 @@ Any MCP 2024-11-05 compliant client should work. If your agent needs a specific 
 | **comP: Force Re-index** | Rebuild the entire codebase index |
 | **comP: Generate Context Capsule** | Extract optimized code for your current task |
 | **comP: Show Impact Graph** | See what code depends on the symbol at your cursor |
+| **comP: Copy Active File Compressed** | Copy current active file with AST compression (comments removed or skeletonized) to clipboard |
 
 ### Status Bar
 
@@ -224,6 +225,16 @@ Once configured, AI agents like Claude Code can call comP's tools:
 @comP run_pipeline
 Analyze the impact of changing the `authenticate()` function
 ```
+
+### VSCode Chat Participant (@comp)
+
+You can use the `@comp` assistant directly inside the VSCode Chat panel (e.g. Copilot Chat) to query LLMs while automatically skeletonizing large files:
+
+```markdown
+@comp Explain what this function does using #file:src/main.rs
+```
+
+Attached files are automatically skeletonized (comments removed, function bodies replaced with `{ ... }`) on the fly, allowing you to feed large files (like API specs or type definitions) without blowing up the token count.
 
 ---
 
@@ -384,6 +395,7 @@ npm run lint:md:fix
 | **v0.2** | Word (.docx), PowerPoint (.pptx), and Excel (.xlsx) automatic indexing, BM25 search. | ✅ **Released** |
 | **v0.3** | PDF (.pdf) support, advanced impact analysis (`max_depth`), TF-IDF search wired to `run_pipeline`, multi-path indexing, AST compression for `get_symbol` | ✅ **Released** |
 | **v0.4** | `run_pipeline` content mode (`include_content`/`compression_level`), `get_git_diff_context` tool for PR review, enhanced `get_project_overview` with language distribution | ✅ **Released** |
+| **v0.5** | Clipboard copy of compressed active file (`copyActiveFileCompressed`), `@comp` Chat Participant integration using VSCode Chat Participant API, and automatic indexing & BM25 search support for Parquet (.parquet) files. | ✅ **Released** |
 | **v1.0** | Stable API, wider agent support, integrations | ⚪ Planning |
 
 ---

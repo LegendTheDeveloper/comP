@@ -363,6 +363,7 @@ mod tests {
         assert_eq!(indexer.walker_detect_language("report.docx"), "docx");
         assert_eq!(indexer.walker_detect_language("slides.pptx"), "pptx");
         assert_eq!(indexer.walker_detect_language("data.xlsx"), "xlsx");
+        assert_eq!(indexer.walker_detect_language("data.parquet"), "parquet");
     }
 
     #[tokio::test]

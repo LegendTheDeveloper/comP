@@ -145,4 +145,51 @@ export function registerCommands(
       }
     })
   );
+
+  // Command 6: comp.copyActiveFileCompressed
+  // Copy current active file with AST compression
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comp.copyActiveFileCompressed", async () => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showErrorMessage("No active editor. Open a file first.");
+        return;
+      }
+
+      const dm = getDaemonManager();
+      if (!dm?.isRunning()) {
+        vscode.window.showErrorMessage("comP daemon is not running. Start it from the comP sidebar first.");
+        return;
+      }
+
+      const levels = [
+        { label: "Full Source", description: "No compression, copy full file", value: 0 },
+        { label: "Compact", description: "Remove comments and empty lines", value: 1 },
+        { label: "Skeleton", description: "Extract declarations only (signatures)", value: 2 }
+      ];
+
+      const selected = await vscode.window.showQuickPick(levels, {
+        placeHolder: "Select compression level"
+      });
+
+      if (selected === undefined) return;
+
+      const filePath = editor.document.uri.fsPath;
+      try {
+        await vscode.window.withProgress({
+          location: vscode.ProgressLocation.Notification,
+          title: "comP: Compressing file...",
+          cancellable: false
+        }, async () => {
+          const compressed = await dm.compressFile(filePath, selected.value);
+          await vscode.env.clipboard.writeText(compressed);
+          vscode.window.showInformationMessage(`Copied compressed file content to clipboard (${selected.label} mode).`);
+        });
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Failed to compress file: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    })
+  );
 }

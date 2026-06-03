@@ -46,7 +46,7 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.4.0 リリース</div>
+        <div class="badge animate-fade-in">v0.5.0 リリース</div>
         <h1 class="animate-fade-in">あなたのAIエージェントに、<br><span class="gradient-text">完璧なローカルコード文脈</span>を。</h1>
         <p class="hero-desc animate-fade-in">comP（コンプ）は、AIエージェントがコードの構造、依存関係、全文情報を完全に把握できるように支援する、VSCode拡張機能およびRust製バックエンドデーモンです。</p>
         <div class="hero-cta animate-fade-in">
@@ -147,6 +147,14 @@
             <span class="status-tag">✅ リリース済み</span>
           </div>
         </div>
+        <div class="roadmap-item completed">
+          <div class="roadmap-badge">v0.5</div>
+          <div class="roadmap-content">
+            <h4>コード圧縮コピー & Chat Participant / Parquetサポート</h4>
+            <p>アクティブファイルをAST圧縮（コメント除去/スケルトン化）してコピーするコマンドの実装。VSCode Chat Participant API による <code>@comp</code> 連携で、ファイルを自動圧縮しながらAIチャットに流せる機能を追加。また、Parquet (.parquet) ファイルの自動インデックス化および BM25 全文検索に対応。</p>
+            <span class="status-tag">✅ リリース済み</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -163,7 +171,7 @@
           <span class="step-num">1</span>
           <h4>拡張機能のインストール</h4>
           <p>リリースされた <code>.vsix</code> ファイルをダウンロードし、VSCodeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
-          <pre><code>code --install-extension comP-0.4.0.vsix</code></pre>
+          <pre><code>code --install-extension comP-0.5.0.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>

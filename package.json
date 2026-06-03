@@ -2,12 +2,12 @@
   "name": "comp-vscode",
   "displayName": "comP - Code Context Engine",
   "description": "Local-first code indexing engine for AI agents with MCP support. Open-source alternative to Vexp.",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "publisher": "tsucky230",
   "license": "MIT",
   "icon": "resources/comp-icon.png",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "AI",
@@ -33,6 +33,15 @@
   ],
   "main": "./dist/extension.js",
   "contributes": {
+    "chatParticipants": [
+      {
+        "id": "comp.chat",
+        "name": "comp",
+        "fullName": "comP Context Helper",
+        "description": "API仕様や長大なコードを賢く圧縮してLLMに質問を投げます。",
+        "icon": "resources/comp-icon.png"
+      }
+    ],
     "commands": [
       {
         "command": "comp.setupAgents",
@@ -53,6 +62,11 @@
         "command": "comp.showImpactGraph",
         "title": "comP: Show Impact Graph",
         "description": "Show impact analysis for symbol at cursor"
+      },
+      {
+        "command": "comp.copyActiveFileCompressed",
+        "title": "comP: Copy Active File Compressed",
+        "description": "Copy current active file with AST compression (comments removed or skeletonized)"
       }
     ],
     "viewsContainers": {

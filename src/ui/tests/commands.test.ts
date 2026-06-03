@@ -34,6 +34,7 @@ describe("registerCommands", () => {
       request: sinon.stub().resolves({}),
       getStats: sinon.stub().resolves({ total_nodes: 10, total_files: 5, total_edges: 20 }),
       isRunning: sinon.stub().returns(true),
+      compressFile: sinon.stub().resolves("compressed_output"),
     };
 
     mockStatusBar = {
@@ -47,17 +48,22 @@ describe("registerCommands", () => {
     (vscode.window as any).showErrorMessage = sinon.stub().resolves(undefined);
     (vscode.window as any).showWarningMessage = sinon.stub().resolves("Cancel");
     (vscode.window as any).activeTextEditor = undefined;
+    (vscode.window as any).withProgress = async (_options: any, task: () => Promise<any>) => {
+      return await task();
+    };
     (vscode.workspace as any).workspaceFolders = undefined;
+    (vscode.env.clipboard as any).writeText = sinon.stub().resolves();
   });
 
-  it("registers all 5 commands", () => {
+  it("registers all 6 commands", () => {
     registerCommands(mockContext, () => mockDaemon, mockStatusBar);
-    expect(handlers.size).to.equal(5);
+    expect(handlers.size).to.equal(6);
     expect(handlers.has("comp.setupAgents")).to.be.true;
     expect(handlers.has("comp.forceReindex")).to.be.true;
     expect(handlers.has("comp.generateContext")).to.be.true;
     expect(handlers.has("comp.showImpactGraph")).to.be.true;
     expect(handlers.has("comp.showStats")).to.be.true;
+    expect(handlers.has("comp.copyActiveFileCompressed")).to.be.true;
   });
 
   it("comp.showStats calls getStats and shows information message", async () => {
@@ -115,5 +121,31 @@ describe("registerCommands", () => {
     registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.showImpactGraph")!();
     expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
+  });
+
+  it("comp.copyActiveFileCompressed with no active editor shows error", async () => {
+    (vscode.window as any).activeTextEditor = undefined;
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
+    await handlers.get("comp.copyActiveFileCompressed")!();
+    expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
+  });
+
+  it("comp.copyActiveFileCompressed with active editor and selection calls compressFile and writes clipboard", async () => {
+    // Setup active editor
+    (vscode.window as any).activeTextEditor = {
+      document: {
+        uri: vscode.Uri.file("/workspace/test_file.rs"),
+        languageId: "rust"
+      }
+    };
+    // Mock QuickPick selection: Compact level
+    const selection = { label: "Compact", value: 1 };
+    (vscode.window as any).showQuickPick = sinon.stub().resolves(selection);
+
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
+    await handlers.get("comp.copyActiveFileCompressed")!();
+
+    expect(mockDaemon.compressFile.calledWith("/workspace/test_file.rs", 1)).to.be.true;
+    expect((vscode.env as any).clipboard.writeText.calledWith("compressed_output")).to.be.true;
   });
 });

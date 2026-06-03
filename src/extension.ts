@@ -16,6 +16,7 @@ import { SidebarPanel } from "./ui/SidebarPanel";
 import { DependencyCodeLensProvider } from "./ui/CodeLens";
 import { registerCommands } from "./ui/commands";
 import { SessionMemoryManager } from "./mcp/sessionMemory";
+import { registerChatParticipant } from "./mcp/chatParticipant";
 
 /** Global context */
 let daemonManager: DaemonManager | null = null;
@@ -59,6 +60,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     statusBar.show("Stopped");
     context.subscriptions.push({ dispose: () => statusBar?.dispose() });
     registerCommands(context, () => daemonManager, statusBar);
+    registerChatParticipant(context, () => daemonManager);
 
     // 3. Inject lifecycle callbacks into SidebarPanel.
     // WHY: Prevent duplicate DaemonManager creation within SidebarPanel.

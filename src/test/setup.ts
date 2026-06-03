@@ -72,9 +72,14 @@ Module.prototype.require = function (id: string) {
       Position: MockPosition,
       Range: MockRange,
       CodeLens: MockCodeLens,
+      Uri: {
+        file: (p: string) => ({ fsPath: p, path: p }),
+        parse: (val: string) => ({ fsPath: val, path: val }),
+      },
       workspace: {
         workspaceFolders: undefined,
       },
+      ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
       StatusBarAlignment: { Left: 1, Right: 2 },
       ThemeColor: class {
         id: string;
@@ -99,6 +104,11 @@ Module.prototype.require = function (id: string) {
         showQuickPick: () => Promise.resolve(undefined),
         showInputBox: () => Promise.resolve(undefined),
         activeTextEditor: undefined,
+      },
+      env: {
+        clipboard: {
+          writeText: () => Promise.resolve(),
+        },
       },
     };
     return vscodeMock;

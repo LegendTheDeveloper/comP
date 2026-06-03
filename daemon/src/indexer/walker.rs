@@ -269,6 +269,7 @@ impl FileWalker {
                 "pptx" => "pptx",
                 "xlsx" => "xlsx",
                 "pdf" => "pdf",
+                "parquet" => "parquet",
                 _ => "unknown",
             }
         } else {
@@ -302,6 +303,7 @@ mod tests {
         assert_eq!(walker.detect_language("main.go"), "go");
         assert_eq!(walker.detect_language("unknown.xyz"), "unknown");
         assert_eq!(walker.detect_language("doc.docx"), "docx");
+        assert_eq!(walker.detect_language("data.parquet"), "parquet");
         assert_eq!(walker.detect_language("slides.pptx"), "pptx");
         assert_eq!(walker.detect_language("sheet.xlsx"), "xlsx");
     }

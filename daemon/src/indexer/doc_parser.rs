@@ -14,7 +14,7 @@ use std::fs::File;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use std::io::Read;
-use parquet::file::reader::{FileReader, SerializedFileReader};
+// use parquet::file::reader::{FileReader, SerializedFileReader};
 use lopdf::content::{Content, Operation};
 
 use super::parser::Symbol;
@@ -145,29 +145,49 @@ impl DocumentParser {
         Ok(symbols)
     }
 
-    /// Parse Parquet and extract schema fields
+    /// Parse Parquet and extract schema fields as symbols
     pub fn parse_parquet(path: &Path) -> Result<Vec<Symbol>> {
-        let file = File::open(path)?;
-        let reader = SerializedFileReader::new(file)?;
-        let metadata = reader.metadata();
-        let file_metadata = metadata.file_metadata();
-        let schema = file_metadata.schema();
+        let text = Self::extract_parquet_text(path)?;
+        let sig = if text.is_empty() {
+            None
+        } else {
+            let text_trimmed = text.trim();
+            let mut preview = text_trimmed.chars().take(200).collect::<String>();
+            if text_trimmed.chars().count() > 200 {
+                preview.push_str("...");
+            }
+            Some(preview)
+        };
 
-        let mut symbols = Vec::new();
-        for field in schema.get_fields() {
-            let name = field.name().to_string();
+        let mut symbols = vec![Symbol {
+            name: "Parquet Schema".to_string(),
+            kind: super::parser::SymbolKind::Module,
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 1,
+            signature: sig,
+            is_exported: true,
+            scope: None,
+        }];
+
+        let mut file = File::open(path)?;
+        let metadata = parquet2::read::read_metadata(&mut file).map_err(|e| anyhow::anyhow!("{:?}", e))?;
+
+        for field in metadata.schema().fields() {
             symbols.push(Symbol {
-                name,
+                name: field.name().to_string(),
                 kind: super::parser::SymbolKind::Property,
                 line: 1,
                 column: 1,
                 end_line: 1,
                 end_column: 1,
-                signature: Some(format!("{:?}", field.get_physical_type())),
+                signature: Some(format!("{:?}", field)),
                 is_exported: true,
                 scope: None,
             });
         }
+
         Ok(symbols)
     }
 
@@ -287,6 +307,25 @@ impl DocumentParser {
                 buf.clear();
             }
         }
+
+        Ok(text)
+    }
+
+    /// Extract schema summary text from a Parquet file for BM25 indexing
+    pub fn extract_parquet_text(path: &Path) -> Result<String> {
+        let mut file = File::open(path)?;
+        let metadata = parquet2::read::read_metadata(&mut file).map_err(|e| anyhow::anyhow!("{:?}", e))?;
+
+        let mut text = format!(
+            "Parquet File. Rows: {}, Columns: {}. Schema: ",
+            metadata.num_rows,
+            metadata.schema().fields().len()
+        );
+
+        let fields: Vec<String> = metadata.schema().fields().iter()
+            .map(|field| format!("{}: {:?}", field.name(), field))
+            .collect();
+        text.push_str(&fields.join(", "));
 
         Ok(text)
     }
@@ -583,6 +622,8 @@ impl Bm25Scorer {
                     DocumentParser::extract_xlsx_text(&full).ok()?
                 } else if path.ends_with(".pdf") {
                     DocumentParser::extract_pdf_text(&full).ok()?
+                } else if path.ends_with(".parquet") {
+                    DocumentParser::extract_parquet_text(&full).ok()?
                 } else {
                     std::fs::read_to_string(&full).ok()?
                 };
@@ -754,6 +795,32 @@ mod tests {
         let symbols = DocumentParser::parse_xlsx(xlsx_file.path())?;
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "Sheet: Sales");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_parquet_metadata() -> Result<()> {
+        let path = Path::new("tests/data/test.parquet");
+        let symbols = DocumentParser::parse_parquet(path)?;
+
+        assert!(!symbols.is_empty(), "Symbols list should not be empty");
+        assert_eq!(symbols[0].name, "Parquet Schema");
+        assert_eq!(symbols[0].kind.as_str(), "module");
+        
+        let sig = symbols[0].signature.as_ref().unwrap();
+        println!("DEBUG PARQUET SIG: {}", sig);
+        assert!(sig.contains("Parquet File. Rows: 3, Columns: 3"));
+        assert!(sig.contains("id:"));
+
+        let names: Vec<String> = symbols.iter().map(|s| s.name.clone()).collect();
+        assert!(names.contains(&"id".to_string()));
+        assert!(names.contains(&"name".to_string()));
+        assert!(names.contains(&"score".to_string()));
+
+        let text = DocumentParser::extract_parquet_text(path)?;
+        assert!(text.contains("Parquet File. Rows: 3, Columns: 3"));
+        assert!(text.contains("score:"));
 
         Ok(())
     }
