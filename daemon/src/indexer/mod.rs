@@ -221,8 +221,9 @@ impl Indexer {
             (syms, content)
         };
 
-        // 3. Store file in DB
-        let file_id = db.upsert_file(&file_entry.path, &file_entry.hash, &file_entry.language)?;
+        // 3. Store file in DB (char_count drives the real-token baseline in run_pipeline)
+        let char_count = content_str.len();
+        let file_id = db.upsert_file(&file_entry.path, &file_entry.hash, &file_entry.language, char_count)?;
 
         // 4. Store each symbol as a node in DB
         let mut symbol_map: HashMap<String, i64> = HashMap::new();

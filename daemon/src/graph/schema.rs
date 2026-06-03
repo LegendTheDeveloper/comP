@@ -3,8 +3,17 @@
 pub struct Schema;
 
 impl Schema {
+    /// Pragmas applied on every connection open, before any DDL.
+    /// WAL mode allows concurrent reads from the VSCode daemon while the MCP
+    /// daemon is writing, without blocking. busy_timeout prevents immediate
+    /// SQLITE_BUSY errors under cross-process write contention.
+    pub const PRAGMA_INIT: &str = "
+        PRAGMA journal_mode=WAL;
+        PRAGMA busy_timeout=5000;
+    ";
+
     /// SQL to create all required tables
-    /// 
+    ///
     /// Tables:
     /// - files: Indexed source files with hashes
     /// - nodes: Symbols extracted from code (functions, classes, types, etc.)
@@ -59,13 +68,32 @@ impl Schema {
 
     /// Apply all migrations to the database
     pub fn apply_all(conn: &rusqlite::Connection) -> anyhow::Result<()> {
+        // Pragmas first — WAL mode and busy_timeout
+        conn.execute_batch(Self::PRAGMA_INIT)?;
+
         conn.execute_batch(Self::MIGRATION_001_INIT)?;
-        
-        // Initialize metadata
-        conn.execute(
-            "INSERT OR IGNORE INTO metadata (key, value) VALUES (?, ?)",
-            ["version", "1"],
-        )?;
+
+        // Migration 002: add char_count column to files for real token baseline
+        // Guard: SQLite <3.37 has no ADD COLUMN IF NOT EXISTS, so check manually.
+        let has_char_count: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name='char_count'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).map_err(|e| anyhow::anyhow!("Migration guard query failed: {}", e))? > 0;
+        if !has_char_count {
+            conn.execute_batch(
+                "ALTER TABLE files ADD COLUMN char_count INTEGER NOT NULL DEFAULT 0;"
+            )?;
+        }
+
+        // Initialize metadata keys used by token tracking
+        for key in &["tokens_sent", "tokens_saved", "queries_count", "version"] {
+            let value = if *key == "version" { "2" } else { "0" };
+            conn.execute(
+                "INSERT OR IGNORE INTO metadata (key, value) VALUES (?, ?)",
+                [key, value],
+            )?;
+        }
 
         Ok(())
     }
@@ -78,5 +106,6 @@ mod tests {
     #[test]
     fn test_schema_constants_exist() {
         assert!(!Schema::MIGRATION_001_INIT.is_empty());
+        assert!(!Schema::PRAGMA_INIT.is_empty());
     }
 }

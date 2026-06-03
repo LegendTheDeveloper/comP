@@ -429,7 +429,8 @@ impl TokenCounter {
         if full_tokens == 0 {
             return "0%".to_string();
         }
-        let percentage = ((full_tokens - optimized_tokens) as f32 / full_tokens as f32) * 100.0;
+        let saved = full_tokens.saturating_sub(optimized_tokens);
+        let percentage = (saved as f32 / full_tokens as f32) * 100.0;
         format!("{:.0}%", percentage)
     }
 

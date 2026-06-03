@@ -239,9 +239,11 @@ export class DaemonManager {
     console.log(`[comP] Sending request: ${method} (id: ${id})`);
 
     return new Promise((resolve, reject) => {
-      // Set timeout based on method
-      // With proper response handling, these should complete quickly
-      const timeoutMs = method === "getStats" ? 5000 : 3000;
+      const METHOD_TIMEOUTS: Record<string, number> = {
+        getStats: 5000,
+        forceReindex: 120_000,
+      };
+      const timeoutMs = METHOD_TIMEOUTS[method] ?? 3000;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
         console.error(`[comP] Request timeout: ${method} (id: ${id}) after ${timeoutMs}ms`);
@@ -296,8 +298,10 @@ export class DaemonManager {
     total_nodes: number;
     total_edges: number;
     efficiency?: string;
+    tokens_sent?: number;
     tokens_saved?: number;
     queries_count?: number;
+    avg_tokens_per_query?: number;
   }> {
     const result = await this.request("getStats", {});
     if (!result || typeof result !== "object") {
@@ -309,8 +313,10 @@ export class DaemonManager {
       total_nodes: Number(stats["total_nodes"]) || 0,
       total_edges: Number(stats["total_edges"]) || 0,
       efficiency: typeof stats["efficiency"] === "string" ? stats["efficiency"] : undefined,
+      tokens_sent: stats["tokens_sent"] !== undefined ? Number(stats["tokens_sent"]) : undefined,
       tokens_saved: stats["tokens_saved"] !== undefined ? Number(stats["tokens_saved"]) : undefined,
       queries_count: stats["queries_count"] !== undefined ? Number(stats["queries_count"]) : undefined,
+      avg_tokens_per_query: stats["avg_tokens_per_query"] !== undefined ? Number(stats["avg_tokens_per_query"]) : undefined,
     };
   }
 

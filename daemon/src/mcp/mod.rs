@@ -15,7 +15,6 @@ use anyhow::{Result, anyhow};
 use log::info;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SessionCall {
@@ -434,33 +433,37 @@ impl MCPServer {
             .map(|t| t as usize)
             .sum();
 
-        // 3. Estimate total workspace tokens (for calculating savings ratio)
-        let total_symbols: i64 = symbol_counts.values().sum();
-        let full_workspace_tokens = (total_symbols as usize).saturating_mul(50).max(total_tokens + 1);
+        // 3. Real workspace token baseline from stored file char counts
+        let full_workspace_tokens = self.state.graph_db
+            .get_full_workspace_tokens()
+            .unwrap_or(total_tokens as u64 + 1);
 
-        let savings = crate::search::TokenCounter::calculate_savings(full_workspace_tokens, total_tokens);
+        let saved_this_call = full_workspace_tokens.saturating_sub(total_tokens as u64);
+        let savings = crate::search::TokenCounter::calculate_savings(
+            full_workspace_tokens as usize,
+            total_tokens,
+        );
         let cost = crate::search::TokenCounter::estimate_cost(total_tokens, "sonnet");
 
-        // Update accumulated token statistics for the session
-        let saved_this_call = full_workspace_tokens.saturating_sub(total_tokens) as u64;
-        self.state.tokens_sent.fetch_add(total_tokens as u64, Ordering::Relaxed);
-        self.state.tokens_saved.fetch_add(saved_this_call, Ordering::Relaxed);
-        self.state.queries_count.fetch_add(1, Ordering::Relaxed);
-        // Persist to shared DB so the VSCode extension's daemon (separate process) can read these stats
-        let _ = self.state.graph_db.increment_token_stats(total_tokens as u64, saved_this_call);
+        // Persist to shared DB (single source of truth for both daemon processes)
+        if let Err(e) = self.state.graph_db.record_tool_call(total_tokens as u64, saved_this_call) {
+            log::warn!("record_tool_call failed in run_pipeline: {}", e);
+        }
 
         // Record this call to session memory
         recorded_symbols.sort();
         recorded_symbols.dedup();
         recorded_files.sort();
         recorded_files.dedup();
-        let _ = record_mcp_call(
+        if let Err(e) = record_mcp_call(
             &self.state.session_id,
             task.to_string(),
             recorded_symbols,
             recorded_files,
             total_tokens as u64,
-        );
+        ) {
+            log::warn!("record_mcp_call failed in run_pipeline: {}", e);
+        }
 
         Ok(json!({
             "task": task,
@@ -469,7 +472,6 @@ impl MCPServer {
             "total_tokens": total_tokens,
             "max_tokens": max_tokens,
             "savings": savings,
-            "compression_ratio": savings,
             "full_workspace_tokens": full_workspace_tokens,
             "estimated_cost": cost
         }))
@@ -549,13 +551,18 @@ impl MCPServer {
         recorded_files.sort();
         recorded_files.dedup();
         let estimated_tokens = (count as u64) * 50;
-        let _ = record_mcp_call(
+        if let Err(e) = record_mcp_call(
             &self.state.session_id,
             query.to_string(),
             recorded_symbols,
             recorded_files,
             estimated_tokens,
-        );
+        ) {
+            log::warn!("record_mcp_call failed in get_context: {}", e);
+        }
+        if let Err(e) = self.state.graph_db.record_tool_call(estimated_tokens, 0) {
+            log::warn!("record_tool_call failed in get_context: {}", e);
+        }
 
         Ok(json!({
             "query": query,
@@ -625,13 +632,18 @@ impl MCPServer {
             _ => "high",
         };
 
-        Ok(json!({
+        let result = json!({
             "symbol_id": symbol_id,
             "symbol": symbol_name,
             "affected_files": Value::Object(affected_obj),
             "impact_count": impact_count,
             "severity": severity
-        }))
+        });
+        let tokens = (result.to_string().len() / 4) as u64;
+        if let Err(e) = self.state.graph_db.record_tool_call(tokens, 0) {
+            log::warn!("record_tool_call failed in get_impact_graph: {}", e);
+        }
+        Ok(result)
     }
 
     /// Tool 4: list_indexed_files
@@ -705,9 +717,8 @@ impl MCPServer {
     /// 3. Calculate efficiency (context optimization benefit)
     /// 4. Add current timestamp
     pub async fn handle_get_token_usage(&self) -> Result<Value> {
-        let sent = self.state.tokens_sent.load(Ordering::Relaxed);
-        let saved = self.state.tokens_saved.load(Ordering::Relaxed);
-        let queries = self.state.queries_count.load(Ordering::Relaxed);
+        let (sent, saved, queries) = self.state.graph_db.get_token_stats()
+            .unwrap_or_else(|e| { log::warn!("get_token_stats failed in get_token_usage: {}", e); (0, 0, 0) });
         let avg = sent.checked_div(queries).unwrap_or(0);
         let efficiency = (saved * 100).checked_div(sent + saved)
             .map(|e| format!("{}%", e))
@@ -720,7 +731,7 @@ impl MCPServer {
         Ok(json!({
             "total_tokens_consumed": sent,
             "total_tokens_saved": saved,
-            "queries_executed": queries,
+            "queries_count": queries,
             "average_tokens_per_query": avg,
             "timestamp": timestamp,
             "efficiency": efficiency
@@ -828,7 +839,8 @@ impl MCPServer {
         let (file_count, node_count, edge_count) = self.state.graph_db.get_stats()?;
         // Read from shared DB (not in-memory) so VSCode extension's daemon sees stats
         // accumulated by the Claude Code MCP daemon in the same workspace
-        let (sent, saved, queries) = self.state.graph_db.get_token_stats().unwrap_or((0, 0, 0));
+        let (sent, saved, queries) = self.state.graph_db.get_token_stats()
+            .unwrap_or_else(|e| { log::warn!("get_token_stats failed in get_stats: {}", e); (0, 0, 0) });
         let efficiency = (saved * 100).checked_div(sent + saved)
             .map(|e| format!("{}%", e))
             .unwrap_or_else(|| "0%".to_string());
@@ -845,7 +857,6 @@ impl MCPServer {
             "tokens_saved": saved,
             "queries_count": queries,
             "efficiency": efficiency,
-            "compression_ratio": efficiency,
             "avg_tokens_per_query": avg_tokens_per_query
         }))
     }
@@ -1042,6 +1053,24 @@ impl MCPServer {
                             }
                         }
                     }
+                },
+                {
+                    "name": "compress_file",
+                    "description": "Compress a file using AST-based compression. Removes comments (level 1) or extracts signatures only (level 2). Useful for reading large files with fewer tokens. Requires an absolute path within the workspace.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "Absolute path to the file within the workspace"
+                            },
+                            "compression_level": {
+                                "type": "integer",
+                                "description": "0=full (no-op), 1=compact (comments removed), 2=skeleton (signatures only). Default: 1"
+                            }
+                        },
+                        "required": ["path"]
+                    }
                 }
             ]
         }))
@@ -1069,6 +1098,7 @@ impl MCPServer {
             "get_file_summary" => self.handle_get_file_summary(args).await?,
             "get_project_overview" => self.handle_get_project_overview().await?,
             "get_git_diff_context" => self.handle_get_git_diff_context(args).await?,
+            "compress_file" => self.handle_compress_file(args).await?,
             _ => return Err(anyhow!("Unknown tool: {}", name)),
         };
 
@@ -1234,6 +1264,9 @@ impl MCPServer {
             markdown.push_str("\n---\n\n");
         }
 
+        if let Err(e) = self.state.graph_db.record_tool_call((markdown.len() / 4) as u64, 0) {
+            log::warn!("record_tool_call failed in get_symbol: {}", e);
+        }
         Ok(Value::String(markdown))
     }
 
@@ -1289,6 +1322,9 @@ impl MCPServer {
             }
         }
 
+        if let Err(e) = self.state.graph_db.record_tool_call((markdown.len() / 4) as u64, 0) {
+            log::warn!("record_tool_call failed in get_dependencies: {}", e);
+        }
         Ok(Value::String(markdown))
     }
 
@@ -1325,6 +1361,9 @@ impl MCPServer {
             ));
         }
 
+        if let Err(e) = self.state.graph_db.record_tool_call((markdown.len() / 4) as u64, 0) {
+            log::warn!("record_tool_call failed in get_file_summary: {}", e);
+        }
         Ok(Value::String(markdown))
     }
 
@@ -1400,6 +1439,9 @@ impl MCPServer {
             }
         }
 
+        if let Err(e) = self.state.graph_db.record_tool_call((markdown.len() / 4) as u64, 0) {
+            log::warn!("record_tool_call failed in get_project_overview: {}", e);
+        }
         Ok(Value::String(markdown))
     }
 
@@ -1481,12 +1523,17 @@ impl MCPServer {
             }
         }
 
-        Ok(json!({
+        let result = json!({
             "base_ref": base_ref,
             "changed_files": diff_files,
             "total_changed": changed_files.len(),
             "markdown": markdown
-        }))
+        });
+        let tokens = (markdown.len() / 4) as u64;
+        if let Err(e) = self.state.graph_db.record_tool_call(tokens, 0) {
+            log::warn!("record_tool_call failed in get_git_diff_context: {}", e);
+        }
+        Ok(result)
     }
 
     /// Compress a single file using AST compression
@@ -1494,7 +1541,7 @@ impl MCPServer {
         let path_str = params["path"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
-        let compression_level = params["compression_level"].as_i64().unwrap_or(0);
+        let compression_level = params["compression_level"].as_i64().unwrap_or(1);
 
         let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
             .or_else(|_| std::env::var("WORKSPACE_ROOT"))
@@ -1513,11 +1560,21 @@ impl MCPServer {
 
         let original_chars = content.len();
         let compressed_chars = compressed.len();
-        let compression_rate = if original_chars > 0 {
-            format!("{:.0}%", (1.0 - compressed_chars as f64 / original_chars as f64) * 100.0)
-        } else {
-            "0%".to_string()
+        let compression_rate = match level {
+            compress::CompressionLevel::Full => "0%".to_string(),
+            _ => {
+                if original_chars > 0 {
+                    let rate = ((1.0 - compressed_chars as f64 / original_chars as f64) * 100.0)
+                        .max(0.0);
+                    format!("{:.0}%", rate)
+                } else {
+                    "0%".to_string()
+                }
+            }
         };
+        if let Err(e) = self.state.graph_db.record_tool_call((compressed_chars / 4) as u64, 0) {
+            log::warn!("record_tool_call failed in compress_file: {}", e);
+        }
 
         Ok(json!({
             "compressed_text": compressed,
@@ -1682,7 +1739,7 @@ mod tests {
         let response = server.handle_get_token_usage().await.unwrap();
         assert!(response["timestamp"].is_number());
         assert_eq!(response["total_tokens_consumed"].as_u64().unwrap(), 0);
-        assert_eq!(response["queries_executed"].as_u64().unwrap(), 0);
+        assert_eq!(response["queries_count"].as_u64().unwrap(), 0);
         assert!(response["efficiency"].is_string());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -1772,7 +1829,7 @@ mod tests {
         let server = MCPServer::new(state.clone());
 
         // Insert mock data into DB
-        let file_id = state.graph_db.upsert_file("src/test_mcp.rs", "hash1", "rust").unwrap();
+        let file_id = state.graph_db.upsert_file("src/test_mcp.rs", "hash1", "rust", 0).unwrap();
         let node_id_1 = state.graph_db.insert_node(file_id, "my_mcp_func", "function", 10, 5, None, true, None).unwrap();
         let node_id_2 = state.graph_db.insert_node(file_id, "caller_func", "function", 20, 5, None, true, None).unwrap();
 
@@ -1820,7 +1877,7 @@ mod tests {
         let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.unwrap());
         let server = MCPServer::new(state.clone());
 
-        let file_id = state.graph_db.upsert_file("src/test.rs", "hash1", "rust").unwrap();
+        let file_id = state.graph_db.upsert_file("src/test.rs", "hash1", "rust", 0).unwrap();
         state.graph_db.insert_node(file_id, "compress_test_fn", "function", 1, 1, None, true, None).unwrap();
 
         // All compression levels should succeed without error

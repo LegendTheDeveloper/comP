@@ -61,19 +61,20 @@ impl GraphDB {
 
     /// Insert/update a file in the database
     ///
+    /// `char_count` is the UTF-8 byte length of the file content, stored as the
+    /// real token-baseline for savings calculations in run_pipeline.
+    ///
     /// Returns the file ID for use in subsequent operations
-    pub fn upsert_file(&self, path: &str, hash: &str, language: &str) -> Result<i64> {
+    pub fn upsert_file(&self, path: &str, hash: &str, language: &str, char_count: usize) -> Result<i64> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
         conn.execute(
-            "INSERT OR REPLACE INTO files (path, hash, language, last_indexed)
-             VALUES (?, ?, ?, strftime('%s', 'now'))",
-            [path, hash, language],
+            "INSERT OR REPLACE INTO files (path, hash, language, last_indexed, char_count)
+             VALUES (?, ?, ?, strftime('%s', 'now'), ?)",
+            rusqlite::params![path, hash, language, char_count as i64],
         )?;
 
         // Get the inserted/updated file ID
-        let mut stmt = conn.prepare(
-            "SELECT id FROM files WHERE path = ?"
-        )?;
+        let mut stmt = conn.prepare("SELECT id FROM files WHERE path = ?")?;
         let file_id: i64 = stmt.query_row([path], |row| row.get(0))?;
 
         Ok(file_id)
@@ -137,19 +138,17 @@ impl GraphDB {
         Ok(result)
     }
 
-    /// Atomically increment token stats in the metadata table
+    /// Record a tool call's token consumption in the shared metadata table.
     ///
-    /// WHY: run_pipeline is executed in the MCP daemon process spawned by Claude Code,
-    /// while getStats is called from a separate process spawned by the VSCode extension.
-    /// Since an in-memory AtomicU64 is not shared between processes, we persist it in the shared SQLite DB.
-    pub fn increment_token_stats(&self, tokens_sent: u64, tokens_saved: u64) -> Result<()> {
+    /// This is the single write path for all token statistics.  Both the MCP
+    /// daemon (Claude Code / Cursor) and the VSCode extension daemon share the
+    /// same SQLite file, so writing here makes the numbers visible to both
+    /// processes without any in-memory state synchronisation.
+    ///
+    /// `tokens_saved` is non-zero only for `run_pipeline`, which has a real
+    /// full-workspace baseline.  All other tools pass 0 for `tokens_saved`.
+    pub fn record_tool_call(&self, tokens_sent: u64, tokens_saved: u64) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
-        for key in &["tokens_sent", "tokens_saved", "queries_count"] {
-            conn.execute(
-                "INSERT OR IGNORE INTO metadata (key, value) VALUES (?, '0')",
-                [key],
-            )?;
-        }
         conn.execute(
             "UPDATE metadata SET value = CAST(CAST(value AS INTEGER) + ? AS TEXT) WHERE key = 'tokens_sent'",
             [tokens_sent as i64],
@@ -163,6 +162,21 @@ impl GraphDB {
             [],
         )?;
         Ok(())
+    }
+
+    /// Return the total char count across all indexed files divided by 4
+    /// (the standard chars-to-tokens approximation).
+    ///
+    /// This is the honest baseline for run_pipeline savings: how many tokens
+    /// an AI would consume if it read every file in the workspace verbatim.
+    pub fn get_full_workspace_tokens(&self) -> Result<u64> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let total_chars: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(char_count), 0) FROM files",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok((total_chars as u64) / 4)
     }
 
     /// Read token stats from the metadata table

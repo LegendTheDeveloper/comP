@@ -8,7 +8,6 @@
 
 use log::info;
 use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 
 mod indexer;
 mod graph;
@@ -18,18 +17,14 @@ mod mcp;
 use graph::GraphDB;
 use search::SearchEngine;
 
-/// Application state
+/// Application state shared across the MCP server.
 ///
-/// Shared state across MCP server:
-/// - GraphDB: Persist code structure (SQLite)
-/// - SearchEngine: Semantic search and scoring
-/// - Token counters: accumulated per run_pipeline call (session resets allowed)
+/// Token statistics are stored exclusively in SQLite (via GraphDB::record_tool_call)
+/// so both the MCP daemon and the VSCode extension daemon read consistent numbers
+/// without any cross-process synchronisation overhead.
 pub struct AppState {
     pub graph_db: Arc<GraphDB>,
     pub search_engine: Arc<tokio::sync::Mutex<SearchEngine>>,
-    pub tokens_sent: Arc<AtomicU64>,
-    pub tokens_saved: Arc<AtomicU64>,
-    pub queries_count: Arc<AtomicU64>,
     pub session_id: String,
 }
 
@@ -62,9 +57,6 @@ impl AppState {
         Ok(AppState {
             graph_db: Arc::new(graph_db),
             search_engine: Arc::new(tokio::sync::Mutex::new(search_engine)),
-            tokens_sent: Arc::new(AtomicU64::new(0)),
-            tokens_saved: Arc::new(AtomicU64::new(0)),
-            queries_count: Arc::new(AtomicU64::new(0)),
             session_id,
         })
     }
@@ -263,7 +255,7 @@ mod integration_tests {
         assert!(result.is_ok(), "get_token_usage failed");
         let response = result.unwrap();
         assert!(response["timestamp"].is_number());
-        assert!(response["queries_executed"].is_number());
+        assert!(response["queries_count"].is_number());
         assert!(response["efficiency"].is_string());
 
         // Cleanup
