@@ -1317,7 +1317,7 @@ impl MCPServer {
             *lang_counts.entry(lang.clone()).or_insert(0) += 1;
         }
         let mut lang_sorted: Vec<(String, usize)> = lang_counts.into_iter().collect();
-        lang_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        lang_sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
 
         markdown.push_str("## Language Distribution\n");
         for (lang, count) in &lang_sorted {
@@ -1330,7 +1330,7 @@ impl MCPServer {
             .iter()
             .map(|(id, path, _)| (path.clone(), symbol_counts.get(id).copied().unwrap_or(0)))
             .collect();
-        top_files.sort_by(|a, b| b.1.cmp(&a.1));
+        top_files.sort_by_key(|b| std::cmp::Reverse(b.1));
         top_files.truncate(10);
 
         markdown.push_str("## Top Files by Symbol Count\n");
