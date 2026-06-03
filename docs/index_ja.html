@@ -74,7 +74,7 @@
         <div class="feature-card">
           <div class="feature-icon">🔍</div>
           <h3>インテリジェントBM25検索</h3>
-          <p>マークダウンやコード、Officeドキュメント（Word, Excel, PowerPoint）のテキスト情報を正確にトークン化し、高精度な全文キーワード検索を可能にします。</p>
+          <p>コードやマークダウン、Office文書に加え、PDFやデータ分析用のParquet (.parquet) ファイルも正確にトークン化し、高精度な全文キーワード検索を可能にします。</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">⚡</div>
@@ -88,8 +88,8 @@
         </div>
         <div class="feature-card">
           <div class="feature-icon">💼</div>
-          <h3>Officeドキュメント対応</h3>
-          <p>`.docx` (Word), `.pptx` (PowerPoint), `.xlsx` (Excel) などのOfficeファイル内のシート名やスライドテキスト、テーブル情報を自動インデックス。非コード文脈もエージェントに提供します。</p>
+          <h3>多様なドキュメント・データ対応</h3>
+          <p>Office（Word, Excel, PowerPoint）やPDFファイル、Parquetファイルのスキーマ情報を自動抽出・インデックス化。コード以外のデータ・文脈も網羅してエージェントに提供します。</p>
         </div>
       </div>
 
@@ -102,6 +102,18 @@
           <h3>VSCodeに完全統合</h3>
           <p>VSCodeサイドバーからボタンひとつで簡単に開始でき、コードの変更を監視してリアルタイムにインデックスを差分更新（stale状態の自動付与）します。</p>
           <p>Claude Code, Cursor, Cline, Windsurf, GitHub Copilotなど、あらゆる主要AIエージェントのMCP（Model Context Protocol）設定を自動生成し、シームレスに連携可能です。</p>
+        </div>
+      </div>
+
+      <!-- Feature Detail 2 (AST Compression & Chat Participant) -->
+      <div class="feature-detail reversed">
+        <div class="detail-content">
+          <h3>ASTコード圧縮 & @comp チャット連携</h3>
+          <p>長大なAPI定義やクラスファイルをチャットに流し込みたい時、コマンド一つでコードをAST圧縮（コメント・空行の除去、関数本体のスケルトン化）してクリップボードにコピーできます。</p>
+          <p>さらに、VSCode Chat Participant APIを利用した <code>@comp</code> 連携により、添付ファイルを自動でAST圧縮しながらLLMにプロンプトとして送信可能。モデルの入力トークン制限を賢く回避し、消費コストを最大80%節約します。</p>
+        </div>
+        <div class="detail-image-wrapper">
+          <img src="comp_banner.png" alt="comP AST Compression Detail" class="detail-image">
         </div>
       </div>
     </div>

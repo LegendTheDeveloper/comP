@@ -74,7 +74,7 @@
         <div class="feature-card">
           <div class="feature-icon">🔍</div>
           <h3>Intelligent BM25 Search</h3>
-          <p>Accurately tokenizes and searches through Markdown, code, and Office documents (Word, Excel, PowerPoint) to deliver precise full-text keyword matching.</p>
+          <p>Accurately tokenizes and searches through Markdown, code, Office documents (Word, Excel, PowerPoint), PDF, and Parquet (.parquet) files to deliver precise full-text keyword matching.</p>
         </div>
         <div class="feature-card">
           <div class="feature-icon">⚡</div>
@@ -88,8 +88,8 @@
         </div>
         <div class="feature-card">
           <div class="feature-icon">💼</div>
-          <h3>Office Document Indexing</h3>
-          <p>Automatically indexes sheet names in Excel (.xlsx), slide contents in PowerPoint (.pptx), and Word documents (.docx) to capture non-code context.</p>
+          <h3>Rich Document & Data Support</h3>
+          <p>Automatically indexes sheet names in Excel (.xlsx), slide contents in PowerPoint (.pptx), Word documents (.docx), PDFs, and Parquet (.parquet) schema metadata to capture all non-code context.</p>
         </div>
       </div>
 
@@ -102,6 +102,18 @@
           <h3>Deep Integration with VSCode</h3>
           <p>Starts with a single click from the sidebar and watches workspace changes to keep indexes incrementally updated with 'stale' status tracking.</p>
           <p>Generates Model Context Protocol (MCP) server configuration for Claude Code, Cursor, Cline, Windsurf, GitHub Copilot, and other major AI agents.</p>
+        </div>
+      </div>
+
+      <!-- Feature Detail 2 (AST Compression & Chat Participant) -->
+      <div class="feature-detail reversed">
+        <div class="detail-content">
+          <h3>AST Code Compression & @comp Chat</h3>
+          <p>When you need to paste large API definitions or classes into a chat, compress the file with AST compression (comments removed, function bodies skeletonized) in one command to copy to your clipboard.</p>
+          <p>Furthermore, use <code>@comp</code> Chat Participant via VSCode Chat Participant API to automatically compress attached files for LLM prompts, dodging token limits and reducing costs by up to 80%.</p>
+        </div>
+        <div class="detail-image-wrapper">
+          <img src="comp_banner.png" alt="comP AST Compression Detail" class="detail-image">
         </div>
       </div>
     </div>

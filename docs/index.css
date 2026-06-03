@@ -332,6 +332,34 @@ img {
   margin-bottom: 1.5rem;
 }
 
+.feature-detail.reversed {
+  grid-template-columns: 1fr 1fr;
+}
+
+.feature-detail.reversed .detail-image-wrapper {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.feature-detail.reversed .detail-content {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+@media (max-width: 768px) {
+  .feature-detail.reversed {
+    grid-template-columns: 1fr;
+  }
+  .feature-detail.reversed .detail-image-wrapper {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .feature-detail.reversed .detail-content {
+    grid-column: auto;
+    grid-row: auto;
+  }
+}
+
 /* Roadmap Section */
 .roadmap-timeline {
   position: relative;
