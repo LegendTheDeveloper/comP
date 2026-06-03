@@ -112,7 +112,7 @@
     "vscode:prepublish": "npm run generate-icon && npm run esbuild:prod",
     "compile": "npm run generate-icon && npm run esbuild:dev",
     "watch": "npm run esbuild:dev -- --watch",
-    "generate-icon": "node scripts/generate-icon.js",
+    "generate-icon": "node scripts/generate-icon.js && node scripts/generate-icon-activitybar.js",
     "esbuild:dev": "esbuild ./src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node22",
     "esbuild:prod": "npm run esbuild:dev -- --minify",
     "test": "npm run test:unit",

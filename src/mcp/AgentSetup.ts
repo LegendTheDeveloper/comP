@@ -179,14 +179,17 @@ export class AgentSetupManager {
    */
   private getDaemonPath(): string {
     const binaryName = process.platform === "win32" ? "comp-daemon.exe" : "comp-daemon";
+    const bundledBinaryName = process.platform === "win32" ? "comp-daemon-win.exe"
+      : process.platform === "darwin" ? "comp-daemon-macos"
+      : "comp-daemon-linux";
 
-    // Development: cargo build output in workspace
+    // Development: cargo build output in workspace (default cargo output name)
     const devPath = path.join(this.workspaceRoot, "daemon", "target", "release", binaryName);
     if (fs.existsSync(devPath)) return devPath;
 
-    // Extension: binary bundled with the installed extension
+    // Extension: binary bundled with the installed extension (platform-specific name)
     if (this.extensionPath) {
-      const extPath = path.join(this.extensionPath, "daemon", "target", "release", binaryName);
+      const extPath = path.join(this.extensionPath, "daemon", "target", "release", bundledBinaryName);
       if (fs.existsSync(extPath)) return extPath;
     }
 
