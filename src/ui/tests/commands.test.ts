@@ -34,7 +34,7 @@ describe("registerCommands", () => {
       request: sinon.stub().resolves({}),
       getStats: sinon.stub().resolves({ total_nodes: 10, total_files: 5, total_edges: 20 }),
       isRunning: sinon.stub().returns(true),
-      compressFile: sinon.stub().resolves("compressed_output"),
+      compressFile: sinon.stub().resolves({ text: "compressed_output", compressionRate: "38%" }),
     };
 
     mockStatusBar = {
