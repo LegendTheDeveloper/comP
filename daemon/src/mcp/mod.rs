@@ -1832,10 +1832,13 @@ mod tests {
         let temp_dir = std::env::temp_dir().join("comP_test_compress_file");
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
+        let temp_dir = temp_dir.canonicalize().unwrap();
 
         let file_path = temp_dir.join("test_file.rs");
         let code = "fn my_test_func() {\n    // some comment\n    let x = 42;\n}\n";
         std::fs::write(&file_path, code).unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", temp_dir.to_str().unwrap());
 
         let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.unwrap());
         let server = MCPServer::new(state);
