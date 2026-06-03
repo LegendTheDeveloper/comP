@@ -79,11 +79,95 @@ npm run daemon:build
 4. **ステータスバー**（下）でインデックス進捗を確認
 5. セットアップコマンドを実行：
 
-```bash
+```text
 Ctrl+Shift+P → "comP: Setup Agents"
 ```
 
-AI エージェント（Claude Code・Cursor・Cline・Antigravity など）を選択し、comP が自動で MCP を設定します。
+AI エージェントを選択すると、comP が `.comp/config/` に設定ファイルを生成します。以下のエージェント別手順に従って有効化してください。
+
+---
+
+## エージェント別セットアップ手順
+
+### Claude Code（CLI）
+
+生成されるファイル: `.comp/config/claude_desktop_config.json`
+
+ターミナルで以下を実行して登録します：
+
+```bash
+claude mcp add comp "/path/to/comp-daemon" \
+  -e COMP_WORKSPACE_ROOT="/your/workspace" \
+  -e RUST_LOG=info
+```
+
+パスは生成されたファイル内の値を使用してください。登録後は `claude mcp list` で確認できます。
+
+> **macOS/Linux**: `daemon/target/release/comp-daemon`  
+> **Windows**: `daemon\target\release\comp-daemon.exe`
+
+---
+
+### Cursor
+
+生成されるファイル: `.comp/config/cursor_config.json`
+
+`mcpServers` ブロックを以下にマージしてください：
+
+- **グローバル**（全プロジェクト共通）: `~/.cursor/mcp.json`
+- **プロジェクト限定**: ワークスペースルートの `.cursor/mcp.json`
+
+保存後、Cursor を再起動してください。
+
+---
+
+### Cline（VSCode 拡張）
+
+生成されるファイル: `.comp/config/cline_config.json`
+
+1. VSCode 設定を開く（`Ctrl+,`）
+2. `Cline › MCP Servers` を検索
+3. **settings.json で編集** をクリックし、`mcpServers.comp` ブロックを貼り付け
+
+または Cline パネル → **MCP Servers** タブ → **Add Server** から JSON を貼り付け。
+
+---
+
+### Windsurf
+
+生成されるファイル: `.comp/config/windsurf_config.json`
+
+内容を以下にマージしてください：
+
+```text
+~/.codeium/windsurf/mcp_config.json
+```
+
+保存後、Windsurf を再起動してください。
+
+---
+
+### GitHub Copilot（VSCode）
+
+comP がワークスペースの `.vscode/mcp.json` に直接書き込みます。**追加手順は不要**です。ワークスペースを開き直すと自動で有効になります。
+
+---
+
+### Antigravity
+
+comP が `~/.gemini/antigravity-ide/mcp_config.json` に直接書き込みます。**追加手順は不要**です。Antigravity IDE を再起動してください。
+
+---
+
+### Continue.dev
+
+生成されるファイル: `.comp/config/continue_config.py`
+
+`mcp_servers` ブロックを Continue の設定ファイルに追加してください：
+
+```text
+~/.continue/config.py
+```
 
 ---
 

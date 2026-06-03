@@ -162,7 +162,7 @@
         <div class="step">
           <span class="step-num">1</span>
           <h4>Install the Extension</h4>
-          <p>Download the release `.vsix` file and drag-and-drop it into VSCode, or install via command line:</p>
+          <p>Download the release <code>.vsix</code> file and drag-and-drop it into VSCode, or install via command line:</p>
           <pre><code>code --install-extension comP-0.4.0.vsix</code></pre>
         </div>
         <div class="step">
@@ -173,7 +173,15 @@
         <div class="step">
           <span class="step-num">3</span>
           <h4>Link Your Coding Agent</h4>
-          <p>Open the Command Palette and search for <code>comP: Setup Agent Config</code>, select your agent (Cline, Cursor, Copilot, etc.), and merge the MCP configuration.</p>
+          <p>Open the Command Palette → <code>comP: Setup Agents</code>, select your agent, and follow these steps:</p>
+          <ul style="margin-top:0.75rem;padding-left:1.2rem;line-height:1.8">
+            <li><strong>Claude Code</strong>: Run <code>claude mcp add comp &lt;daemon-path&gt; -e COMP_WORKSPACE_ROOT=&lt;workspace&gt;</code></li>
+            <li><strong>Cursor</strong>: Merge config into <code>~/.cursor/mcp.json</code> or <code>.cursor/mcp.json</code></li>
+            <li><strong>Cline</strong>: Paste config in VSCode Settings → <em>Cline › MCP Servers</em></li>
+            <li><strong>Windsurf</strong>: Merge into <code>~/.codeium/windsurf/mcp_config.json</code></li>
+            <li><strong>GitHub Copilot</strong>: Written to <code>.vscode/mcp.json</code> automatically</li>
+            <li><strong>Antigravity</strong>: Written to <code>~/.gemini/antigravity-ide/mcp_config.json</code> automatically</li>
+          </ul>
         </div>
       </div>
     </div>

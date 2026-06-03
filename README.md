@@ -80,11 +80,87 @@ npm run daemon:build
 4. Watch the **status bar** to see indexing progress.
 5. Run the setup command:
 
-```bash
+```text
 Ctrl+Shift+P → "comP: Setup Agents"
 ```
 
-Choose your AI agent (Claude Code, Cursor, Cline, Antigravity, etc.), and comP will configure the MCP connection.
+Choose your AI agent. comP generates a config file in `.comp/config/`. Follow the per-agent steps below to activate it.
+
+---
+
+## Agent Setup (Per-Agent Steps)
+
+### Claude Code (CLI)
+
+comP generates `.comp/config/claude_desktop_config.json`. Register it with:
+
+```bash
+claude mcp add comp "/path/to/comp-daemon" \
+  -e COMP_WORKSPACE_ROOT="/your/workspace" \
+  -e RUST_LOG=info
+```
+
+Replace the path with the value in the generated file. Verify with `claude mcp list`.
+
+> **macOS/Linux**: The daemon is at `daemon/target/release/comp-daemon`  
+> **Windows**: `daemon\target\release\comp-daemon.exe`
+
+---
+
+### Cursor
+
+comP generates `.comp/config/cursor_config.json`. Merge its `mcpServers` block into:
+
+- **Global** (all projects): `~/.cursor/mcp.json`
+- **Project-only**: `.cursor/mcp.json` in your workspace root
+
+Restart Cursor after saving.
+
+---
+
+### Cline (VSCode Extension)
+
+comP generates `.comp/config/cline_config.json`. Then:
+
+1. Open VSCode Settings (`Ctrl+,`)
+2. Search for `Cline › MCP Servers`
+3. Click **Edit in settings.json** and paste the `mcpServers.comp` block
+
+Or open the Cline panel → **MCP Servers** tab → **Add Server** → paste the JSON.
+
+---
+
+### Windsurf
+
+comP generates `.comp/config/windsurf_config.json`. Merge its contents into:
+
+```text
+~/.codeium/windsurf/mcp_config.json
+```
+
+Restart Windsurf after saving.
+
+---
+
+### GitHub Copilot (VSCode)
+
+comP writes directly to `.vscode/mcp.json` in your workspace — **no extra steps needed**. The MCP server activates automatically when you reopen the workspace.
+
+---
+
+### Antigravity
+
+comP writes directly to `~/.gemini/antigravity-ide/mcp_config.json` — **no extra steps needed**. Restart Antigravity IDE to pick up the new server.
+
+---
+
+### Continue.dev
+
+comP generates `.comp/config/continue_config.py`. Add the `mcp_servers` block to your Continue config:
+
+```text
+~/.continue/config.py
+```
 
 ---
 

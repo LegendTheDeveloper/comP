@@ -162,7 +162,7 @@
         <div class="step">
           <span class="step-num">1</span>
           <h4>拡張機能のインストール</h4>
-          <p>リリースされた `.vsix` ファイルをダウンロードし、VSCodeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
+          <p>リリースされた <code>.vsix</code> ファイルをダウンロードし、VSCodeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
           <pre><code>code --install-extension comP-0.4.0.vsix</code></pre>
         </div>
         <div class="step">
@@ -173,7 +173,15 @@
         <div class="step">
           <span class="step-num">3</span>
           <h4>エージェントを紐付ける</h4>
-          <p>コマンドパレットから <code>comP: Setup Agent Config</code> を起動し、利用したいエージェント（Cline, Cursor, Copilot等）を選択して、MCP設定を自動マージ・出力します。</p>
+          <p>コマンドパレット → <code>comP: Setup Agents</code> を実行し、エージェントを選択。生成されたファイルを以下の手順で有効化：</p>
+          <ul style="margin-top:0.75rem;padding-left:1.2rem;line-height:1.8">
+            <li><strong>Claude Code</strong>: <code>claude mcp add comp &lt;daemon-path&gt; -e COMP_WORKSPACE_ROOT=&lt;workspace&gt;</code> を実行</li>
+            <li><strong>Cursor</strong>: <code>~/.cursor/mcp.json</code> または <code>.cursor/mcp.json</code> にマージ</li>
+            <li><strong>Cline</strong>: VSCode設定 → <em>Cline › MCP Servers</em> に貼り付け</li>
+            <li><strong>Windsurf</strong>: <code>~/.codeium/windsurf/mcp_config.json</code> にマージ</li>
+            <li><strong>GitHub Copilot</strong>: <code>.vscode/mcp.json</code> に自動書き込み済み</li>
+            <li><strong>Antigravity</strong>: <code>~/.gemini/antigravity-ide/mcp_config.json</code> に自動書き込み済み</li>
+          </ul>
         </div>
       </div>
     </div>
