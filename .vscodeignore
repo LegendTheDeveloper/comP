@@ -3,11 +3,20 @@
 # ===== Development Files =====
 
 src/
-daemon/
-!daemon/target/release/comp-daemon-win.exe
-!daemon/target/release/comp-daemon-macos
-!daemon/target/release/comp-daemon-linux
-Cargo.lock
+daemon/src/
+daemon/tests/
+daemon/Cargo.toml
+daemon/Cargo.lock
+daemon/target/debug/
+daemon/target/release/deps/
+daemon/target/release/build/
+daemon/target/release/incremental/
+daemon/target/release/.fingerprint/
+daemon/target/release/*.d
+daemon/target/release/*.rlib
+daemon/target/release/*.pdb
+daemon/target/release/comp-daemon
+daemon/target/release/comp-daemon.exe
 
 # ===== Build/Config =====
 
@@ -63,7 +72,7 @@ Thumbs.db
 *.sublime-workspace
 
 # ===== Local Data/Configs =====
-.comp/
+**/.comp/
 .claude/
 .husky/
 scripts/
