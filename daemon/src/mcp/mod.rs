@@ -119,6 +119,37 @@ pub struct MCPServer {
     state: Arc<crate::AppState>,
 }
 
+/// Canonicalize `path_str` and verify it resides under `workspace_root`.
+/// Prevents path-traversal attacks from MCP callers.
+fn validate_within_workspace(
+    path_str: &str,
+    workspace_root: &str,
+) -> Result<std::path::PathBuf> {
+    let path = std::path::Path::new(path_str);
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| anyhow!("Cannot resolve path '{}': {}", path_str, e))?;
+    let canonical_root = std::path::Path::new(workspace_root)
+        .canonicalize()
+        .map_err(|e| anyhow!("Cannot resolve workspace root '{}': {}", workspace_root, e))?;
+    if !canonical.starts_with(&canonical_root) {
+        return Err(anyhow!("Access denied: '{}' is outside the workspace", path_str));
+    }
+    Ok(canonical)
+}
+
+/// Reject git refs that start with `-` or contain control characters to prevent
+/// flag injection (e.g. `-C /other/path`) passed to `git diff`.
+fn validate_git_ref(base_ref: &str) -> Result<()> {
+    if base_ref.starts_with('-') {
+        return Err(anyhow!("Invalid git ref '{}': cannot start with '-'", base_ref));
+    }
+    if base_ref.chars().any(|c| matches!(c, '\n' | '\r' | '\0')) {
+        return Err(anyhow!("Invalid git ref: contains control characters"));
+    }
+    Ok(())
+}
+
 impl MCPServer {
     /// Create a new MCP server
     pub fn new(state: Arc<crate::AppState>) -> Self {
@@ -743,9 +774,11 @@ impl MCPServer {
             .or_else(|_| std::env::var("WORKSPACE_ROOT"))
             .unwrap_or_else(|_| ".".to_string());
 
+        let safe_path = validate_within_workspace(path_str, &workspace_root)?;
+
         let mut indexer = crate::indexer::Indexer::new(&workspace_root);
         indexer
-            .index_file(std::path::Path::new(path_str), &self.state.graph_db)
+            .index_file(&safe_path, &self.state.graph_db)
             .await?;
 
         Ok(json!({ "status": "ok", "path": path_str }))
@@ -1376,6 +1409,7 @@ impl MCPServer {
     /// Runs `git diff --name-only <base_ref>` and maps changed files to indexed symbols.
     pub async fn handle_get_git_diff_context(&self, params: Value) -> Result<Value> {
         let base_ref = params["base_ref"].as_str().unwrap_or("HEAD~1");
+        validate_git_ref(base_ref)?;
         let workspace_root = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
 
         let output = std::process::Command::new("git")
@@ -1462,12 +1496,14 @@ impl MCPServer {
             .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
         let compression_level = params["compression_level"].as_i64().unwrap_or(0);
 
-        let path = std::path::Path::new(path_str);
-        if !path.exists() {
-            return Err(anyhow!("File not found: {}", path_str));
-        }
+        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
+            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+            .unwrap_or_else(|_| ".".to_string());
 
-        let content = std::fs::read_to_string(path)?;
+        let safe_path = validate_within_workspace(path_str, &workspace_root)?;
+
+        let content = std::fs::read_to_string(&safe_path)?;
+        let path = safe_path.as_path();
         let ext = path.extension()
             .and_then(|e| e.to_str())
             .unwrap_or("");

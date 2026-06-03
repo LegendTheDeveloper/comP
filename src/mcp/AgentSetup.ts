@@ -291,17 +291,17 @@ export class AgentSetupManager {
    * Generate Continue.dev MCP configuration (Python-based)
    */
   private generateContinueConfig(daemonPath: string): string {
-    // Continue uses Python config
+    const escapePy = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     const pythonConfig = `
 # Continue.dev MCP Server Configuration
 # Add this to your continue/config.py
 
 mcp_servers = {
     "comp": {
-        "command": "${daemonPath}",
+        "command": "${escapePy(daemonPath)}",
         "args": [],
         "env": {
-            "COMP_WORKSPACE_ROOT": "${this.workspaceRoot}",
+            "COMP_WORKSPACE_ROOT": "${escapePy(this.workspaceRoot)}",
             "RUST_LOG": "info"
         }
     }
