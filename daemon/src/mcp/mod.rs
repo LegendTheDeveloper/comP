@@ -1511,8 +1511,19 @@ impl MCPServer {
         let level = compress::CompressionLevel::from_i64(compression_level);
         let compressed = compress::compress(&content, ext, level);
 
+        let original_chars = content.len();
+        let compressed_chars = compressed.len();
+        let compression_rate = if original_chars > 0 {
+            format!("{:.0}%", (1.0 - compressed_chars as f64 / original_chars as f64) * 100.0)
+        } else {
+            "0%".to_string()
+        };
+
         Ok(json!({
-            "compressed_text": compressed
+            "compressed_text": compressed,
+            "original_chars": original_chars,
+            "compressed_chars": compressed_chars,
+            "compression_rate": compression_rate
         }))
     }
 }

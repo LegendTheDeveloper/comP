@@ -34,10 +34,10 @@ export function registerChatParticipant(
         try {
           stream.progress(`Compressing ${vscode.workspace.asRelativePath(fileUri)}...`);
           // Compress using Skeleton level (2) for maximum token savings
-          const compressed = await dm.compressFile(fileUri.fsPath, 2);
+          const { text: compressed } = await dm.compressFile(fileUri.fsPath, 2);
           const relativePath = vscode.workspace.asRelativePath(fileUri);
           const ext = relativePath.split('.').pop() || "";
-          
+
           compressedContext += `File: ${relativePath}\n\`\`\`${ext}\n${compressed}\n\`\`\`\n\n`;
         } catch (error) {
           // Fallback to raw file content on error

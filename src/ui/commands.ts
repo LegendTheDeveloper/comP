@@ -181,9 +181,9 @@ export function registerCommands(
           title: "comP: Compressing file...",
           cancellable: false
         }, async () => {
-          const compressed = await dm.compressFile(filePath, selected.value);
-          await vscode.env.clipboard.writeText(compressed);
-          vscode.window.showInformationMessage(`Copied compressed file content to clipboard (${selected.label} mode).`);
+          const { text, compressionRate } = await dm.compressFile(filePath, selected.value);
+          await vscode.env.clipboard.writeText(text);
+          vscode.window.showInformationMessage(`Copied to clipboard (${selected.label} mode, ${compressionRate} reduction).`);
         });
       } catch (error) {
         vscode.window.showErrorMessage(

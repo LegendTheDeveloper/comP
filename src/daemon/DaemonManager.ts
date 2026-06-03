@@ -326,7 +326,7 @@ export class DaemonManager {
   /**
    * Compress a single file using AST compression
    */
-  async compressFile(filePath: string, compressionLevel: number): Promise<string> {
+  async compressFile(filePath: string, compressionLevel: number): Promise<{ text: string; compressionRate: string }> {
     const result = await this.request("compressFile", {
       path: filePath,
       compression_level: compressionLevel,
@@ -338,7 +338,10 @@ export class DaemonManager {
     if (typeof res["compressed_text"] !== "string") {
       throw new Error("Missing compressed_text in response");
     }
-    return res["compressed_text"];
+    return {
+      text: res["compressed_text"],
+      compressionRate: typeof res["compression_rate"] === "string" ? res["compression_rate"] : "0%",
+    };
   }
 
   /**
