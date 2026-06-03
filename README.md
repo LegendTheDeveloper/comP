@@ -92,18 +92,21 @@ Choose your AI agent. comP generates a config file in `.comp/config/`. Follow th
 
 ### Claude Code (CLI)
 
-comP generates `.comp/config/claude_desktop_config.json`. Register it with:
+comP generates `.comp/config/claude_desktop_config.json` with the exact paths pre-filled. Register it with:
 
-```bash
-claude mcp add comp "/path/to/comp-daemon" \
-  -e COMP_WORKSPACE_ROOT="/your/workspace" \
-  -e RUST_LOG=info
+**Windows (PowerShell)**:
+
+```powershell
+claude mcp add comp "e:\your\project\daemon\target\release\comp-daemon.exe" -e COMP_WORKSPACE_ROOT="e:\your\project" -e RUST_LOG=info
 ```
 
-Replace the path with the value in the generated file. Verify with `claude mcp list`.
+**macOS / Linux**:
 
-> **macOS/Linux**: The daemon is at `daemon/target/release/comp-daemon`  
-> **Windows**: `daemon\target\release\comp-daemon.exe`
+```bash
+claude mcp add comp "/your/project/daemon/target/release/comp-daemon" -e COMP_WORKSPACE_ROOT="/your/project" -e RUST_LOG=info
+```
+
+Copy the exact paths from the generated `.comp/config/claude_desktop_config.json`. Verify with `claude mcp list`.
 
 ---
 
