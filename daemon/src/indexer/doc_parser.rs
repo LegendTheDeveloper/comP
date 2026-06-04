@@ -120,13 +120,33 @@ impl DocumentParser {
     /// Parse Markdown and extract structure
     pub fn parse_markdown(content: &str) -> Result<Vec<Symbol>> {
         let mut symbols = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
 
-        for (i, line) in content.lines().enumerate() {
+        for (i, line) in lines.iter().enumerate() {
             let line_num = (i + 1) as u32;
             let level = line.len() - line.trim_start_matches('#').len();
             if level > 0 && level <= 6 {
                 let heading = line.trim_start_matches('#').trim();
                 if !heading.is_empty() {
+                    // WHY: First non-empty body line after heading gives agents a preview of section
+                    // content, improving BM25 relevance and get_file_summary readability.
+                    let signature = lines[i + 1..]
+                        .iter()
+                        .find(|l| !l.trim().is_empty())
+                        .and_then(|l| {
+                            let trimmed = l.trim();
+                            if trimmed.starts_with('#') {
+                                None // next heading immediately follows — no body preview
+                            } else {
+                                let s = if trimmed.chars().count() > 100 {
+                                    format!("{}…", trimmed.chars().take(100).collect::<String>())
+                                } else {
+                                    trimmed.to_string()
+                                };
+                                Some(s)
+                            }
+                        });
+
                     symbols.push(Symbol {
                         name: heading.to_string(),
                         kind: super::parser::SymbolKind::Module,
@@ -134,7 +154,7 @@ impl DocumentParser {
                         column: (level + 1) as u32,
                         end_line: line_num,
                         end_column: (heading.len() + level + 1) as u32,
-                        signature: None,
+                        signature,
                         is_exported: true,
                         scope: None,
                     });
@@ -719,11 +739,39 @@ mod tests {
 ## Section 2
 "#;
         let symbols = DocumentParser::parse_markdown(markdown)?;
-        
+
         assert_eq!(symbols.len(), 4);
         assert_eq!(symbols[0].name, "Title");
         assert_eq!(symbols[1].name, "Section 1");
-        
+        // Consecutive headings with no body produce no signature
+        assert!(symbols[0].signature.is_none());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_markdown_signature() -> Result<()> {
+        let markdown = r#"# Overview
+comP is a lightweight indexer.
+
+## Installation
+Run npm install to get started.
+
+## Empty Section
+### Nested
+"#;
+        let symbols = DocumentParser::parse_markdown(markdown)?;
+
+        assert_eq!(symbols[0].name, "Overview");
+        assert_eq!(symbols[0].signature.as_deref(), Some("comP is a lightweight indexer."));
+
+        assert_eq!(symbols[1].name, "Installation");
+        assert_eq!(symbols[1].signature.as_deref(), Some("Run npm install to get started."));
+
+        // "Empty Section" is followed immediately by a sub-heading
+        assert_eq!(symbols[2].name, "Empty Section");
+        assert!(symbols[2].signature.is_none());
+
         Ok(())
     }
 

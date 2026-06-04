@@ -339,6 +339,7 @@ impl MCPServer {
             })
             .map(|(_, path, _)| path.clone())
             .collect();
+        let indexed_doc_count = doc_paths.len();
         // WHY: Save language per path before consuming files_list — needed for content compression.
         let mut path_to_lang: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let path_to_id: std::collections::HashMap<String, i64> = files_list
@@ -389,6 +390,7 @@ impl MCPServer {
         // BM25 full-text search (complements search for Markdown and Office files)
         // WHY: Symbol LIKE queries only match headings, missing body content keywords.
         //      We read Markdown/Office files and score using BM25, then add to pivot files.
+        let mut bm25_hit_count: usize = 0;
         if !doc_paths.is_empty() && !keywords.is_empty() {
             let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
                 .unwrap_or_else(|_| ".".to_string());
@@ -398,6 +400,7 @@ impl MCPServer {
                 &keywords,
                 20,
             );
+            bm25_hit_count = bm25_hits.len();
             for (path, _score) in bm25_hits {
                 recorded_files.push(path.clone());
                 if seen.insert(path.clone()) {
@@ -465,6 +468,22 @@ impl MCPServer {
             log::warn!("record_mcp_call failed in run_pipeline: {}", e);
         }
 
+        // WHY: pivot_file_types gives agents a quick signal that Markdown/docs were searched,
+        // preventing the false assumption that comP only indexes code files.
+        let pivot_file_types: std::collections::HashMap<String, usize> = pivot_paths
+            .iter()
+            .map(|p| {
+                std::path::Path::new(p)
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("unknown")
+                    .to_string()
+            })
+            .fold(std::collections::HashMap::new(), |mut m, ext| {
+                *m.entry(ext).or_insert(0) += 1;
+                m
+            });
+
         Ok(json!({
             "task": task,
             "pivot_files": pivot_files,
@@ -473,7 +492,12 @@ impl MCPServer {
             "max_tokens": max_tokens,
             "savings": savings,
             "full_workspace_tokens": full_workspace_tokens,
-            "estimated_cost": cost
+            "estimated_cost": cost,
+            "coverage": {
+                "indexed_doc_files": indexed_doc_count,
+                "bm25_hits": bm25_hit_count,
+                "pivot_file_types": pivot_file_types
+            }
         }))
     }
 
@@ -880,13 +904,13 @@ impl MCPServer {
             "tools": [
                 {
                     "name": "run_pipeline",
-                    "description": "Call at the START of a new coding task (bug fix, feature, refactor) to retrieve the most relevant files and symbols for that task. Do NOT call mid-implementation or for general questions. Returns pivot files and related symbols ranked by relevance. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
+                    "description": "Call at the START of a new task — coding (bug fix, feature, refactor) or documentation (writing/editing Markdown, updating docs) — to retrieve the most relevant files and symbols for that task. Do NOT call mid-implementation or for general questions. Returns pivot files and related symbols ranked by relevance. The response includes a 'coverage' field showing which file types (including Markdown) were searched. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "task": {
                                 "type": "string",
-                                "description": "One sentence describing what you are about to implement or fix. IMPORTANT: The task description MUST be in English. Translate to English if needed. Example: 'fix JWT token expiry bug in auth middleware'"
+                                "description": "One sentence describing what you are about to implement, fix, or write. IMPORTANT: The task description MUST be in English. Translate to English if needed. Examples: 'fix JWT token expiry bug in auth middleware', 'write installation section in README.md'"
                             },
                             "max_tokens": {
                                 "type": "integer",
@@ -1638,6 +1662,10 @@ mod tests {
         assert!(response["total_tokens"].is_number());
         assert!(response["savings"].is_string());
         assert!(response["estimated_cost"].is_string());
+        assert!(response["coverage"].is_object());
+        assert!(response["coverage"]["indexed_doc_files"].is_number());
+        assert!(response["coverage"]["bm25_hits"].is_number());
+        assert!(response["coverage"]["pivot_file_types"].is_object());
     }
 
     #[tokio::test]

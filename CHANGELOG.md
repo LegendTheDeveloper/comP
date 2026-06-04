@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.5.3] - 2026-06-04
+
+### Added
+
+- **Markdown heading signature**: `parse_markdown()` now captures the first body line after each heading as `signature`, improving BM25 search precision and `get_file_summary` previews
+- **`run_pipeline` coverage field**: Response now includes `coverage.indexed_doc_files`, `coverage.bm25_hits`, and `coverage.pivot_file_types` — gives agents a verifiable signal that Markdown and document files were searched, preventing false "not indexed" assumptions
+
+### Changed
+
+- **`run_pipeline` tool description**: Updated to explicitly include documentation tasks (writing/editing Markdown, updating docs), preventing agents from skipping the tool for non-code tasks
+
+---
+
 ## [0.4.0] - 2026-06-03
 
 ### Added
