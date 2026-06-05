@@ -261,6 +261,80 @@ All contributions should include documentation updates:
 
 ---
 
+## MCP Server Development
+
+comP implements the **Model Context Protocol (MCP)** to expose tools to AI agents. If you're adding new MCP tools or modifying the protocol:
+
+### MCP Tool Development Checklist
+
+1. **Define the tool** in `daemon/src/mcp/mod.rs`:
+   - Implement the tool handler function
+   - Update the tool list in `handle_tools_list()`
+   - Add JSDoc-style documentation
+
+2. **Test the tool**:
+   - Add integration tests in `daemon/tests/`
+   - Verify with Claude Code or another MCP client
+   - Check `.comp/daemon.log` for errors
+
+3. **Document the tool**:
+   - Update [docs/user/MCP_TOOLS.md](docs/user/MCP_TOOLS.md) with:
+     - Tool name and description
+     - Input parameters and types
+     - Output format and examples
+     - Example usage in Claude Code chat
+
+4. **Multi-agent compatibility**:
+   - Test with at least 2 agents (Claude Code + Cursor/Copilot)
+   - Verify parameter marshaling (JSON serialization)
+   - Check timeout handling (default 30s)
+
+### Example: Adding a New MCP Tool
+
+```rust
+// daemon/src/mcp/mod.rs
+pub async fn handle_new_tool(params: Value) -> Result<Value> {
+    let query = params["query"]
+        .as_str()
+        .ok_or_else(|| anyhow!("Missing 'query' parameter"))?;
+    
+    // Implementation...
+    
+    Ok(json!({
+        "result": "...",
+        "metadata": { "tokens": 1234 }
+    }))
+}
+```
+
+Then add to `handle_tools_list()`:
+
+```rust
+tools.push(json!({
+    "name": "new_tool",
+    "description": "Does something useful",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "query": { "type": "string" }
+        },
+        "required": ["query"]
+    }
+}));
+```
+
+### Testing MCP Servers
+
+```bash
+# Test the daemon directly (Unix socket / named pipe)
+cargo test --all --manifest-path daemon/Cargo.toml
+
+# Test integration with VSCode extension
+npm run compile && F5  # Opens Extension Development Host
+```
+
+---
+
 ## Getting Help
 
 - 📖 **Documentation**: [docs/](docs/)

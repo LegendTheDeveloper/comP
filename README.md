@@ -185,6 +185,8 @@ comP generates `.comp/config/continue_config.py`. Add the `mcp_servers` block to
 
 Any MCP 2024-11-05 compliant client should work. If your agent needs a specific config, [open an issue](https://github.com/tsucky230/comP/issues/new).
 
+**For detailed multi-agent setup instructions**, see [docs/user/MCP_SETUP.md](docs/user/MCP_SETUP.md).
+
 ---
 
 ## Usage
