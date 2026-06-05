@@ -7,23 +7,28 @@ When using GitHub Copilot in VSCode with comP, you can leverage the `@comp` part
 1. **Install comP** from VSCode Marketplace
 2. **Open a folder** in VSCode
 3. **Run setup**:
-   ```
-   Ctrl+Shift+P → "comP: Setup Agents" → Select "GitHub Copilot"
-   ```
-4. **Use in Copilot chat**:
-   - `@comp what files handle authentication?` (searches codebase)
-   - `@comp generate context for login refactor` (token-compressed context)
+
+```text
+Ctrl+Shift+P → "comP: Setup Agents" → Select "GitHub Copilot"
+```
+
+1. **Use in Copilot chat**:
+
+- `@comp what files handle authentication?` (searches codebase)
+- `@comp generate context for login refactor` (token-compressed context)
 
 ## Using `run_pipeline` Tool
 
 Copilot can call `run_pipeline` automatically for code-related questions:
 
 **Example**:
-```
+
+```text
 What would break if I rename UserService to AccountService?
 ```
 
 Copilot will:
+
 1. Call `run_pipeline` with your query
 2. Get impact analysis and dependent files
 3. Return analysis in the response
@@ -42,7 +47,7 @@ Copilot will:
 By default, `run_pipeline` returns compressed code (comments removed, 60-80% smaller).
 To see full source:
 
-```
+```text
 @comp show full source for UserService with compression_level=0
 ```
 
