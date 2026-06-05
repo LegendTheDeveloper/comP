@@ -31,7 +31,6 @@ daemon/target/
 
 # ===== comP Working Directory =====
 .comp/
-.vexp/
 
 # ===== Python (if used for tooling) =====
 __pycache__/
@@ -79,7 +78,6 @@ lcov.info
 
 # ===== Development Tools & Caches =====
 .claude/
-.vexp/
 .cache/
 CLAUDE.md
 .eslintcache

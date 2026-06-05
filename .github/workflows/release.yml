@@ -150,3 +150,9 @@ jobs:
         run: vsce publish -i comP-${{ github.ref_name }}.vsix --pat ${{ secrets.VSCE_PAT }}
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Publish to Open VSX Registry
+        if: github.repository == 'tsucky230/comP'
+        run: npx ovsx publish comP-${{ github.ref_name }}.vsix -p ${{ secrets.OVSX_PAT }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
