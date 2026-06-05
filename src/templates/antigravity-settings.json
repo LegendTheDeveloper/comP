@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "comp": {
+      "command": "comp-daemon",
+      "args": [],
+      "env": {
+        "COMP_WORKSPACE_ROOT": ".",
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}

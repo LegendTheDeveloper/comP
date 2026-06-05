@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.5.4] - 2026-06-05
+
+### Added
+
+- **Multi-agent MCP setup**: `comp setupAgents` command now generates configuration templates for Antigravity, GitHub Copilot, Cursor, Cline, and Continue.dev in addition to Claude Code
+- **Antigravity IDE support**: comP now officially supports Antigravity with automatic MCP server registration via `mcp-servers-manifest.json`
+- **MCP Setup Guide**: New [docs/user/MCP_SETUP.md](docs/user/MCP_SETUP.md) with per-agent configuration instructions including troubleshooting
+- **Multi-agent configuration docs**: Updated [docs/user/CONFIGURATION.md](docs/user/CONFIGURATION.md) with multi-workspace setup and simultaneous agent usage guidelines
+- **MCP server development guide**: Added [CONTRIBUTING.md](CONTRIBUTING.md) section for MCP tool development with testing checklist and examples
+
+### Changed
+
+- **GitHub Copilot instructions**: Added [src/templates/copilot-instructions.md](src/templates/copilot-instructions.md) with best practices for using comP with Copilot Chat
+- **README.md**: Added reference to MCP_SETUP.md for detailed multi-agent configuration
+
+### Why
+
+Feedback from Antigravity users showed that comP's MCP server wasn't discoverable without explicit setup documentation. This release makes comP a "first-class citizen" MCP server that agents can detect and register automatically, with clear setup instructions for all major AI platforms.
+
+---
+
 ## [0.5.3] - 2026-06-04
 
 ### Added
