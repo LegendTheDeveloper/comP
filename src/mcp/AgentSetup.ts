@@ -17,6 +17,14 @@ interface AgentConfig {
   template: (daemonPath: string) => string;
 }
 
+export interface GenerateConfigResult {
+  configPath: string;
+  success: boolean;
+  message: string;
+  command?: string;
+  llmPrompt?: string;
+}
+
 /**
  * AgentSetup - Generate MCP configuration files for various AI agents
  *
@@ -123,9 +131,7 @@ export class AgentSetupManager {
    * # Prerequisites
    * - The user has file write permissions
    */
-  async generateConfig(
-    agentName: string
-  ): Promise<{ configPath: string; success: boolean; message: string }> {
+  async generateConfig(agentName: string): Promise<GenerateConfigResult> {
     const config = this.getAgentConfig(agentName);
 
     if (!config) {
@@ -153,11 +159,18 @@ export class AgentSetupManager {
       // Write config file
       fs.writeFileSync(fullPath, configContent, "utf-8");
 
-      return {
+      const result: GenerateConfigResult = {
         configPath: fullPath,
         success: true,
         message: `MCP configuration created for ${agentName}`,
       };
+
+      if (agentName === "Claude Code") {
+        result.command = this.generateClaudeCodeCommand(daemonPath);
+        result.llmPrompt = this.generateClaudeCodeLLMPrompt(daemonPath);
+      }
+
+      return result;
     } catch (error) {
       return {
         configPath: "",
@@ -225,6 +238,19 @@ export class AgentSetupManager {
     };
 
     return JSON.stringify(config, null, 2);
+  }
+
+  private generateClaudeCodeCommand(daemonPath: string): string {
+    const escapeQuotes = (value: string) => value.replace(/"/g, '\\"');
+    const escapedPath = escapeQuotes(daemonPath);
+    const escapedWorkspaceRoot = escapeQuotes(this.workspaceRoot);
+
+    return `claude mcp add comp "${escapedPath}" -e COMP_WORKSPACE_ROOT="${escapedWorkspaceRoot}" -e RUST_LOG=info`;
+  }
+
+  private generateClaudeCodeLLMPrompt(daemonPath: string): string {
+    const command = this.generateClaudeCodeCommand(daemonPath);
+    return `このワークスペースを Claude Code の MCP サーバーとして登録するには、次のコマンドをターミナルで実行してください。\n\n${command}`;
   }
 
   /**

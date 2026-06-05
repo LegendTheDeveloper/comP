@@ -37,17 +37,57 @@ export function registerCommands(
         const result = await agentSetup.generateConfig(selected);
 
         if (result.success) {
-          vscode.window.showInformationMessage(result.message);
-          // Ask user if they want to open the config file
-          const openFile = await vscode.window.showInformationMessage(
-            `Config file created at ${result.configPath}. Open it?`,
-            "Open",
-            "Done"
-          );
+          if (result.llmPrompt) {
+            const action = await vscode.window.showInformationMessage(
+              `MCP configuration created for ${selected}. 以下のプロンプトをLLMに実行させるか、コマンドをコピーしてください。`,
+              "Copy LLM prompt",
+              "View LLM prompt",
+              "Open config",
+              "Done"
+            );
 
-          if (openFile === "Open") {
-            const uri = vscode.Uri.file(result.configPath);
-            await vscode.window.showTextDocument(uri);
+            if (action === "Copy LLM prompt") {
+              await vscode.env.clipboard.writeText(result.llmPrompt);
+              vscode.window.showInformationMessage("LLM向けプロンプトをクリップボードにコピーしました。");
+            }
+
+            if (action === "View LLM prompt") {
+              const doc = await vscode.workspace.openTextDocument({ content: result.llmPrompt, language: "text" });
+              await vscode.window.showTextDocument(doc, { preview: false });
+            }
+
+            if (action === "Open config") {
+              const uri = vscode.Uri.file(result.configPath);
+              await vscode.window.showTextDocument(uri);
+            }
+          } else if (result.command) {
+            const commandAction = await vscode.window.showInformationMessage(
+              `MCP configuration created for ${selected}. Run this command in a terminal:\n${result.command}`,
+              "Copy command",
+              "Open config",
+              "Done"
+            );
+
+            if (commandAction === "Copy command") {
+              await vscode.env.clipboard.writeText(result.command);
+              vscode.window.showInformationMessage("Command copied to clipboard.");
+            }
+
+            if (commandAction === "Open config") {
+              const uri = vscode.Uri.file(result.configPath);
+              await vscode.window.showTextDocument(uri);
+            }
+          } else {
+            const openFile = await vscode.window.showInformationMessage(
+              `Config file created at ${result.configPath}. Open it?`,
+              "Open",
+              "Done"
+            );
+
+            if (openFile === "Open") {
+              const uri = vscode.Uri.file(result.configPath);
+              await vscode.window.showTextDocument(uri);
+            }
           }
         } else {
           vscode.window.showErrorMessage(result.message);

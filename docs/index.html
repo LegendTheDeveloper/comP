@@ -193,9 +193,9 @@
         <div class="step">
           <span class="step-num">3</span>
           <h4>Link Your Coding Agent</h4>
-          <p>Open the Command Palette → <code>comP: Setup Agents</code>, select your agent, and follow these steps:</p>
+          <p>Open the Command Palette → <code>comP: Setup Agents</code>, select your agent. comP generates a config file and shows a ready-to-copy command. For each agent:</p>
           <ul style="margin-top:0.75rem;padding-left:1.2rem;line-height:1.8">
-            <li><strong>Claude Code</strong>: Run <code>claude mcp add comp &lt;daemon-path&gt; -e COMP_WORKSPACE_ROOT=&lt;workspace&gt;</code></li>
+            <li><strong>Claude Code</strong>: A popup shows a ready-to-copy <code>claude mcp add comp</code> command and an optional LLM prompt — paste in terminal. If you miss it, use the path from <code>.comp/config/claude_desktop_config.json</code></li>
             <li><strong>Cursor</strong>: Merge config into <code>~/.cursor/mcp.json</code> or <code>.cursor/mcp.json</code></li>
             <li><strong>Cline</strong>: Paste config in VSCode Settings → <em>Cline › MCP Servers</em></li>
             <li><strong>Windsurf</strong>: Merge into <code>~/.codeium/windsurf/mcp_config.json</code></li>

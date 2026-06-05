@@ -92,6 +92,11 @@ describe("AgentSetupManager", () => {
       expect(result.success).to.be.true;
       expect(result.configPath).to.include("claude_desktop_config.json");
       expect(result.message).to.include("Claude Code");
+      expect(result.command).to.exist;
+      expect(result.command).to.include("claude mcp add comp");
+      expect(result.command).to.include(`COMP_WORKSPACE_ROOT="${testWorkspace}"`);
+      expect(result.llmPrompt).to.exist;
+      expect(result.llmPrompt).to.include("ターミナルで実行してください");
 
       // Verify content is valid JSON
       const content = fs.readFileSync(result.configPath, "utf-8");

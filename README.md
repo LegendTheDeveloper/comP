@@ -93,8 +93,8 @@ Choose your AI agent. comP generates a config file in `.comp/config/`. Follow th
 ### Claude Code (CLI)
 
 Running `comP: Setup Agents` generates `.comp/config/claude_desktop_config.json` with the exact `command` path and `COMP_WORKSPACE_ROOT` pre-filled for your machine.
-
-Open that file to find your paths, then register with:
+After selecting `Claude Code`, comP displays a ready-to-copy terminal command and an optional LLM prompt.
+If you miss the popup, open `.comp/config/claude_desktop_config.json` and use the `command` path from that file.
 
 **Windows (PowerShell)**:
 
