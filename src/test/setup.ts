@@ -78,6 +78,7 @@ Module.prototype.require = function (id: string) {
       },
       workspace: {
         workspaceFolders: undefined,
+        openTextDocument: () => Promise.resolve({ uri: { fsPath: '/mock/doc' } }),
       },
       ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
       StatusBarAlignment: { Left: 1, Right: 2 },
@@ -103,6 +104,7 @@ Module.prototype.require = function (id: string) {
         showWarningMessage: () => Promise.resolve(undefined),
         showQuickPick: () => Promise.resolve(undefined),
         showInputBox: () => Promise.resolve(undefined),
+        showTextDocument: () => Promise.resolve(undefined),
         activeTextEditor: undefined,
       },
       env: {
