@@ -37,58 +37,25 @@ export function registerCommands(
         const result = await agentSetup.generateConfig(selected);
 
         if (result.success) {
-          if (result.llmPrompt) {
-            const action = await vscode.window.showInformationMessage(
-              `MCP configuration created for ${selected}. 以下のプロンプトをLLMに実行させるか、コマンドをコピーしてください。`,
-              "Copy LLM prompt",
-              "View LLM prompt",
-              "Open config",
-              "Done"
-            );
-
-            if (action === "Copy LLM prompt") {
-              await vscode.env.clipboard.writeText(result.llmPrompt);
-              vscode.window.showInformationMessage("LLM向けプロンプトをクリップボードにコピーしました。");
+          let mdContent = `# comP MCP Setup for ${selected}\n\n`;
+          
+          if (result.llmPrompt || result.command) {
+            mdContent += `## 次の手順 (Next Steps)\n\n`;
+            if (result.llmPrompt) {
+              mdContent += `### LLM に設定を依頼する\n以下のプロンプトをコピーして、エージェントのチャット画面に貼り付けてください。\n\n\`\`\`text\n${result.llmPrompt}\n\`\`\`\n\n`;
             }
-
-            if (action === "View LLM prompt") {
-              const doc = await vscode.workspace.openTextDocument({ content: result.llmPrompt, language: "text" });
-              await vscode.window.showTextDocument(doc, { preview: false });
-            }
-
-            if (action === "Open config") {
-              const uri = vscode.Uri.file(result.configPath);
-              await vscode.window.showTextDocument(uri);
-            }
-          } else if (result.command) {
-            const commandAction = await vscode.window.showInformationMessage(
-              `MCP configuration created for ${selected}. Run this command in a terminal:\n${result.command}`,
-              "Copy command",
-              "Open config",
-              "Done"
-            );
-
-            if (commandAction === "Copy command") {
-              await vscode.env.clipboard.writeText(result.command);
-              vscode.window.showInformationMessage("Command copied to clipboard.");
-            }
-
-            if (commandAction === "Open config") {
-              const uri = vscode.Uri.file(result.configPath);
-              await vscode.window.showTextDocument(uri);
+            if (result.command) {
+              mdContent += `### ターミナルで設定する\n以下のコマンドをご自身のターミナルで実行してください。\n\n\`\`\`bash\n${result.command}\n\`\`\`\n\n`;
             }
           } else {
-            const openFile = await vscode.window.showInformationMessage(
-              `Config file created at ${result.configPath}. Open it?`,
-              "Open",
-              "Done"
-            );
-
-            if (openFile === "Open") {
-              const uri = vscode.Uri.file(result.configPath);
-              await vscode.window.showTextDocument(uri);
-            }
+            mdContent += `設定は自動的に反映されました。\n\n`;
           }
+
+          mdContent += `### 設定ファイルパス\n設定ファイルは以下の場所に生成されました:\n\`\`\`text\n${result.configPath}\n\`\`\`\n`;
+
+          const doc = await vscode.workspace.openTextDocument({ content: mdContent, language: "markdown" });
+          await vscode.window.showTextDocument(doc, { preview: false });
+          vscode.window.showInformationMessage(`${selected} 向けの設定を生成しました。開かれたタブの手順に従ってください。`);
         } else {
           vscode.window.showErrorMessage(result.message);
         }

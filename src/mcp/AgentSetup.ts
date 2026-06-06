@@ -15,6 +15,8 @@ interface AgentConfig {
   configPath: string;
   envVar?: string;
   template: (daemonPath: string) => string;
+  command?: (daemonPath: string) => string;
+  llmPrompt?: (daemonPath: string, configPath: string) => string;
 }
 
 export interface GenerateConfigResult {
@@ -70,6 +72,8 @@ export class AgentSetupManager {
           name: "Claude Code",
           configPath: this.claudeDesktopConfigPath(),
           template: (path) => this.generateClaudeCodeConfig(path),
+          command: (path) => this.generateClaudeCodeCommand(path),
+          llmPrompt: (path) => this.generateClaudeCodeLLMPrompt(path),
         };
 
       case "Cursor":
@@ -77,6 +81,7 @@ export class AgentSetupManager {
           name: "Cursor",
           configPath: this.cursorConfigPath(),
           template: (path) => this.generateCursorConfig(path),
+          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`
         };
 
       case "Cline":
@@ -84,6 +89,7 @@ export class AgentSetupManager {
           name: "Cline",
           configPath: this.clineConfigPath(),
           template: (path) => this.generateClineConfig(path),
+          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`
         };
 
       case "Windsurf":
@@ -91,6 +97,7 @@ export class AgentSetupManager {
           name: "Windsurf",
           configPath: this.windsurfConfigPath(),
           template: (path) => this.generateWindsurfConfig(path),
+          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`
         };
 
       case "Continue":
@@ -98,6 +105,7 @@ export class AgentSetupManager {
           name: "Continue",
           configPath: this.continueConfigPath(),
           template: (path) => this.generateContinueConfig(path),
+          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`
         };
 
       case "Antigravity":
@@ -165,9 +173,11 @@ export class AgentSetupManager {
         message: `MCP configuration created for ${agentName}`,
       };
 
-      if (agentName === "Claude Code") {
-        result.command = this.generateClaudeCodeCommand(daemonPath);
-        result.llmPrompt = this.generateClaudeCodeLLMPrompt(daemonPath);
+      if (config.command) {
+        result.command = config.command(daemonPath);
+      }
+      if (config.llmPrompt) {
+        result.llmPrompt = config.llmPrompt(daemonPath, fullPath);
       }
 
       return result;

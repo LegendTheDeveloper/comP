@@ -16,6 +16,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { DaemonManager } from "../daemon/DaemonManager";
 import { StatusBar } from "./StatusBar";
+import { SessionMemoryManager } from "../mcp/sessionMemory";
 
 /**
  * Sidebar panel - Implemented as a WebviewViewProvider.
@@ -256,6 +257,26 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         efficiency
       );
 
+      let lastAgentConnectionStr = "Waiting...";
+      try {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || ".";
+        const memoryManager = new SessionMemoryManager(workspaceRoot);
+        const memory = memoryManager.load();
+        let lastTimestamp = 0;
+        for (const session of memory.sessions) {
+          for (const call of session.calls) {
+            if (call.timestamp > lastTimestamp) {
+              lastTimestamp = call.timestamp;
+            }
+          }
+        }
+        if (lastTimestamp > 0) {
+          lastAgentConnectionStr = new Date(lastTimestamp).toLocaleTimeString();
+        }
+      } catch (e) {
+        // ignore file read errors
+      }
+
       this.view.webview.postMessage({
         type: "statsUpdate",
         data: {
@@ -267,6 +288,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
           efficiency,
           tokensSaved,
           queriesCount,
+          lastAgentConnection: lastAgentConnectionStr,
         },
       });
     } catch (error) {
@@ -411,6 +433,10 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   </div>
   <div class="stats-container" style="margin-top:0;">
     <div class="stat-item" style="grid-column:span 2;">
+      <div class="stat-label">Last Agent Connection</div>
+      <div class="stat-value" id="lastAgentConnection" style="font-size:14px;color:var(--vscode-terminal-ansiMagenta);">Waiting...</div>
+    </div>
+    <div class="stat-item" style="grid-column:span 2;">
       <div class="stat-label">Compression Ratio</div>
       <div style="display:flex;align-items:baseline;justify-content:center;gap:8px;">
         <div class="stat-value" id="tokenEfficiency" style="color:var(--vscode-terminal-ansiGreen);">--</div>
@@ -437,6 +463,9 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         document.getElementById('edgeCount').textContent = d.totalEdges ?? '--';
         document.getElementById('lastUpdated').textContent = d.lastUpdated ?? '--';
         document.getElementById('tokenEfficiency').textContent = d.efficiency || '0%';
+        if (document.getElementById('lastAgentConnection')) {
+          document.getElementById('lastAgentConnection').textContent = d.lastAgentConnection || 'Waiting...';
+        }
         const avgSaved = d.queriesCount > 0 ? Math.round(d.tokensSaved / d.queriesCount) : 0;
         const avgSavedStr = avgSaved > 1000 ? (avgSaved / 1000).toFixed(1) + 'K' : String(avgSaved);
         document.getElementById('tokensSaved').textContent = d.queriesCount > 0 ? '~' + avgSavedStr + ' tokens/query' : '';

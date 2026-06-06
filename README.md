@@ -84,7 +84,7 @@ npm run daemon:build
 Ctrl+Shift+P → "comP: Setup Agents"
 ```
 
-Choose your AI agent. comP generates a config file in `.comp/config/`. Follow the per-agent steps below to activate it.
+Choose your AI agent. comP will open a new Markdown tab with step-by-step instructions (and an LLM prompt) to easily set up your agent. You can also verify the agent's connection status directly in the comP sidebar.
 
 ---
 
@@ -92,9 +92,7 @@ Choose your AI agent. comP generates a config file in `.comp/config/`. Follow th
 
 ### Claude Code (CLI)
 
-Running `comP: Setup Agents` generates `.comp/config/claude_desktop_config.json` with the exact `command` path and `COMP_WORKSPACE_ROOT` pre-filled for your machine.
-After selecting `Claude Code`, comP displays a ready-to-copy terminal command and an optional LLM prompt.
-If you miss the popup, open `.comp/config/claude_desktop_config.json` and use the `command` path from that file.
+Running `comP: Setup Agents` opens a Markdown guide with a ready-to-copy terminal command (or an LLM prompt) to automatically configure Claude Code. If you miss the guide, you can open `.comp/config/claude_desktop_config.json` manually.
 
 **Windows (PowerShell)**:
 

@@ -193,9 +193,9 @@
         <div class="step">
           <span class="step-num">3</span>
           <h4>エージェントを紐付ける</h4>
-          <p>コマンドパレット → <code>comP: Setup Agents</code> を実行し、エージェントを選択。comP が設定ファイルを生成し、登録用コマンドを表示します。各エージェントの手順：</p>
+          <p>コマンドパレット → <code>comP: Setup Agents</code> を実行し、エージェントを選択します。comP は新しいタブで Markdown の手順書（および自動設定用の LLM プロンプト）を開き、設定をサポートします。また、サイドバーからいつでもエージェントの接続状況（最終アクセス時刻）を確認できます。各エージェントの手順：</p>
           <ul style="margin-top:0.75rem;padding-left:1.2rem;line-height:1.8">
-            <li><strong>Claude Code</strong>: ポップアップにコピー用の <code>claude mcp add comp</code> コマンドと LLM 向けプロンプトが表示されます — そのままターミナルに貼り付けて実行。見逃した場合は <code>.comp/config/claude_desktop_config.json</code> のパスを使用</li>
+            <li><strong>Claude Code</strong>: 手順書に従い <code>claude mcp add comp</code> コマンドをコピーして実行します。手順書を見逃した場合は <code>.comp/config/claude_desktop_config.json</code> のパスを使用</li>
             <li><strong>Cursor</strong>: <code>~/.cursor/mcp.json</code> または <code>.cursor/mcp.json</code> にマージ</li>
             <li><strong>Cline</strong>: VSCode設定 → <em>Cline › MCP Servers</em> に貼り付け</li>
             <li><strong>Windsurf</strong>: <code>~/.codeium/windsurf/mcp_config.json</code> にマージ</li>
