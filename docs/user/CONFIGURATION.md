@@ -44,6 +44,7 @@ Ctrl+Shift+P → "comP: Setup Agents"
 ```
 
 This generates agent-specific configs in `.comp/config/`:
+
 - `claude_desktop_config.json` (Claude Code)
 - `cursor_config.json` (Cursor)
 - `cline_config.json` (Cline)
@@ -85,10 +86,9 @@ Relative paths are resolved from the workspace root.
 ## Excluding files from indexing
 
 comP respects `.gitignore`. To exclude additional paths, add them to `.gitignore`
-or configure `files.exclude` in VSCode settings.
+or configure `files.exclude` in VS Code settings.
 
 ## Manual re-indexing
 
 Run `comP: Force Re-index Workspace` from the Command Palette (`Ctrl+Shift+P`)
 to rebuild the index from scratch.
-

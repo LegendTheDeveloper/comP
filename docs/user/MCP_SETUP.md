@@ -1,6 +1,7 @@
 # MCP Server Setup for Multiple Agents
 
 comP runs as an MCP server, making it compatible with any MCP-capable AI agent. This guide covers setup for:
+
 - **Claude Code** (local CLI)
 - **GitHub Copilot** (VS Code extension)
 - **Cursor** (editor)
@@ -13,9 +14,11 @@ comP runs as an MCP server, making it compatible with any MCP-capable AI agent. 
 
 1. Install comP from the VSCode Marketplace or build locally
 2. Run the setup command from VSCode:
+
    ```
    Ctrl+Shift+P → "comP: Setup Agents"
    ```
+
 3. This generates configuration files in `.comp/config/`
 
 ---
@@ -25,11 +28,13 @@ comP runs as an MCP server, making it compatible with any MCP-capable AI agent. 
 ### Claude Code (Recommended)
 
 **Windows (PowerShell)**:
+
 ```powershell
 $configPath = "$env:APPDATA\Claude\claude_desktop_config.json"
 ```
 
 **macOS/Linux**:
+
 ```bash
 $configPath = ~/.claude/claude_desktop_config.json
 ```
@@ -81,6 +86,7 @@ Cursor uses MCP similarly to Claude Code:
 Cline discovers MCP servers from VSCode settings. No additional config needed after install.
 
 To verify, check Cline's settings UI:
+
 - Look for **"MCP Servers"** section
 - comP should appear in the list
 
@@ -106,21 +112,23 @@ Antigravity uses the Anthropic MCP manifest system. Setup:
 }
 ```
 
-2. Ensure `comp-daemon` is in `$PATH`:
+1. Ensure `comp-daemon` is in `$PATH`:
 
 **Windows**:
+
 ```powershell
 $env:PATH = "$env:PATH;C:\Users\YourName\AppData\Local\Programs\comp"
 [Environment]::SetEnvironmentVariable("PATH", $env:PATH, "User")
 ```
 
 **macOS/Linux**:
+
 ```bash
 # Add to ~/.zshrc or ~/.bashrc
 export PATH="/usr/local/bin/comp:$PATH"
 ```
 
-3. Restart Antigravity. Run `@comp` to verify.
+1. Restart Antigravity. Run `@comp` to verify.
 
 ---
 
