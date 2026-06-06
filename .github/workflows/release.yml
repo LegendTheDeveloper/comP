@@ -32,6 +32,11 @@ jobs:
             daemon/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Disable Windows Defender realtime scanning
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Build Rust daemon
         run: cargo build --release
         working-directory: daemon
