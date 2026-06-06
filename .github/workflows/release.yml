@@ -152,12 +152,18 @@ jobs:
       - name: Publish to VS Code Marketplace
         # secretsはif条件式で直接参照できないため、本家リポジトリの実行時のみ公開するように制御します
         if: github.repository == 'tsucky230/comP'
-        run: vsce publish -i comP-${{ github.ref_name }}.vsix --pat ${{ secrets.VSCE_PAT }}
+        run: |
+          if ! vsce publish -i comP-${{ github.ref_name }}.vsix --pat ${{ secrets.VSCE_PAT }} 2>&1 | tee /tmp/vsce_out.txt; then
+            grep -q "already exists" /tmp/vsce_out.txt && echo "Already published, skipping." || exit 1
+          fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Publish to Open VSX Registry
         if: github.repository == 'tsucky230/comP'
-        run: npx ovsx publish comP-${{ github.ref_name }}.vsix -p ${{ secrets.OVSX_PAT }}
+        run: |
+          if ! npx ovsx publish comP-${{ github.ref_name }}.vsix -p ${{ secrets.OVSX_PAT }} 2>&1 | tee /tmp/ovsx_out.txt; then
+            grep -q "already exists" /tmp/ovsx_out.txt && echo "Already published, skipping." || exit 1
+          fi
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
