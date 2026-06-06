@@ -127,16 +127,19 @@ export PATH="/usr/local/bin/comp:$PATH"
 ## Troubleshooting
 
 ### "MCP server not found"
+
 - Verify `comp-daemon` binary exists at the configured path
 - Check `COMP_WORKSPACE_ROOT` environment variable is set correctly
 - Restart the agent application
 
 ### No tools appear in chat
+
 - Run `comP: Force Re-index` to rebuild the index
 - Check VSCode output panel (`View → Output → "comP"`) for errors
 - Verify `.comp/index.db` exists in the workspace
 
 ### Token compression not working
+
 - Update `comp.maxContextTokens` in VSCode settings (default: 8000)
 - Run `run_pipeline` with increased `max_tokens` parameter
 
