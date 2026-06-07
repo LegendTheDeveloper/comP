@@ -35,7 +35,7 @@ describe("AgentSetupManager", () => {
 
       expect(config).to.exist;
       expect(config?.name).to.equal("Claude Code");
-      expect(config?.configPath).to.include("claude_desktop_config.json");
+      expect(config?.configPath).to.equal(".mcp.json");
     });
 
     it("should return Cursor config", () => {
@@ -90,13 +90,13 @@ describe("AgentSetupManager", () => {
       const result = await manager.generateConfig("Claude Code");
 
       expect(result.success).to.be.true;
-      expect(result.configPath).to.include("claude_desktop_config.json");
+      expect(result.configPath).to.include(".mcp.json");
       expect(result.message).to.include("Claude Code");
       expect(result.command).to.exist;
       expect(result.command).to.include("claude mcp add comp");
       expect(result.command).to.include(`COMP_WORKSPACE_ROOT="${testWorkspace}"`);
       expect(result.llmPrompt).to.exist;
-      expect(result.llmPrompt).to.include("ターミナルで実行してください");
+      expect(result.llmPrompt).to.include(".mcp.json");
 
       // Verify content is valid JSON
       const content = fs.readFileSync(result.configPath, "utf-8");
