@@ -223,31 +223,34 @@ export class AgentSetupManager {
   /**
    * Generate Claude Code MCP configuration
    *
-   * # Format
-   * - claude_desktop_config.json in ~/Library/Application Support/Claude/ (macOS)
-   * - $APPDATA/Claude/claude_desktop_config.json (Windows)
-   * - ~/.config/Claude/claude_desktop_config.json (Linux)
-   *
-   * # MCP Server Setup
-   * - command: daemon binary path
-   * - args: (none)
-   * - env: COMP_WORKSPACE_ROOT
+   * Writes to .mcp.json at the workspace root — the file Claude Code CLI
+   * reads for project-scoped MCP servers. Merges with any existing entries
+   * so other MCP servers the user has configured are preserved.
    */
   private generateClaudeCodeConfig(daemonPath: string): string {
-    const config = {
-      mcpServers: {
-        comp: {
-          command: daemonPath,
-          args: [],
-          env: {
-            COMP_WORKSPACE_ROOT: this.workspaceRoot,
-            RUST_LOG: "info",
-          },
-        },
+    let existing: { mcpServers: Record<string, unknown> } = { mcpServers: {} };
+
+    const fullPath = path.join(this.workspaceRoot, ".mcp.json");
+    try {
+      if (fs.existsSync(fullPath)) {
+        const raw = fs.readFileSync(fullPath, "utf-8");
+        const parsed = JSON.parse(raw);
+        existing = { mcpServers: {}, ...parsed };
+      }
+    } catch {
+      // File absent or invalid — start from scratch
+    }
+
+    existing.mcpServers["comp"] = {
+      command: daemonPath,
+      args: [],
+      env: {
+        COMP_WORKSPACE_ROOT: this.workspaceRoot,
+        RUST_LOG: "info",
       },
     };
 
-    return JSON.stringify(config, null, 2);
+    return JSON.stringify(existing, null, 2);
   }
 
   private generateClaudeCodeCommand(daemonPath: string): string {
@@ -260,7 +263,7 @@ export class AgentSetupManager {
 
   private generateClaudeCodeLLMPrompt(daemonPath: string): string {
     const command = this.generateClaudeCodeCommand(daemonPath);
-    return `このワークスペースを Claude Code の MCP サーバーとして登録するには、次のコマンドをターミナルで実行してください。\n\n${command}`;
+    return `プロジェクトルートの .mcp.json に comP MCP サーバーの設定を書き込みました。Claude Code でこのプロジェクトを開くと comP が自動的に利用可能になります。\n\nユーザーレベルで登録したい場合は次のコマンドを実行してください。\n\n${command}`;
   }
 
   /**
@@ -351,7 +354,7 @@ mcp_servers = {
    * Configuration file paths for each agent
    */
   private claudeDesktopConfigPath(): string {
-    return ".comp/config/claude_desktop_config.json";
+    return ".mcp.json";
   }
 
   private cursorConfigPath(): string {
