@@ -7,6 +7,8 @@
 // - comp.showImpactGraph: Show impact analysis
 
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { DaemonManager } from "../daemon/DaemonManager";
 import { StatusBar } from "./StatusBar";
 import { AgentSetupManager } from "../mcp/AgentSetup";
@@ -26,7 +28,7 @@ export function registerCommands(
   // Setup MCP for AI agents (Claude Code, Cursor, Cline, etc.)
   context.subscriptions.push(
     vscode.commands.registerCommand("comp.setupAgents", async () => {
-      const agents = ["Claude Code", "Cursor", "Cline", "Windsurf", "Continue", "Antigravity", "GitHub Copilot"];
+      const agents = ["Claude Code", "Cursor", "Cline", "Windsurf", "Continue", "Antigravity", "GitHub Copilot", "Aider"];
       const selected = await vscode.window.showQuickPick(agents, {
         placeHolder: "Select an AI agent to configure",
       });
@@ -88,7 +90,7 @@ export function registerCommands(
       try {
         await dm.request("forceReindex");
         const stats = await dm.getStats();
-        statusBar.updateStats(stats.total_nodes, stats.total_files, "Ready");
+        statusBar.updateStats(stats.total_nodes, stats.total_files, "Ready", stats.efficiency || "0%");
         vscode.window.showInformationMessage(`Re-indexing completed: ${stats.total_nodes} symbols found`);
       } catch (error) {
         statusBar.show("Error");
@@ -153,7 +155,68 @@ export function registerCommands(
     })
   );
 
-  // Command 6: comp.copyActiveFileCompressed
+  // Command 6: comp.exportDebugLog
+  // Export session-memory.json to a user-chosen location
+  context.subscriptions.push(
+    vscode.commands.registerCommand("comp.exportDebugLog", async () => {
+      const sessionMemoryPath = path.join(workspaceRoot, ".comp", "session-memory.json");
+
+      if (!fs.existsSync(sessionMemoryPath)) {
+        vscode.window.showWarningMessage(
+          "No session memory found. Run a query via MCP first to generate logs."
+        );
+        return;
+      }
+
+      const choice = await vscode.window.showQuickPick(
+        [
+          { label: "Open in Editor", description: "View session-memory.json in a new tab" },
+          { label: "Export to File", description: "Save a copy to a chosen location" },
+        ],
+        { placeHolder: "How do you want to view the debug log?" }
+      );
+
+      if (!choice) return;
+
+      if (choice.label === "Open in Editor") {
+        const uri = vscode.Uri.file(sessionMemoryPath);
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+        return;
+      }
+
+      // Export to file
+      const defaultUri = vscode.Uri.file(
+        path.join(workspaceRoot, `comp-debug-${Date.now()}.json`)
+      );
+      const saveUri = await vscode.window.showSaveDialog({
+        defaultUri,
+        filters: { "JSON": ["json"] },
+        title: "Export comP Debug Log",
+      });
+
+      if (!saveUri) return;
+
+      try {
+        const content = fs.readFileSync(sessionMemoryPath, "utf-8");
+        fs.writeFileSync(saveUri.fsPath, content, "utf-8");
+        const openDoc = await vscode.window.showInformationMessage(
+          `Debug log exported to ${path.basename(saveUri.fsPath)}`,
+          "Open File"
+        );
+        if (openDoc === "Open File") {
+          const doc = await vscode.workspace.openTextDocument(saveUri);
+          await vscode.window.showTextDocument(doc, { preview: false });
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Export failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    })
+  );
+
+  // Command 7: comp.copyActiveFileCompressed
   // Copy current active file with AST compression
   context.subscriptions.push(
     vscode.commands.registerCommand("comp.copyActiveFileCompressed", async () => {

@@ -55,15 +55,16 @@ describe("registerCommands", () => {
     (vscode.env.clipboard as any).writeText = sinon.stub().resolves();
   });
 
-  it("registers all 6 commands", () => {
+  it("registers all 7 commands", () => {
     registerCommands(mockContext, () => mockDaemon, mockStatusBar);
-    expect(handlers.size).to.equal(6);
+    expect(handlers.size).to.equal(7);
     expect(handlers.has("comp.setupAgents")).to.be.true;
     expect(handlers.has("comp.forceReindex")).to.be.true;
     expect(handlers.has("comp.generateContext")).to.be.true;
     expect(handlers.has("comp.showImpactGraph")).to.be.true;
     expect(handlers.has("comp.showStats")).to.be.true;
     expect(handlers.has("comp.copyActiveFileCompressed")).to.be.true;
+    expect(handlers.has("comp.exportDebugLog")).to.be.true;
   });
 
   it("comp.showStats calls getStats and shows information message", async () => {

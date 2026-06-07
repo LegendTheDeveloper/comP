@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.7.0] - 2026-06-07
+
+### Added
+
+- **拡張子別圧縮ルール(#7)**: `.comp/config.json`に`compression_rules`フィールドを追加。`{ "*.md": 0, "*.rs": 2 }`のようなパターンでファイルごとの圧縮レベルを指定可能。`run_pipeline`レスポンスに`compression_rules_applied`フラグを追加
+- **Aiderエージェント対応(#8)**: `comp setupAgents`でAiderを選択可能に。`.aider.conf.yml`に`mcp-servers`ブロックを生成。既存の設定ファイルがある場合はマージ警告を追加
+- **デバッグログエクスポート(#10)**: `comP: Export Debug Log`コマンドを追加。`session-memory.json`をエディターで開くか、任意のパスにエクスポート可能
+
+### Fixed
+
+- **トークン可視化の状態不整合 (#5)**:
+  - `startDaemonStack()`完了時にStatusBarが`efficiency`なしで"Ready"を表示していた問題を修正。起動直後に`getStats`を呼んでトークン統計を即時反映
+  - `forceReindex`後の`updateStats`で`efficiency`が渡されず表示がリセットされていたバグを修正
+
+### Why
+
+v0.7.xクイックウィン群。圧縮ルールによりMarkdownドキュメントを常に非圧縮（level 0）に保ちつつコードを強圧縮するなど、プロジェクト固有の最適化が可能になる。
+
+---
+
 ## [0.5.4] - 2026-06-05
 
 ### Added

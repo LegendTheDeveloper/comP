@@ -114,6 +114,15 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
 
   sidebarPanel?.setDaemonManager(daemonManager);
 
+  // Update status bar immediately with token stats (SidebarPanel also polls every 5s,
+  // but showing efficiency right away avoids a blank display on startup)
+  try {
+    const stats = await daemonManager.getStats();
+    statusBar?.updateStats(stats.total_nodes || 0, stats.total_files || 0, "Ready", stats.efficiency || "0%");
+  } catch {
+    statusBar?.show("Ready");
+  }
+
   // CodeLens and FileWatcher need to be re-created on restart -> manage via dispose
   if (codeLensDisposable) {
     codeLensDisposable.dispose();
@@ -133,7 +142,6 @@ async function startDaemonStack(context: vscode.ExtensionContext): Promise<void>
   }
   watcherDisposable = setupFileWatchers(context, daemonManager, codeLensProvider);
 
-  statusBar?.show("Ready");
 }
 
 /**

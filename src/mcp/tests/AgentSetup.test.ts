@@ -78,6 +78,14 @@ describe("AgentSetupManager", () => {
       expect(config?.configPath).to.include("mcp.json");
     });
 
+    it("should return Aider config", () => {
+      const config = manager.getAgentConfig("Aider");
+
+      expect(config).to.exist;
+      expect(config?.name).to.equal("Aider");
+      expect(config?.configPath).to.include(".aider.conf.yml");
+    });
+
     it("should return null for unsupported agent", () => {
       const config = manager.getAgentConfig("UnsupportedAgent");
 
@@ -182,6 +190,30 @@ describe("AgentSetupManager", () => {
       // Should contain Python-like syntax
       expect(content).to.include("mcp_servers");
       expect(content).to.include("COMP_WORKSPACE_ROOT");
+    });
+
+    it("Aider config should contain mcp-servers YAML block", async () => {
+      const result = await manager.generateConfig("Aider");
+      expect(result.success).to.be.true;
+      expect(result.configPath).to.include(".aider.conf.yml");
+
+      const content = fs.readFileSync(result.configPath, "utf-8");
+      expect(content).to.include("mcp-servers:");
+      expect(content).to.include("comp:");
+      expect(content).to.include("COMP_WORKSPACE_ROOT");
+    });
+
+    it("Aider config should warn when mcp-servers block already exists", async () => {
+      // Pre-create a config file with an existing mcp-servers block
+      const configPath = path.join(testWorkspace, ".aider.conf.yml");
+      fs.writeFileSync(configPath, "mcp-servers:\n  other-server:\n    command: /usr/bin/other\n");
+
+      const result = await manager.generateConfig("Aider");
+      expect(result.success).to.be.true;
+
+      const content = fs.readFileSync(result.configPath, "utf-8");
+      expect(content).to.include("WARNING");
+      expect(content).to.include("existing config below");
     });
   });
 });

@@ -2,7 +2,7 @@
   "name": "comp-vscode",
   "displayName": "comP - Code Context Engine",
   "description": "Local-first code indexing engine for AI agents with MCP support. Open-source alternative to Vexp.",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "publisher": "tsucky230",
   "license": "MIT",
   "icon": "resources/comp-icon.png",
@@ -67,6 +67,11 @@
         "command": "comp.copyActiveFileCompressed",
         "title": "comP: Copy Active File Compressed",
         "description": "Copy current active file with AST compression (comments removed or skeletonized)"
+      },
+      {
+        "command": "comp.exportDebugLog",
+        "title": "comP: Export Debug Log",
+        "description": "Open or export the session-memory.json debug log"
       }
     ],
     "viewsContainers": {

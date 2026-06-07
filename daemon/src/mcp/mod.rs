@@ -421,12 +421,21 @@ impl MCPServer {
         let packed = Self::pack_within_budget(&candidates, budget, final_level);
 
         // 4. Build pivot_files JSON, compressing content at the chosen level.
+        //    Per-extension rules from .comp/config.json may override level per file.
         let ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
-        let compression = compress::CompressionLevel::from_i64(final_level);
+        let compression_rules = Self::load_compression_rules();
         let mut pivot_files: Vec<Value> = Vec::new();
         let mut pivot_paths: Vec<String> = Vec::new();
+        let mut compression_rules_applied = false;
         for (file, sym) in &packed {
-            let tokens = Self::estimate_tokens(*sym, final_level);
+            let file_level = match Self::apply_compression_rule(file, &compression_rules) {
+                Some(rule_level) if rule_level != final_level => {
+                    compression_rules_applied = true;
+                    rule_level
+                }
+                _ => final_level,
+            };
+            let tokens = Self::estimate_tokens(*sym, file_level);
             let mut entry = json!({
                 "path": file,
                 "symbols": sym,
@@ -435,8 +444,9 @@ impl MCPServer {
             if include_content {
                 let full_path = std::path::Path::new(&ws).join(file);
                 let lang = path_to_lang.get(file).map(|s| s.as_str()).unwrap_or("");
+                let file_compression = compress::CompressionLevel::from_i64(file_level);
                 if let Ok(raw) = std::fs::read_to_string(&full_path) {
-                    entry["content"] = Value::String(compress::compress(&raw, lang, compression));
+                    entry["content"] = Value::String(compress::compress(&raw, lang, file_compression));
                 }
             }
             pivot_files.push(entry);
@@ -448,6 +458,11 @@ impl MCPServer {
             .filter_map(|v| v["tokens"].as_u64())
             .map(|t| t as usize)
             .sum();
+
+        // Rules can override the base level with less compression (e.g. rule=0, base=2),
+        // causing total_tokens to exceed the budget even when budget_adjusted is false.
+        // Flag this explicitly so agents are not surprised by the discrepancy.
+        let budget_exceeded_by_rules = compression_rules_applied && total_tokens > budget;
 
         // 5. Real workspace token baseline from stored file char counts
         let full_workspace_tokens = self.state.graph_db
@@ -504,6 +519,8 @@ impl MCPServer {
             "total_tokens": total_tokens,
             "max_tokens": budget,
             "compression_level_applied": final_level,
+            "compression_rules_applied": compression_rules_applied,
+            "budget_exceeded_by_rules": budget_exceeded_by_rules,
             "budget_adjusted": budget_adjusted,
             "savings": savings,
             "full_workspace_tokens": full_workspace_tokens,
@@ -526,6 +543,97 @@ impl MCPServer {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let json: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
         json["default_budget_tokens"].as_u64().unwrap_or(8000) as usize
+    }
+
+    /// Read `compression_rules` from `.comp/config.json`.
+    ///
+    /// Rules map glob patterns to compression levels (0/1/2).
+    /// Returns an empty map when the file is absent, invalid, or has no rules key.
+    fn load_compression_rules() -> std::collections::HashMap<String, i64> {
+        let root = std::env::var("COMP_WORKSPACE_ROOT")
+            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+            .unwrap_or_else(|_| ".".to_string());
+        let path = std::path::Path::new(&root).join(".comp/config.json");
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let json: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
+
+        let mut rules = std::collections::HashMap::new();
+        if let Some(obj) = json["compression_rules"].as_object() {
+            for (pattern, level_val) in obj {
+                if let Some(l) = level_val.as_i64() {
+                    rules.insert(pattern.clone(), l.clamp(0, 2));
+                }
+            }
+        }
+        rules
+    }
+
+    /// Match a filename against a simple glob pattern.
+    ///
+    /// Supported forms: `*` (any), `*.ext` (suffix), `prefix*` (prefix), `exact` (literal).
+    fn match_pattern(filename: &str, pattern: &str) -> bool {
+        if pattern == "*" {
+            return true;
+        }
+        if let Some(suffix) = pattern.strip_prefix('*') {
+            return filename.ends_with(suffix);
+        }
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            return filename.starts_with(prefix);
+        }
+        filename == pattern
+    }
+
+    /// Return the compression level override for a file path from the rules map.
+    ///
+    /// Matching order (deterministic):
+    ///   1. Exact full-path match
+    ///   2. Exact filename match
+    ///   3. Glob patterns — most specific wins (longest non-wildcard portion);
+    ///      ties broken alphabetically so results never vary between runs.
+    ///
+    /// Returns None when no rule matches (caller falls back to the base level).
+    fn apply_compression_rule(
+        file_path: &str,
+        rules: &std::collections::HashMap<String, i64>,
+    ) -> Option<i64> {
+        if rules.is_empty() {
+            return None;
+        }
+        let filename = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(file_path);
+
+        // 1. Exact full-path match
+        if let Some(&level) = rules.get(file_path) {
+            return Some(level);
+        }
+        // 2. Exact filename match
+        if let Some(&level) = rules.get(filename) {
+            return Some(level);
+        }
+        // 3. Glob patterns — collect all matches, then pick most specific deterministically.
+        //    WHY: HashMap iteration order is not guaranteed; without this, the chosen rule
+        //    for a file that matches multiple globs (e.g. "test_*.rs" matching both "*.rs"
+        //    and "test_*") would change between runs.
+        let mut matches: Vec<(&str, i64)> = rules
+            .iter()
+            .filter(|(p, _)| p.contains('*') && Self::match_pattern(filename, p))
+            .map(|(p, &l)| (p.as_str(), l))
+            .collect();
+
+        if matches.is_empty() {
+            return None;
+        }
+        // Sort: longer non-wildcard portion = more specific = wins.
+        // Tie-break: alphabetical pattern string for full determinism.
+        matches.sort_by(|(a, _), (b, _)| {
+            let a_len = a.replace('*', "").len();
+            let b_len = b.replace('*', "").len();
+            b_len.cmp(&a_len).then_with(|| a.cmp(b))
+        });
+        Some(matches[0].1)
     }
 
     /// Estimate token count for a file given its symbol count and compression level.
@@ -1752,6 +1860,79 @@ mod tests {
 
         let result = server.handle_run_pipeline(params).await;
         assert!(result.is_err()); // Should error on missing task
+    }
+
+    #[test]
+    fn test_match_pattern() {
+        // Wildcard any
+        assert!(MCPServer::match_pattern("foo.rs", "*"));
+        // Suffix glob
+        assert!(MCPServer::match_pattern("main.rs", "*.rs"));
+        assert!(!MCPServer::match_pattern("main.ts", "*.rs"));
+        // Prefix glob
+        assert!(MCPServer::match_pattern("test_auth.rs", "test_*"));
+        assert!(!MCPServer::match_pattern("auth_test.rs", "test_*"));
+        // Exact
+        assert!(MCPServer::match_pattern("README.md", "README.md"));
+        assert!(!MCPServer::match_pattern("readme.md", "README.md"));
+    }
+
+    #[test]
+    fn test_apply_compression_rule_empty() {
+        let rules = std::collections::HashMap::new();
+        assert_eq!(MCPServer::apply_compression_rule("src/main.rs", &rules), None);
+    }
+
+    #[test]
+    fn test_apply_compression_rule_glob() {
+        let mut rules = std::collections::HashMap::new();
+        rules.insert("*.md".to_string(), 0i64);
+        rules.insert("*.rs".to_string(), 2i64);
+
+        assert_eq!(MCPServer::apply_compression_rule("docs/README.md", &rules), Some(0));
+        assert_eq!(MCPServer::apply_compression_rule("src/main.rs", &rules), Some(2));
+        assert_eq!(MCPServer::apply_compression_rule("app.ts", &rules), None);
+    }
+
+    #[test]
+    fn test_apply_compression_rule_exact_takes_priority() {
+        let mut rules = std::collections::HashMap::new();
+        rules.insert("*.rs".to_string(), 2i64);
+        rules.insert("main.rs".to_string(), 0i64); // exact overrides glob
+
+        assert_eq!(MCPServer::apply_compression_rule("src/main.rs", &rules), Some(0));
+        assert_eq!(MCPServer::apply_compression_rule("src/lib.rs", &rules), Some(2));
+    }
+
+    #[test]
+    fn test_apply_compression_rule_conflict_is_deterministic() {
+        // "test_*" (5 non-wildcard chars) is more specific than "*.rs" (2 non-wildcard chars)
+        // so test_* should win regardless of HashMap insertion order.
+        let mut rules = std::collections::HashMap::new();
+        rules.insert("*.rs".to_string(), 2i64);
+        rules.insert("test_*".to_string(), 1i64);
+
+        // Run 100 times to expose any non-determinism
+        for _ in 0..100 {
+            let level = MCPServer::apply_compression_rule("test_auth.rs", &rules);
+            assert_eq!(level, Some(1), "test_* (5 chars) should beat *.rs (2 chars)");
+        }
+
+        // *.rs (2) vs *.md (2) — tie on non-wildcard length, alphabetical: "*.md" < "*.rs"
+        let mut rules2 = std::collections::HashMap::new();
+        rules2.insert("*.rs".to_string(), 2i64);
+        rules2.insert("*.md".to_string(), 0i64);
+        // these don't conflict: .rs and .md can't both match the same file
+        assert_eq!(MCPServer::apply_compression_rule("main.rs", &rules2), Some(2));
+        assert_eq!(MCPServer::apply_compression_rule("README.md", &rules2), Some(0));
+    }
+
+    #[test]
+    fn test_load_compression_rules_missing_file() {
+        // Should return empty map when config.json doesn't exist
+        let rules = MCPServer::load_compression_rules();
+        // In test environment COMP_WORKSPACE_ROOT may not be set — just ensure no panic
+        let _ = rules;
     }
 
     #[tokio::test]
