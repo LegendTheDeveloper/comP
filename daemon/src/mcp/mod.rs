@@ -294,9 +294,17 @@ impl MCPServer {
         let task = params["task"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'task' parameter"))?;
-        let max_tokens = params["max_tokens"].as_u64().unwrap_or(8000) as usize;
+
+        // budget: explicit param overrides config default
+        let budget = params["max_tokens"].as_u64().map(|v| v as usize)
+            .unwrap_or_else(Self::load_default_budget);
+
         let include_content = params["include_content"].as_bool().unwrap_or(false);
-        let compression_level = params["compression_level"].as_i64().unwrap_or(0);
+
+        // None = auto-adjust mode; Some(n) = fixed level, no compression adjustment.
+        // WHY: Use params.get() to distinguish "omitted" (None → auto) from "explicitly 0" (Some(0) → fixed).
+        let explicit_compression: Option<i64> = params.get("compression_level")
+            .and_then(|v| v.as_i64());
 
         // 1. Split task into words and query symbol name LIKE for each keyword -> pivot candidates
         // WHY: A LIKE query on the entire task string (e.g. "fix auth bug") would return 0 hits.
@@ -350,10 +358,12 @@ impl MCPServer {
             })
             .collect();
 
-        // 2. Deduplicate matched files to build pivot files list
+        // 2. Collect candidates in relevance order (deduped by file path).
+        //    Content compression is deferred until after level selection so we
+        //    only read each file once at the chosen level.
         let mut seen = std::collections::HashSet::new();
-        let mut pivot_files = Vec::new();
-        let mut pivot_paths: Vec<String> = Vec::new();
+        // (path, sym_count)
+        let mut candidates: Vec<(String, usize)> = Vec::new();
         let mut recorded_symbols = Vec::new();
         let mut recorded_files = Vec::new();
         for (file, name, _kind, _line) in hits {
@@ -364,32 +374,14 @@ impl MCPServer {
                     .get(&file)
                     .and_then(|id| symbol_counts.get(id))
                     .copied()
-                    .unwrap_or(0);
-                // WHY: sym*20 is an underestimation. An average function has ~50 lines x ~1 token/line, closer to sym*50.
-                //      We estimate based on line count approximations since file sizes aren't stored in DB.
-                let tokens = (sym as usize).saturating_mul(50);
-                let mut entry = json!({
-                    "path": file.clone(),
-                    "symbols": sym,
-                    "tokens": tokens
-                });
-                if include_content {
-                    let ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
-                    let full_path = std::path::Path::new(&ws).join(&file);
-                    let lang = path_to_lang.get(&file).map(|s| s.as_str()).unwrap_or("");
-                    let level = compress::CompressionLevel::from_i64(compression_level);
-                    if let Ok(raw) = std::fs::read_to_string(&full_path) {
-                        entry["content"] = Value::String(compress::compress(&raw, lang, level));
-                    }
-                }
-                pivot_files.push(entry);
-                pivot_paths.push(file);
+                    .unwrap_or(0) as usize;
+                candidates.push((file, sym));
             }
         }
 
         // BM25 full-text search (complements search for Markdown and Office files)
         // WHY: Symbol LIKE queries only match headings, missing body content keywords.
-        //      We read Markdown/Office files and score using BM25, then add to pivot files.
+        //      We read Markdown/Office files and score using BM25, then add to candidates.
         let mut bm25_hit_count: usize = 0;
         if !doc_paths.is_empty() && !keywords.is_empty() {
             let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
@@ -408,26 +400,47 @@ impl MCPServer {
                         .get(&path)
                         .and_then(|id| symbol_counts.get(id))
                         .copied()
-                        .unwrap_or(0);
-                    let tokens = (sym as usize).saturating_mul(50);
-                    let mut entry = json!({
-                        "path": path.clone(),
-                        "symbols": sym,
-                        "tokens": tokens
-                    });
-                    if include_content {
-                        let ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
-                        let full_path = std::path::Path::new(&ws).join(&path);
-                        let lang = path_to_lang.get(&path).map(|s| s.as_str()).unwrap_or("");
-                        let level = compress::CompressionLevel::from_i64(compression_level);
-                        if let Ok(raw) = std::fs::read_to_string(&full_path) {
-                            entry["content"] = Value::String(compress::compress(&raw, lang, level));
-                        }
-                    }
-                    pivot_files.push(entry);
-                    pivot_paths.push(path);
+                        .unwrap_or(0) as usize;
+                    candidates.push((path, sym));
                 }
             }
+        }
+
+        // 3. Choose compression level and pack within budget.
+        //
+        //    Fixed mode  (explicit_compression = Some(n)):
+        //      Use level n without adjustment; greedy-pack files at that level.
+        //
+        //    Auto mode   (explicit_compression = None):
+        //      Try levels 0 → 1 → 2 until total estimate fits budget.
+        //      If level 2 still overflows, stay at 2 and greedy-truncate.
+        let (final_level, budget_adjusted) = match explicit_compression {
+            Some(level) => (level, false),
+            None => Self::choose_compression_level(&candidates, budget),
+        };
+        let packed = Self::pack_within_budget(&candidates, budget, final_level);
+
+        // 4. Build pivot_files JSON, compressing content at the chosen level.
+        let ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
+        let compression = compress::CompressionLevel::from_i64(final_level);
+        let mut pivot_files: Vec<Value> = Vec::new();
+        let mut pivot_paths: Vec<String> = Vec::new();
+        for (file, sym) in &packed {
+            let tokens = Self::estimate_tokens(*sym, final_level);
+            let mut entry = json!({
+                "path": file,
+                "symbols": sym,
+                "tokens": tokens
+            });
+            if include_content {
+                let full_path = std::path::Path::new(&ws).join(file);
+                let lang = path_to_lang.get(file).map(|s| s.as_str()).unwrap_or("");
+                if let Ok(raw) = std::fs::read_to_string(&full_path) {
+                    entry["content"] = Value::String(compress::compress(&raw, lang, compression));
+                }
+            }
+            pivot_files.push(entry);
+            pivot_paths.push(file.clone());
         }
 
         let total_tokens: usize = pivot_files
@@ -436,7 +449,7 @@ impl MCPServer {
             .map(|t| t as usize)
             .sum();
 
-        // 3. Real workspace token baseline from stored file char counts
+        // 5. Real workspace token baseline from stored file char counts
         let full_workspace_tokens = self.state.graph_db
             .get_full_workspace_tokens()
             .unwrap_or(total_tokens as u64 + 1);
@@ -489,7 +502,9 @@ impl MCPServer {
             "pivot_files": pivot_files,
             "related_files": [],  // TODO: calculate via impact graph (Phase 5)
             "total_tokens": total_tokens,
-            "max_tokens": max_tokens,
+            "max_tokens": budget,
+            "compression_level_applied": final_level,
+            "budget_adjusted": budget_adjusted,
             "savings": savings,
             "full_workspace_tokens": full_workspace_tokens,
             "estimated_cost": cost,
@@ -499,6 +514,67 @@ impl MCPServer {
                 "pivot_file_types": pivot_file_types
             }
         }))
+    }
+
+    /// Read `default_budget_tokens` from `.comp/config.json`.
+    /// Falls back to 8000 if the file is absent or the key is missing.
+    fn load_default_budget() -> usize {
+        let root = std::env::var("COMP_WORKSPACE_ROOT")
+            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+            .unwrap_or_else(|_| ".".to_string());
+        let path = std::path::Path::new(&root).join(".comp/config.json");
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let json: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
+        json["default_budget_tokens"].as_u64().unwrap_or(8000) as usize
+    }
+
+    /// Estimate token count for a file given its symbol count and compression level.
+    ///
+    /// Reduction factors mirror the compression ratio ranges advertised in the tool schema:
+    ///   level 1 (compact)   → ~30% reduction  → factor 0.70
+    ///   level 2 (skeleton)  → ~75% reduction  → factor 0.25
+    fn estimate_tokens(sym_count: usize, level: i64) -> usize {
+        // WHY: sym*50 approximates ~50 tokens per symbol (signature + a few lines).
+        let base = sym_count.saturating_mul(50);
+        match level {
+            1 => ((base as f64) * 0.70) as usize,
+            2 => ((base as f64) * 0.25) as usize,
+            _ => base,
+        }
+    }
+
+    /// Choose the lowest compression level whose total token estimate fits within budget.
+    ///
+    /// Returns (level, budget_adjusted).
+    /// If even level 2 overflows, returns (2, true) — greedy truncation handles the rest.
+    fn choose_compression_level(candidates: &[(String, usize)], budget: usize) -> (i64, bool) {
+        for level in [0i64, 1, 2] {
+            let total: usize = candidates.iter()
+                .map(|(_, sym)| Self::estimate_tokens(*sym, level))
+                .sum();
+            if total <= budget {
+                return (level, level > 0);
+            }
+        }
+        (2, true)
+    }
+
+    /// Greedily pack candidates within budget at the given compression level.
+    ///
+    /// Iterates in relevance order (highest first). A file that exceeds the remaining
+    /// budget is skipped rather than stopping the loop, so smaller subsequent files
+    /// can still fill remaining space.
+    fn pack_within_budget(candidates: &[(String, usize)], budget: usize, level: i64) -> Vec<(String, usize)> {
+        let mut remaining = budget;
+        let mut packed = Vec::new();
+        for (path, sym) in candidates {
+            let tokens = Self::estimate_tokens(*sym, level);
+            if tokens <= remaining {
+                packed.push((path.clone(), *sym));
+                remaining = remaining.saturating_sub(tokens);
+            }
+        }
+        packed
     }
 
     /// Tool 2: get_context
@@ -927,8 +1003,7 @@ impl MCPServer {
                             "compression_level": {
                                 "type": "integer",
                                 "enum": [0, 1, 2],
-                                "default": 0,
-                                "description": "0=full source (default), 1=compact (comments removed, 20-35% smaller), 2=skeleton (signatures only, 50-70% smaller)"
+                                "description": "Omit for auto-adjustment (comP picks the lowest level that fits the budget). Set explicitly to disable auto-adjustment: 0=full source, 1=compact (comments removed, ~30% smaller), 2=skeleton (signatures only, ~75% smaller)"
                             }
                         },
                         "required": ["task"]
