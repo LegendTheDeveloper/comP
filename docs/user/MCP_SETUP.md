@@ -12,8 +12,8 @@ comP runs as an MCP server, making it compatible with any MCP-capable AI agent. 
 
 ## Prerequisites
 
-1. Install comP from the VSCode Marketplace or build locally
-2. Run the setup command from VSCode:
+1. Install comP from the VS Code Marketplace or build locally
+2. Run the setup command from VS Code:
 
    ```
    Ctrl+Shift+P → "comP: Setup Agents"
@@ -58,15 +58,15 @@ Restart Claude Code. Run `@comp` in the chat to verify.
 
 ---
 
-### GitHub Copilot (VSCode Extension)
+### GitHub Copilot (VS Code Extension)
 
-GitHub Copilot in VSCode uses MCP via extension-level configuration. Run:
+GitHub Copilot in VS Code uses MCP via extension-level configuration. Run:
 
 ```
 Ctrl+Shift+P → "comP: Setup Agents" → Select "GitHub Copilot"
 ```
 
-This registers comP in VSCode settings. Copilot will automatically discover `run_pipeline` and related tools.
+This registers comP in VS Code settings. Copilot will automatically discover `run_pipeline` and related tools.
 
 ---
 
@@ -81,9 +81,9 @@ Cursor uses MCP similarly to Claude Code:
 
 ---
 
-### Cline (VSCode)
+### Cline (VS Code)
 
-Cline discovers MCP servers from VSCode settings. No additional config needed after install.
+Cline discovers MCP servers from VS Code settings. No additional config needed after install.
 
 To verify, check Cline's settings UI:
 
@@ -132,6 +132,18 @@ export PATH="/usr/local/bin/comp:$PATH"
 
 ---
 
+### Aider
+
+Run:
+
+```
+Ctrl+Shift+P → "comP: Setup Agents" → Select "Aider"
+```
+
+comP writes the MCP server block directly to `.aider.conf.yml` in your workspace root. Restart Aider to pick up the new server.
+
+---
+
 ## Troubleshooting
 
 ### "MCP server not found"
@@ -143,12 +155,12 @@ export PATH="/usr/local/bin/comp:$PATH"
 ### No tools appear in chat
 
 - Run `comP: Force Re-index` to rebuild the index
-- Check VSCode output panel (`View → Output → "comP"`) for errors
+- Check VS Code output panel (`View → Output → "comP"`) for errors
 - Verify `.comp/index.db` exists in the workspace
 
 ### Token compression not working
 
-- Update `comp.maxContextTokens` in VSCode settings (default: 8000)
+- Update `comp.maxContextTokens` in VS Code settings (default: 8000)
 - Run `run_pipeline` with increased `max_tokens` parameter
 
 ---
@@ -157,7 +169,7 @@ export PATH="/usr/local/bin/comp:$PATH"
 
 To use comP in multiple workspaces:
 
-1. Open each workspace in VSCode separately
+1. Open each workspace in VS Code separately
 2. Run `comP: Force Re-index` in each
 3. Each workspace gets its own `.comp/index.db`
 4. In Claude Code / Cursor, set different `COMP_WORKSPACE_ROOT` values per workspace
@@ -166,6 +178,6 @@ To use comP in multiple workspaces:
 
 ## What's Next?
 
-- See [CONFIGURATION.md](./CONFIGURATION.md) for VSCode settings
+- See [CONFIGURATION.md](./CONFIGURATION.md) for VS Code settings
 - See [MCP_TOOLS.md](./MCP_TOOLS.md) for available MCP tools
 - Check [GETTING_STARTED.md](./GETTING_STARTED.md) for usage tips

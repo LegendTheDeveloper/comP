@@ -4,7 +4,7 @@ comP exposes tools via the Model Context Protocol (JSON-RPC 2.0 over stdio).
 
 ## Setup
 
-Run `comP: Setup Agent MCP` from the VSCode Command Palette to auto-configure
+Run `comP: Setup Agent MCP` from the VS Code Command Palette to auto-configure
 Claude Code, Cursor, Cline, Windsurf, or Continue.
 
 ## Tools
@@ -28,6 +28,12 @@ Parameters:
   - `0` — full source (no change)
   - `1` — compact: comments and blank lines removed (~20-35% smaller)
   - `2` — skeleton: function/class bodies replaced with `{ ... }` (~50-70% smaller)
+
+Response fields (v0.6+):
+
+- `compression_level_applied` (number) — actual compression level used after auto-budget selection
+- `budget_adjusted` (boolean) — `true` if compression level was raised to fit within `default_budget_tokens`
+- `compression_rules_applied` (boolean) — `true` if any per-extension rules from `compression_rules` were applied
 
 ---
 

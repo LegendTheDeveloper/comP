@@ -17,6 +17,13 @@ interface AgentConfig {
   template: (daemonPath: string) => string;
   command?: (daemonPath: string) => string;
   llmPrompt?: (daemonPath: string, configPath: string) => string;
+  constitutionGuide?: ConstitutionGuide;
+}
+
+export interface ConstitutionGuide {
+  filePath: string;
+  snippet: string;
+  llmInstruction: string;
 }
 
 export interface GenerateConfigResult {
@@ -25,6 +32,7 @@ export interface GenerateConfigResult {
   message: string;
   command?: string;
   llmPrompt?: string;
+  constitutionGuide?: ConstitutionGuide;
 }
 
 /**
@@ -64,6 +72,30 @@ export class AgentSetupManager {
    * # Prerequisites
    * - The daemon binary exists in a known location
    */
+  private compRuleSnippet(): string {
+    return [
+      "## comP MCP Tool Usage",
+      "",
+      "At the start of every coding or documentation task, ALWAYS call `run_pipeline` FIRST.",
+      "Do NOT read files, run grep/find/Bash searches, or explore the codebase manually before calling run_pipeline.",
+      "run_pipeline indexes the entire codebase and returns exactly the relevant files — use it every time.",
+    ].join("\n");
+  }
+
+  private buildConstitutionGuide(filePath: string): ConstitutionGuide {
+    const snippet = this.compRuleSnippet();
+    const llmInstruction = [
+      `\`${filePath}\` にプロジェクトルート基準で以下の内容を追記してください。`,
+      `ファイルが存在しない場合は新規作成し、既存の場合は末尾に追記してください。`,
+      `すでに "comP MCP Tool Usage" というセクションがある場合は追記不要です。`,
+      ``,
+      "```markdown",
+      snippet,
+      "```",
+    ].join("\n");
+    return { filePath, snippet, llmInstruction };
+  }
+
   getAgentConfig(agentName: string): AgentConfig | null {
 
     switch (agentName) {
@@ -74,6 +106,7 @@ export class AgentSetupManager {
           template: (path) => this.generateClaudeCodeConfig(path),
           command: (path) => this.generateClaudeCodeCommand(path),
           llmPrompt: (path) => this.generateClaudeCodeLLMPrompt(path),
+          constitutionGuide: this.buildConstitutionGuide("CLAUDE.md"),
         };
 
       case "Cursor":
@@ -81,7 +114,8 @@ export class AgentSetupManager {
           name: "Cursor",
           configPath: this.cursorConfigPath(),
           template: (path) => this.generateCursorConfig(path),
-          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`
+          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`,
+          constitutionGuide: this.buildConstitutionGuide(".cursor/rules"),
         };
 
       case "Cline":
@@ -89,7 +123,8 @@ export class AgentSetupManager {
           name: "Cline",
           configPath: this.clineConfigPath(),
           template: (path) => this.generateClineConfig(path),
-          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`
+          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`,
+          constitutionGuide: this.buildConstitutionGuide(".clinerules"),
         };
 
       case "Windsurf":
@@ -97,7 +132,8 @@ export class AgentSetupManager {
           name: "Windsurf",
           configPath: this.windsurfConfigPath(),
           template: (path) => this.generateWindsurfConfig(path),
-          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`
+          llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`,
+          constitutionGuide: this.buildConstitutionGuide(".windsurfrules"),
         };
 
       case "Continue":
@@ -120,6 +156,7 @@ export class AgentSetupManager {
           name: "GitHub Copilot",
           configPath: this.copilotConfigPath(),
           template: (path) => this.generateCopilotConfig(path),
+          constitutionGuide: this.buildConstitutionGuide(".github/copilot-instructions.md"),
         };
 
       case "Aider":
@@ -128,6 +165,7 @@ export class AgentSetupManager {
           configPath: this.aiderConfigPath(),
           template: (path) => this.generateAiderConfig(path),
           llmPrompt: (_, configPath) => `以下のMCPサーバー設定ファイルが生成されました。このプロジェクトで comP を MCP サーバーとして利用できるように、あなたの設定を更新してください。\n設定ファイルパス: ${configPath}`,
+          constitutionGuide: this.buildConstitutionGuide("CONVENTIONS.md"),
         };
 
       default:
@@ -186,6 +224,9 @@ export class AgentSetupManager {
       }
       if (config.llmPrompt) {
         result.llmPrompt = config.llmPrompt(daemonPath, fullPath);
+      }
+      if (config.constitutionGuide) {
+        result.constitutionGuide = config.constitutionGuide;
       }
 
       return result;

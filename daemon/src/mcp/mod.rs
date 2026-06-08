@@ -1088,7 +1088,7 @@ impl MCPServer {
             "tools": [
                 {
                     "name": "run_pipeline",
-                    "description": "Call at the START of a new task — coding (bug fix, feature, refactor) or documentation (writing/editing Markdown, updating docs) — to retrieve the most relevant files and symbols for that task. Do NOT call mid-implementation or for general questions. Returns pivot files and related symbols ranked by relevance. The response includes a 'coverage' field showing which file types (including Markdown) were searched. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
+                    "description": "ALWAYS call this tool FIRST at the start of every task — before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files — this tool replaces all of that. Returns pivot files and related symbols ranked by relevance. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

@@ -46,7 +46,7 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.5.0 Released</div>
+        <div class="badge animate-fade-in">v0.7.0 Released</div>
         <h1 class="animate-fade-in">Empower Your AI Agents with <br><span class="gradient-text">Flawless Local Code Context</span></h1>
         <p class="hero-desc animate-fade-in">comP is a local-first indexing engine and VSCode extension that helps AI coding agents understand your codebase structure, dependency graphs, and full-text content.</p>
         <div class="hero-cta animate-fade-in">
@@ -167,6 +167,22 @@
             <span class="status-tag">✅ Released</span>
           </div>
         </div>
+        <div class="roadmap-item completed">
+          <div class="roadmap-badge">v0.6</div>
+          <div class="roadmap-content">
+            <h4>Dynamic Budget & Auto Compression Level</h4>
+            <p><code>run_pipeline</code> now reads <code>default_budget_tokens</code> from <code>.comp/config.json</code> and automatically selects compression level 0→1→2 to fit within the budget. Response includes <code>compression_level_applied</code> and <code>budget_adjusted</code> flags.</p>
+            <span class="status-tag">✅ Released</span>
+          </div>
+        </div>
+        <div class="roadmap-item completed">
+          <div class="roadmap-badge">v0.7</div>
+          <div class="roadmap-content">
+            <h4>Compression Rules, Aider Support & Debug Export</h4>
+            <p>Per-extension compression rules in <code>.comp/config.json</code> (e.g. keep Markdown uncompressed, fully skeleton Rust files). Aider agent support via <code>.aider.conf.yml</code>. New <code>comP: Export Debug Log</code> command to inspect session memory. Token visualization state bug fixes.</p>
+            <span class="status-tag">✅ Released</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -183,7 +199,7 @@
           <span class="step-num">1</span>
           <h4>Install the Extension</h4>
           <p>Download the release <code>.vsix</code> file and drag-and-drop it into VSCode, or install via command line:</p>
-          <pre><code>code --install-extension comP-0.5.0.vsix</code></pre>
+          <pre><code>code --install-extension comP-0.7.0.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>
@@ -201,6 +217,7 @@
             <li><strong>Windsurf</strong>: Merge into <code>~/.codeium/windsurf/mcp_config.json</code></li>
             <li><strong>GitHub Copilot</strong>: Written to <code>.vscode/mcp.json</code> automatically</li>
             <li><strong>Antigravity</strong>: Written to <code>~/.gemini/antigravity-ide/mcp_config.json</code> automatically</li>
+            <li><strong>Aider</strong>: Written to <code>.aider.conf.yml</code> in your workspace root automatically</li>
           </ul>
         </div>
       </div>

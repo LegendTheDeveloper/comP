@@ -1,6 +1,6 @@
 # Configuration
 
-All settings are under `comp.*` in VSCode settings (`Ctrl+,`).
+All settings are under `comp.*` in VS Code settings (`Ctrl+,`).
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -17,9 +17,9 @@ per-workspace (`.vscode/settings.json`). Workspace settings take precedence.
 
 comP works with multiple AI agents simultaneously. Each agent gets its own configuration:
 
-### VSCode Integrated Agents
+### VS Code Integrated Agents
 
-For agents running inside VSCode (Copilot, Cline), configure MCP servers in `.vscode/mcp.json`:
+For agents running inside VS Code (Copilot, Cline), configure MCP servers in `.vscode/mcp.json`:
 
 ```json
 {
@@ -77,6 +77,34 @@ into the same graph database:
   ]
 }
 ```
+
+---
+
+## Compression Rules
+
+Control compression level per file extension in `.comp/config.json`:
+
+```json
+{
+  "default_budget_tokens": 8000,
+  "compression_rules": {
+    "*.md": 0,
+    "*.rs": 2,
+    "*.ts": 1
+  }
+}
+```
+
+| Option | Values | Description |
+| --- | --- | --- |
+| `default_budget_tokens` | integer | Token budget for `run_pipeline`. When set, compression level is auto-selected (0→1→2) to fit within budget. |
+| `compression_rules` | object | Glob pattern → compression level (0/1/2). Overrides auto-budget selection per file. |
+
+Compression levels:
+
+- `0` — full source (no change)
+- `1` — compact: comments and blank lines removed (~20-35% smaller)
+- `2` — skeleton: function/class bodies replaced with `{ ... }` (~50-70% smaller)
 
 All paths are indexed into the primary workspace's `.comp/index.db`.
 Relative paths are resolved from the workspace root.

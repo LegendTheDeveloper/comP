@@ -35,7 +35,7 @@ and any MCP-compatible agent.
 ## Prerequisites
 
 - **OS**: Windows, macOS, or Linux
-- **VSCode**: Version 1.85 or later
+- **VS Code**: Version 1.85 or later
 - **Rust** (for development only): 1.70+
 - **Node.js** (for development only): 18+
 
@@ -43,9 +43,9 @@ and any MCP-compatible agent.
 
 ## Installation
 
-### From VSCode Marketplace
+### From VS Code Marketplace
 
-1. Open **VSCode**
+1. Open **VS Code**
 2. Go to **Extensions** (`Ctrl+Shift+X`)
 3. Search for **"comP - Code Context Engine"**
 4. Click **Install**
@@ -65,7 +65,7 @@ npm run compile
 # Build the Rust daemon
 npm run daemon:build
 
-# Open in VSCode (F5) to test
+# Open in VS Code (F5) to test
 ```
 
 ---
@@ -73,7 +73,7 @@ npm run daemon:build
 ## Quick Start
 
 1. **Install** the comP extension.
-2. **Open a folder** in VSCode (e.g., a Git repository).
+2. **Open a folder** in VS Code (e.g., a Git repository).
 3. **Start the daemon**:
    - **First-time workspace**: Open the comP sidebar by clicking the **comP icon** in the Activity Bar (left edge), and click the **"Start comP" button** to manually trigger the initial indexing.
    - **Subsequent times (when `.comp/` directory exists)**: comP will **automatically start indexing** your code in the background upon opening the folder.
@@ -123,11 +123,11 @@ Restart Cursor after saving.
 
 ---
 
-### Cline (VSCode Extension)
+### Cline (VS Code Extension)
 
 comP generates `.comp/config/cline_config.json`. Then:
 
-1. Open VSCode Settings (`Ctrl+,`)
+1. Open VS Code Settings (`Ctrl+,`)
 2. Search for `Cline › MCP Servers`
 3. Click **Edit in settings.json** and paste the `mcpServers.comp` block
 
@@ -147,7 +147,7 @@ Restart Windsurf after saving.
 
 ---
 
-### GitHub Copilot (VSCode)
+### GitHub Copilot (VS Code)
 
 comP writes directly to `.vscode/mcp.json` in your workspace — **no extra steps needed**. The MCP server activates automatically when you reopen the workspace.
 
@@ -169,6 +169,12 @@ comP generates `.comp/config/continue_config.py`. Add the `mcp_servers` block to
 
 ---
 
+### Aider
+
+comP writes directly to `.aider.conf.yml` in your workspace root — **no extra steps needed**. Restart Aider to pick up the new server.
+
+---
+
 ## Agent Compatibility
 
 | Agent | Status | Notes |
@@ -179,6 +185,7 @@ comP generates `.comp/config/continue_config.py`. Add the `mcp_servers` block to
 | **Cursor** | ✅ Supported | MCP 2024-11-05 compliant |
 | **Cline** | ✅ Supported | MCP 2024-11-05 compliant |
 | **Windsurf** | ✅ Supported | MCP 2024-11-05 compliant |
+| **Aider** | ✅ Supported | `.aider.conf.yml` auto-written to workspace root |
 | **Gemini** | ❌ Not supported | No native MCP client support |
 
 Any MCP 2024-11-05 compliant client should work. If your agent needs a specific config, [open an issue](https://github.com/tsucky230/comP/issues/new).
@@ -200,10 +207,11 @@ Any MCP 2024-11-05 compliant client should work. If your agent needs a specific 
 | **comP: Generate Context Capsule** | Extract optimized code for your current task |
 | **comP: Show Impact Graph** | See what code depends on the symbol at your cursor |
 | **comP: Copy Active File Compressed** | Copy current active file with AST compression (comments removed or skeletonized) to clipboard |
+| **comP: Export Debug Log** | Open or export `session-memory.json` to inspect debug session data |
 
 ### Status Bar
 
-Bottom-left of VSCode shows:
+Bottom-left of VS Code shows:
 
 ```text
 ◈ comP: 12,534 nodes | ✓ Ready
@@ -226,9 +234,9 @@ Once configured, AI agents like Claude Code can call comP's tools:
 Analyze the impact of changing the `authenticate()` function
 ```
 
-### VSCode Chat Participant (@comp)
+### VS Code Chat Participant (@comp)
 
-You can use the `@comp` assistant directly inside the VSCode Chat panel (e.g. Copilot Chat) to query LLMs while automatically skeletonizing large files:
+You can use the `@comp` assistant directly inside the VS Code Chat panel (e.g. Copilot Chat) to query LLMs while automatically skeletonizing large files:
 
 ```markdown
 @comp Explain what this function does using #file:src/main.rs
@@ -265,7 +273,13 @@ Create `.comp/config.json` to control indexing behavior for large repositories:
 ```json
 {
   "max_nodes": 100000,
-  "on_limit_exceeded": "warn"
+  "on_limit_exceeded": "warn",
+  "default_budget_tokens": 8000,
+  "compression_rules": {
+    "*.md": 0,
+    "*.rs": 2,
+    "*.ts": 1
+  }
 }
 ```
 
@@ -273,10 +287,12 @@ Create `.comp/config.json` to control indexing behavior for large repositories:
 | --- | --- | --- | --- |
 | `max_nodes` | integer | `200000` | Threshold for the total node count |
 | `on_limit_exceeded` | `"warn"` \| `"stop"` | `"warn"` | `warn`: notify and continue · `stop`: halt indexing |
+| `default_budget_tokens` | integer | — | Token budget for `run_pipeline`; triggers auto compression level selection (0→1→2) |
+| `compression_rules` | object | — | Per-extension compression level overrides. Glob pattern → level (0/1/2). Applied before auto-budget selection. |
 
 > **Expected database size** (`.comp/index.db`): ~1–5 MB for small projects (~1k files), ~20–80 MB for medium (~10k files), ~200 MB–1 GB for large repositories (100k+ files). Only symbol metadata is stored—no raw file content.
 >
-> **Tip for monorepos**: Open only the relevant subdirectory in VSCode. comP indexes only the open workspace folder.
+> **Tip for monorepos**: Open only the relevant subdirectory in VS Code. comP indexes only the open workspace folder.
 
 ---
 
@@ -287,7 +303,7 @@ Create `.comp/config.json` to control indexing behavior for large repositories:
 1. **Indexer (Rust daemon)**: Scans your workspace, parses code with tree-sitter, stores graph in SQLite
 2. **Search Engine**: Finds relevant code using semantic search + graph traversal + BM25 complementary
 3. **MCP Server**: Exposes tools to AI agents via Model Context Protocol
-4. **VSCode Extension**: Manages the daemon, displays UI, handles user commands
+4. **VS Code Extension**: Manages the daemon, displays UI, handles user commands
 
 ### Data Flow
 
@@ -339,7 +355,7 @@ When you run **"comP: Generate Context Capsule"**:
 
 - Run **"comP: Setup Agents"** again.
 - Verify your agent has the `.comp/mcp-config.json` file.
-- Check VSCode Output panel (View → Output → "comP") for errors.
+- Check VS Code Output panel (View → Output → "comP") for errors.
 
 ### Issue: "Indexing is slow"
 
@@ -395,7 +411,9 @@ npm run lint:md:fix
 | **v0.2** | Word (.docx), PowerPoint (.pptx), and Excel (.xlsx) automatic indexing, BM25 search. | ✅ **Released** |
 | **v0.3** | PDF (.pdf) support, advanced impact analysis (`max_depth`), TF-IDF search wired to `run_pipeline`, multi-path indexing, AST compression for `get_symbol` | ✅ **Released** |
 | **v0.4** | `run_pipeline` content mode (`include_content`/`compression_level`), `get_git_diff_context` tool for PR review, enhanced `get_project_overview` with language distribution | ✅ **Released** |
-| **v0.5** | Clipboard copy of compressed active file (`copyActiveFileCompressed`), `@comp` Chat Participant integration using VSCode Chat Participant API, and automatic indexing & BM25 search support for Parquet (.parquet) files. | ✅ **Released** |
+| **v0.5** | Clipboard copy of compressed active file (`copyActiveFileCompressed`), `@comp` Chat Participant integration using VS Code Chat Participant API, and automatic indexing & BM25 search support for Parquet (.parquet) files. | ✅ **Released** |
+| **v0.6** | Dynamic budget: `run_pipeline` reads `default_budget_tokens` from `.comp/config.json` and auto-selects compression level 0→1→2 to fit within budget. Response includes `compression_level_applied` and `budget_adjusted` flags. | ✅ **Released** |
+| **v0.7** | Per-extension compression rules in `.comp/config.json` (e.g. keep Markdown at level 0, skeleton Rust at level 2). Aider agent support via `.aider.conf.yml`. New `comP: Export Debug Log` command. Token visualization state bug fixes. | ✅ **Released** |
 | **v1.0** | Stable API, wider agent support, integrations | ⚪ Planning |
 
 ---

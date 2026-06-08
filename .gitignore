@@ -92,6 +92,7 @@ CLAUDE.md
 .vscode/settings.json
 .vscode/launch.json
 .vscode/extensions.json
+.mcp.json
 local.conf
 local.env
 
