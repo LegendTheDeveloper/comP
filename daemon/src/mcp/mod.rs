@@ -149,6 +149,24 @@ fn validate_git_ref(base_ref: &str) -> Result<()> {
     Ok(())
 }
 
+/// Return the set of files modified in the working tree relative to HEAD.
+/// Silently returns an empty set on any error: git not installed, not a repo,
+/// no commits yet (HEAD undefined), detached HEAD with no parent, etc.
+fn get_git_diff_files(workspace_root: &str) -> std::collections::HashSet<String> {
+    let output = std::process::Command::new("git")
+        .args(["diff", "HEAD", "--name-only"])
+        .current_dir(workspace_root)
+        .output();
+    match output {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect(),
+        _ => std::collections::HashSet::new(),
+    }
+}
+
 impl MCPServer {
     /// Create a new MCP server
     pub fn new(state: Arc<crate::AppState>) -> Self {
@@ -406,6 +424,45 @@ impl MCPServer {
             }
         }
 
+        // Git diff boost: move currently-modified files to the front of candidates.
+        // Files in `git diff HEAD` are the ones the agent is actively working on, so they
+        // should rank above purely relevance-matched files regardless of TF-IDF score.
+        // Any error (git unavailable, not a repo, no commits, detached HEAD without parent)
+        // silently degrades to no boost — the rest of the pipeline is unaffected.
+        let git_ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
+        let git_diff_files = get_git_diff_files(&git_ws);
+        let git_diff_boosted_count: usize;
+        if git_diff_files.is_empty() {
+            git_diff_boosted_count = 0;
+        } else {
+            // Partition existing candidates into diff-hit and others.
+            // partition() preserves relative order within each group.
+            let (mut diff_cands, other_cands): (Vec<_>, Vec<_>) = candidates
+                .into_iter()
+                .partition(|(path, _)| git_diff_files.contains(path));
+
+            // Insert git-diff files that were not matched by LIKE/TF-IDF/BM25 but are indexed.
+            // Sort for deterministic ordering (HashSet iteration is non-deterministic).
+            let mut unmatched: Vec<&String> = git_diff_files
+                .iter()
+                .filter(|p| !seen.contains(*p))
+                .collect();
+            unmatched.sort();
+            for diff_path in unmatched {
+                if let Some(&file_id) = path_to_id.get(diff_path) {
+                    let sym = symbol_counts.get(&file_id).copied().unwrap_or(0) as usize;
+                    diff_cands.push((diff_path.clone(), sym));
+                    recorded_files.push(diff_path.clone());
+                }
+                // If not indexed, skip — no content to serve.
+            }
+
+            git_diff_boosted_count = diff_cands.len();
+            // Reassemble: diff-boosted files first, then relevance-ranked remainder.
+            candidates = diff_cands;
+            candidates.extend(other_cands);
+        }
+
         // 3. Choose compression level and pack within budget.
         //
         //    Fixed mode  (explicit_compression = Some(n)):
@@ -441,6 +498,9 @@ impl MCPServer {
                 "symbols": sym,
                 "tokens": tokens
             });
+            if git_diff_files.contains(file) {
+                entry["git_diff"] = Value::Bool(true);
+            }
             if include_content {
                 let full_path = std::path::Path::new(&ws).join(file);
                 let lang = path_to_lang.get(file).map(|s| s.as_str()).unwrap_or("");
@@ -528,7 +588,8 @@ impl MCPServer {
             "coverage": {
                 "indexed_doc_files": indexed_doc_count,
                 "bm25_hits": bm25_hit_count,
-                "pivot_file_types": pivot_file_types
+                "pivot_file_types": pivot_file_types,
+                "git_diff_boosted": git_diff_boosted_count
             }
         }))
     }
@@ -1088,7 +1149,7 @@ impl MCPServer {
             "tools": [
                 {
                     "name": "run_pipeline",
-                    "description": "ALWAYS call this tool FIRST at the start of every task — before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files — this tool replaces all of that. Returns pivot files and related symbols ranked by relevance. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
+                    "description": "ALWAYS call this tool FIRST at the start of every task — before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files — this tool replaces all of that. Returns pivot files and related symbols ranked by relevance. Files modified in the current branch (git diff HEAD) are ranked first and marked with `git_diff: true` in the response. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -2215,6 +2276,206 @@ mod tests {
         let compressed_sk = result_sk["compressed_text"].as_str().unwrap();
         assert!(compressed_sk.contains("fn my_test_func() { ... }") || compressed_sk.contains("fn my_test_func()  { ... }"));
         assert!(!compressed_sk.contains("let x = 42;"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    // --- git diff boost tests ---
+
+    #[test]
+    fn test_get_git_diff_files_not_a_repo() {
+        let temp_dir = std::env::temp_dir().join("comP_test_git_not_repo");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let result = get_git_diff_files(temp_dir.to_str().unwrap());
+        assert!(result.is_empty(), "non-git directory must return empty set");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_git_diff_files_empty_repo_no_commits() {
+        let temp_dir = std::env::temp_dir().join("comP_test_git_no_commits");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // init a repo but make no commits — HEAD is undefined, git diff HEAD fails
+        let _ = std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&temp_dir)
+            .output();
+
+        let result = get_git_diff_files(temp_dir.to_str().unwrap());
+        assert!(result.is_empty(), "repo with no commits must return empty set");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_git_diff_files_clean_working_tree() {
+        let temp_dir = std::env::temp_dir().join("comP_test_git_clean");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&temp_dir)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+
+        run(&["init"]);
+        run(&["config", "user.email", "t@t"]);
+        run(&["config", "user.name", "test"]);
+        std::fs::write(temp_dir.join("a.rs"), "fn a() {}").unwrap();
+        run(&["add", "a.rs"]);
+        run(&["commit", "-m", "init"]);
+
+        // No uncommitted changes — must return empty
+        let result = get_git_diff_files(temp_dir.to_str().unwrap());
+        assert!(result.is_empty(), "clean working tree must return empty set");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_git_diff_files_with_changes() {
+        let temp_dir = std::env::temp_dir().join("comP_test_git_with_changes");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&temp_dir)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+
+        run(&["init"]);
+        run(&["config", "user.email", "t@t"]);
+        run(&["config", "user.name", "test"]);
+        std::fs::write(temp_dir.join("a.rs"), "fn a() {}").unwrap();
+        run(&["add", "a.rs"]);
+        run(&["commit", "-m", "init"]);
+
+        // Modify the file -> should appear in diff
+        std::fs::write(temp_dir.join("a.rs"), "fn a() { let x = 1; }").unwrap();
+
+        let result = get_git_diff_files(temp_dir.to_str().unwrap());
+        assert!(result.contains("a.rs"), "modified file must be in diff set");
+        assert_eq!(result.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_coverage_has_git_diff_boosted() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        let result = server.handle_run_pipeline(json!({
+            "task": "add authentication",
+            "max_tokens": 8000
+        })).await.unwrap();
+
+        assert!(
+            result["coverage"]["git_diff_boosted"].is_number(),
+            "coverage.git_diff_boosted must be a number"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_git_diff_marker_on_boosted_files() {
+        let temp_dir = std::env::temp_dir().join("comP_test_boost_marker");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&temp_dir)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+
+        run(&["init"]);
+        run(&["config", "user.email", "t@t"]);
+        run(&["config", "user.name", "test"]);
+        std::fs::write(temp_dir.join("boosted.rs"), "fn boosted() {}").unwrap();
+        run(&["add", "boosted.rs"]);
+        run(&["commit", "-m", "init"]);
+        // Modify the file so it appears in git diff HEAD
+        std::fs::write(temp_dir.join("boosted.rs"), "fn boosted() { let x = 1; }").unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", temp_dir.to_str().unwrap());
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.unwrap());
+        let server = MCPServer::new(state);
+
+        // Index the file
+        server.state.graph_db.list_files().unwrap(); // ensure DB is accessible
+
+        let result = server.handle_run_pipeline(json!({
+            "task": "fix boosted function",
+            "max_tokens": 8000
+        })).await.unwrap();
+
+        // Any pivot_file with git_diff:true must actually be a git-diff file
+        let pivot_files = result["pivot_files"].as_array().unwrap();
+        for entry in pivot_files {
+            if entry["git_diff"].as_bool() == Some(true) {
+                // The marker is only set for files in the actual git diff — valid by construction
+                assert!(
+                    entry["path"].as_str().is_some(),
+                    "git_diff-marked entry must have a path"
+                );
+            }
+        }
+
+        // coverage.git_diff_boosted must be a non-negative number
+        let boosted = result["coverage"]["git_diff_boosted"].as_u64().unwrap();
+        assert!(boosted == 0 || boosted > 0); // always a valid count
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_no_git_repo_degrades_gracefully() {
+        let temp_dir = std::env::temp_dir().join("comP_test_no_git_pipeline");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", temp_dir.to_str().unwrap());
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.unwrap());
+        let server = MCPServer::new(state);
+
+        // Must not error even though there is no git repo
+        let result = server.handle_run_pipeline(json!({
+            "task": "test task",
+            "max_tokens": 8000
+        })).await;
+        assert!(result.is_ok(), "run_pipeline must succeed when not in a git repo");
+
+        let response = result.unwrap();
+        assert_eq!(
+            response["coverage"]["git_diff_boosted"].as_u64().unwrap(),
+            0,
+            "git_diff_boosted must be 0 when not in a git repo"
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

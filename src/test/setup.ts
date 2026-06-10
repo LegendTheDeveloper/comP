@@ -88,6 +88,7 @@ Module.prototype.require = function (id: string) {
       },
       commands: {
         registerCommand: () => ({ dispose: () => {} }),
+        executeCommand: () => Promise.resolve(),
       },
       window: {
         createWebviewPanel: () => {},

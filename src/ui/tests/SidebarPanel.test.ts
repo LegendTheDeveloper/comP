@@ -103,6 +103,27 @@ describe("SidebarPanel", () => {
     expect(msg.running).to.be.true;
   });
 
+  it("getHtml() includes Re-index button with id reindexBtn", () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(mockWebviewView.webview.html).to.include("reindexBtn");
+    expect(mockWebviewView.webview.html).to.include("Re-index");
+  });
+
+  it("handleWebviewMessage('reindex') calls comp.forceReindex command", async () => {
+    const vscode = require("vscode");
+    const executeCommand = sinon.stub(vscode.commands, "executeCommand").resolves();
+
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "reindex" });
+
+    expect(executeCommand.calledWith("comp.forceReindex")).to.be.true;
+    executeCommand.restore();
+  });
+
   it("setLifecycleCallbacks() stores callbacks without throwing", () => {
     const panel = SidebarPanel.createOrShow("/path", null, mockContext);
     const callbacks = {

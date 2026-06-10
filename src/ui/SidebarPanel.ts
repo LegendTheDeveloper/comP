@@ -170,6 +170,9 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
           this.logs = [];
           this.sendLogsUpdate();
           break;
+        case "reindex":
+          await vscode.commands.executeCommand("comp.forceReindex");
+          break;
         default:
           console.warn("[comP] Unknown message command:", message.command);
       }
@@ -420,6 +423,9 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       <button id="startBtn" onclick="startDaemon()">▶ Start</button>
       <button id="stopBtn" onclick="stopDaemon()" disabled>■ Stop</button>
     </div>
+    <div class="button-group">
+      <button id="reindexBtn" onclick="reindex()" disabled>↺ Re-index</button>
+    </div>
     <div class="status-indicator">
       <div class="status-dot" id="statusDot"></div>
       <span id="statusText">Daemon stopped</span>
@@ -454,6 +460,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     function startDaemon() { vscode.postMessage({ command: 'startDaemon' }); }
     function stopDaemon() { vscode.postMessage({ command: 'stopDaemon' }); }
     function clearLogs() { vscode.postMessage({ command: 'clearLogs' }); }
+    function reindex() { vscode.postMessage({ command: 'reindex' }); }
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (msg.type === 'statsUpdate') {
@@ -498,6 +505,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       document.getElementById('statusText').textContent = running ? 'Daemon running' : 'Daemon stopped';
       document.getElementById('startBtn').disabled = running;
       document.getElementById('stopBtn').disabled = !running;
+      document.getElementById('reindexBtn').disabled = !running;
     }
     vscode.postMessage({ command: 'refresh' });
   </script>
