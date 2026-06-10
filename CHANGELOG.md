@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.8.0] - 2026-06-10
+
+### Added
+
+- **git diff スコアブースト**: `run_pipeline` が `git diff HEAD` の変更ファイルを候補の先頭に昇格。`pivot_file` エントリに `git_diff: true` マーカーと `coverage.git_diff_boosted` カウントを追加。git 未使用環境ではサイレントにフォールバック
+- **サイドバー Re-index ボタン**: SidebarPanel に ↺ ボタンを追加。既存の `comp.forceReindex` コマンドに接続。デーモン停止中は無効化
+
+### Changed
+
+- Rust テスト 6 件（git-diff エッジケース全網羅）、TS テスト 2 件（Re-index ボタン表示・メッセージディスパッチ）を追加
+
+---
+
+## [0.7.1] - 2026-06-08
+
+### Changed
+
+- **ドキュメント全同期**: Aider 対応・Export Debug Log・compression_rules・run_pipeline レスポンスフィールド・MCP_SETUP Aider セクションを v0.7.0 に合わせ更新
+- **run_pipeline 優先ルール強化**: ツール説明に「常に最初に呼ぶ」「Read/Bash/grep 代替禁止」を明記
+- **Setup Agents 出力にエージェント別憲法ガイドを追加**: CLAUDE.md / .cursor/rules / .clinerules 等へ自動追記するプロンプトを生成
+- `.mcp.json` を `.gitignore` に追加（マシン固有の絶対パスを含むため）
+
+---
+
 ## [0.7.0] - 2026-06-07
 
 ### Added
