@@ -1,10 +1,11 @@
-// walker.rs - Filesystem walker with .gitignore support and incremental detection
+// walker.rs — Filesystem walker using the `ignore` crate for gitignore support
 //
 // Responsibilities:
 // - Scan workspace directory recursively
-// - Parse and respect .gitignore patterns
+// - Respect .gitignore (and nested .gitignore files) via the `ignore` crate
+// - Respect .comp/ignore for project-specific exclusions
+// - Prune subtrees for extra skip names (venv, __pycache__, etc.) via filter_entry
 // - Calculate file hashes for incremental updates
-// - Skip directories and files based on patterns (node_modules, .git, etc.)
 // - Detect which files have changed since last index
 //
 // Key data structures:
@@ -12,11 +13,11 @@
 // - WalkerResult: total files, indexed files, skipped files
 
 use anyhow::Result;
-use sha2::{Sha256, Digest};
+use ignore::WalkBuilder;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use walkdir::{WalkDir, DirEntry};
 
 /// A file entry with metadata
 #[derive(Debug, Clone)]
@@ -45,27 +46,32 @@ pub struct WalkerResult {
 
 /// Walker configuration
 pub struct WalkerConfig {
-    /// Skip hidden files and directories (starting with .)
-    pub skip_hidden: bool,
-    /// Built-in patterns to skip (substring match against full path)
-    pub skip_patterns: Vec<String>,
-    /// User-defined patterns from .comp/ignore (gitignore-style)
-    pub ignore_patterns: Vec<String>,
+    /// Directory names to always skip, regardless of gitignore (segment-complete match).
+    /// These prune the entire subtree via filter_entry — no descent into the directory.
+    pub extra_skip_names: Vec<String>,
+    /// Path to a supplementary ignore file (e.g., .comp/ignore).
+    /// Gitignore syntax; read by the `ignore` crate alongside .gitignore.
+    pub custom_ignore_file: Option<PathBuf>,
+    /// Skip files larger than this size in bytes. Default: 5 MiB.
+    /// WHY: Unbounded reads of huge binaries/generated files waste I/O and token budget.
+    pub max_file_bytes: u64,
 }
 
 impl Default for WalkerConfig {
     fn default() -> Self {
         WalkerConfig {
-            skip_hidden: true,
-            skip_patterns: vec![
+            // Non-hidden dirs that are never source code.
+            // Hidden dirs (starting with '.') are skipped automatically by standard_filters.
+            extra_skip_names: vec![
                 "node_modules".to_string(),
-                ".git".to_string(),
-                ".comp".to_string(),
-                "target".to_string(),
-                "dist".to_string(),
-                "build".to_string(),
+                "venv".to_string(),         // Python venv without leading dot
+                "__pycache__".to_string(),  // Python bytecode cache
+                "coverage".to_string(),
+                "vendor".to_string(),
+                "out".to_string(),
             ],
-            ignore_patterns: vec![],
+            custom_ignore_file: None,
+            max_file_bytes: 5 * 1024 * 1024, // 5 MiB
         }
     }
 }
@@ -84,87 +90,93 @@ impl FileWalker {
         }
     }
 
-    /// Walk the workspace and return all files
-    /// 
-    /// # Arguments
-    /// - workspace_root: Path to workspace
-    /// - previous_hashes: Map of (file_path -> hash) from previous index
+    /// Walk the workspace and return all files.
     ///
-    /// # Returns
-    /// - WalkerResult containing all files, changed files, and deleted files
-    ///
-    /// # Process
-    /// 1. Parse .gitignore if exists
-    /// 2. Walk directory recursively
-    /// 3. For each file:
-    ///    - Check if should skip (hidden, in skip_patterns, etc.)
-    ///    - Detect language
-    ///    - Calculate hash
-    ///    - Compare with previous hash (if exists)
-    /// 4. Detect deleted files (were in previous_hashes but not found)
-    /// 5. Return result
+    /// Uses `ignore::WalkBuilder` which provides:
+    /// - .gitignore / nested .gitignore support
+    /// - Hidden-file filtering (files/dirs starting with '.')
+    /// - .comp/ignore via `add_ignore`
+    /// - filter_entry for hard-coded extra_skip_names (prunes entire subtrees)
     pub fn walk(&self, previous_hashes: Option<&HashMap<String, String>>) -> Result<WalkerResult> {
-        // TODO: Implement filesystem walk with:
-        // - gitignore pattern matching
-        // - hash calculation
-        // - change detection
-        // - language detection
-        
+        let mut builder = WalkBuilder::new(&self.workspace_root);
+        // Enables: gitignore, .ignore, global gitignore, hidden-file filtering
+        builder.standard_filters(true);
+
+        // Supplementary ignore file (e.g., .comp/ignore)
+        if let Some(ref p) = self.config.custom_ignore_file {
+            if p.exists() {
+                builder.add_ignore(p);
+            }
+        }
+
+        // Prune extra non-hidden directories by name.
+        // filter_entry returns false for a directory → the entire subtree is skipped,
+        // unlike a plain .filter_map which only skips the directory node itself.
+        let extra_skip = self.config.extra_skip_names.clone();
+        builder.filter_entry(move |e| {
+            let name = e.file_name().to_string_lossy();
+            !extra_skip.iter().any(|s| s == name.as_ref())
+        });
+
         let mut all_files = Vec::new();
         let mut changed_files = Vec::new();
         let mut found_paths = HashSet::new();
 
-        // Walk directory
-        for entry in WalkDir::new(&self.workspace_root)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if self.should_skip_entry(&entry) {
+        for entry in builder.build().filter_map(|e| e.ok()) {
+            if !entry.path().is_file() {
                 continue;
             }
 
-            if entry.path().is_file() {
-                let relative_path = self.get_relative_path(entry.path())?;
-                
-                // Calculate hash
-                let hash = self.calculate_file_hash(entry.path())?;
-                let modified_time = self.get_modified_time(entry.path())?;
-                let language = self.detect_language(&relative_path);
+            let relative_path = match self.get_relative_path(entry.path()) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
 
-                found_paths.insert(relative_path.clone());
-
-                let file_entry = FileEntry {
-                    path: relative_path.clone(),
-                    hash: hash.clone(),
-                    language,
-                    modified_time,
-                };
-
-                // Check if file changed
-                let file_changed = if let Some(prev_hashes) = previous_hashes {
-                    prev_hashes.get(&relative_path) != Some(&hash)
-                } else {
-                    true // First index, all files are "changed"
-                };
-
-                if file_changed {
-                    changed_files.push(file_entry.clone());
+            // Skip oversized files before the expensive SHA-256 read.
+            if let Ok(meta) = entry.metadata() {
+                if meta.len() > self.config.max_file_bytes {
+                    log::debug!(
+                        "Skipping oversized file ({} bytes > {} limit): {}",
+                        meta.len(), self.config.max_file_bytes, relative_path
+                    );
+                    continue;
                 }
-
-                all_files.push(file_entry);
             }
+
+            let hash = match self.calculate_file_hash(entry.path()) {
+                Ok(h) => h,
+                Err(_) => continue,
+            };
+            let modified_time = self.get_modified_time(entry.path()).unwrap_or(0);
+            let language = self.detect_language(&relative_path);
+
+            found_paths.insert(relative_path.clone());
+
+            let file_entry = FileEntry {
+                path: relative_path.clone(),
+                hash: hash.clone(),
+                language,
+                modified_time,
+            };
+
+            let file_changed = previous_hashes
+                .map(|h| h.get(&relative_path) != Some(&hash))
+                .unwrap_or(true);
+
+            if file_changed {
+                changed_files.push(file_entry.clone());
+            }
+            all_files.push(file_entry);
         }
 
-        // Detect deleted files
-        let deleted_files = if let Some(prev_hashes) = previous_hashes {
-            prev_hashes
-                .keys()
-                .filter(|path| !found_paths.contains(*path))
-                .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let deleted_files = previous_hashes
+            .map(|h| {
+                h.keys()
+                    .filter(|p| !found_paths.contains(*p))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Ok(WalkerResult {
             files: all_files,
@@ -173,51 +185,22 @@ impl FileWalker {
         })
     }
 
-    /// Check if a directory entry should be skipped
-    fn should_skip_entry(&self, entry: &DirEntry) -> bool {
-        let path = entry.path();
-        let file_name = entry.file_name();
-        let file_name_str = file_name.to_string_lossy();
-
-        // Skip hidden files
-        if self.config.skip_hidden && file_name_str.starts_with('.') {
-            return true;
-        }
-
-        // Built-in patterns: substring match against full path
-        for pattern in &self.config.skip_patterns {
-            if path.to_string_lossy().contains(pattern) {
-                return true;
-            }
-        }
-
-        // User-defined patterns from .comp/ignore
-        let normalized = path.to_string_lossy().replace('\\', "/");
-        for pattern in &self.config.ignore_patterns {
-            if Self::matches_ignore_pattern(&normalized, pattern) {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Match a normalized path against a gitignore-style pattern.
+    /// Check if a workspace-relative path should be excluded from indexing.
     ///
-    /// Supports:
-    /// - Name match: `node_modules` → any path segment equals this
-    /// - Directory pattern: `dist/` → same as `dist` (trailing slash stripped)
-    /// - Suffix glob: `*.min.js` → path ends with `.min.js`
-    fn matches_ignore_pattern(path: &str, pattern: &str) -> bool {
-        let pattern = pattern.trim_end_matches('/');
-        if pattern.is_empty() {
-            return false;
+    /// Used by Indexer::index_file() to guard single-file update requests.
+    /// Checks hidden segments and extra_skip_names; full gitignore checking
+    /// is handled by the ignore crate during batch walk.
+    pub fn should_skip_relative_path(&self, relative_path: &str) -> bool {
+        let normalized = relative_path.replace('\\', "/");
+        for segment in normalized.split('/') {
+            if segment.starts_with('.') {
+                return true;
+            }
+            if self.config.extra_skip_names.iter().any(|s| s == segment) {
+                return true;
+            }
         }
-        if let Some(suffix) = pattern.strip_prefix('*') {
-            return path.ends_with(suffix);
-        }
-        // Match any path segment (handles both files and directories)
-        path.split('/').any(|component| component == pattern)
+        false
     }
 
     /// Get relative path from workspace root, normalized to forward slashes
@@ -243,7 +226,7 @@ impl FileWalker {
     }
 
     /// Detect programming language from file extension
-    fn detect_language(&self, path: &str) -> String {
+    pub fn detect_language(&self, path: &str) -> String {
         if let Some(ext) = Path::new(path).extension() {
             match ext.to_string_lossy().as_ref() {
                 "rs" => "rust",
@@ -295,8 +278,7 @@ mod tests {
     #[test]
     fn test_language_detection() {
         let walker = FileWalker::new(".", WalkerConfig::default());
-        
-        // Test various file extensions
+
         assert_eq!(walker.detect_language("main.rs"), "rust");
         assert_eq!(walker.detect_language("app.ts"), "typescript");
         assert_eq!(walker.detect_language("script.py"), "python");
@@ -319,110 +301,287 @@ mod tests {
         let hash1 = walker.calculate_file_hash(&file_path)?;
         let hash2 = walker.calculate_file_hash(&file_path)?;
 
-        // Same content should produce same hash
         assert_eq!(hash1, hash2);
-        // Hash should be 64 chars (SHA256 hex)
-        assert_eq!(hash1.len(), 64);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_skip_hidden_files() -> Result<()> {
-        let walker = FileWalker::new(".", WalkerConfig::default());
-        
-        // Create mock DirEntry-like behavior by testing path filtering
-        let hidden_path = ".hidden";
-        let normal_path = "normal";
-
-        assert!(walker.detect_language(hidden_path).is_empty() == false); // Just verify detection works
-        assert!(walker.detect_language(normal_path).is_empty() == false);
-
+        assert_eq!(hash1.len(), 64); // SHA256 hex
         Ok(())
     }
 
     #[tokio::test]
     async fn test_walk_empty_directory() -> Result<()> {
         let temp_dir = TempDir::new()?;
-        let walker = FileWalker::new(
-            temp_dir.path().to_str().unwrap(),
-            WalkerConfig::default(),
-        );
+        let walker = FileWalker::new(temp_dir.path().to_str().unwrap(), WalkerConfig::default());
 
         let result = walker.walk(None)?;
         assert_eq!(result.files.len(), 0);
         assert_eq!(result.changed_files.len(), 0);
         assert_eq!(result.deleted_files.len(), 0);
-
         Ok(())
     }
 
     #[tokio::test]
     async fn test_walk_with_files() -> Result<()> {
         let temp_dir = TempDir::new()?;
-        
-        // Create test files
+
         let file1_path = temp_dir.path().join("test1.rs");
-        let mut file1 = File::create(&file1_path)?;
-        file1.write_all(b"fn main() {}")?;
+        File::create(&file1_path)?.write_all(b"fn main() {}")?;
 
         let file2_path = temp_dir.path().join("test2.py");
-        let mut file2 = File::create(&file2_path)?;
-        file2.write_all(b"print('hello')")?;
+        File::create(&file2_path)?.write_all(b"print('hello')")?;
 
-        let walker = FileWalker::new(
-            temp_dir.path().to_str().unwrap(),
-            WalkerConfig::default(),
-        );
-
+        let walker = FileWalker::new(temp_dir.path().to_str().unwrap(), WalkerConfig::default());
         let result = walker.walk(None)?;
-        
+
         assert_eq!(result.files.len(), 2);
-        assert_eq!(result.changed_files.len(), 2); // All files are new
+        assert_eq!(result.changed_files.len(), 2);
         assert_eq!(result.deleted_files.len(), 0);
 
-        // Check language detection
         let langs: Vec<_> = result.files.iter().map(|f| f.language.as_str()).collect();
         assert!(langs.contains(&"rust"));
         assert!(langs.contains(&"python"));
-
         Ok(())
     }
 
     #[tokio::test]
     async fn test_incremental_detection() -> Result<()> {
         let temp_dir = TempDir::new()?;
-        
         let file_path = temp_dir.path().join("test.rs");
-        let mut file = File::create(&file_path)?;
-        file.write_all(b"fn main() {}")?;
+        File::create(&file_path)?.write_all(b"fn main() {}")?;
 
-        let walker = FileWalker::new(
-            temp_dir.path().to_str().unwrap(),
-            WalkerConfig::default(),
-        );
+        let walker = FileWalker::new(temp_dir.path().to_str().unwrap(), WalkerConfig::default());
 
-        // First walk
         let result1 = walker.walk(None)?;
         assert_eq!(result1.changed_files.len(), 1);
 
-        // Create a previous hashes map from first walk
         let mut previous_hashes = HashMap::new();
-        for file_entry in &result1.files {
-            previous_hashes.insert(file_entry.path.clone(), file_entry.hash.clone());
+        for fe in &result1.files {
+            previous_hashes.insert(fe.path.clone(), fe.hash.clone());
         }
 
-        // Second walk with same files (should detect no changes)
         let result2 = walker.walk(Some(&previous_hashes))?;
-        assert_eq!(result2.changed_files.len(), 0); // No changes
+        assert_eq!(result2.changed_files.len(), 0);
 
-        // Modify file
-        let mut file = File::create(&file_path)?;
-        file.write_all(b"fn main() { println!('hello'); }")?;
+        File::create(&file_path)?.write_all(b"fn main() { println!(\"hello\"); }")?;
 
-        // Third walk (should detect change)
         let result3 = walker.walk(Some(&previous_hashes))?;
-        assert_eq!(result3.changed_files.len(), 1); // File changed
+        assert_eq!(result3.changed_files.len(), 1);
+        Ok(())
+    }
+
+    /// Fix 1: filter_entry prunes .hidden dirs — subtree never descended
+    #[tokio::test]
+    async fn test_walk_prunes_hidden_dirs() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // Simulate .venv with a Python package inside
+        let venv_dir = temp_dir.path().join(".venv").join("Lib").join("site-packages");
+        std::fs::create_dir_all(&venv_dir)?;
+        File::create(venv_dir.join("six.py"))?.write_all(b"# six")?;
+
+        // A real source file at root
+        File::create(temp_dir.path().join("main.py"))?.write_all(b"print('hello')")?;
+
+        let walker = FileWalker::new(temp_dir.path().to_str().unwrap(), WalkerConfig::default());
+        let result = walker.walk(None)?;
+
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"main.py"), "main.py should be indexed");
+        assert!(
+            !paths.iter().any(|p| p.contains(".venv")),
+            ".venv subtree must not be indexed"
+        );
+        Ok(())
+    }
+
+    /// Fix 2: extra_skip_names prunes non-hidden dirs like venv, __pycache__
+    #[tokio::test]
+    async fn test_walk_prunes_extra_skip_names() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // venv (no leading dot)
+        let venv = temp_dir.path().join("venv").join("lib");
+        std::fs::create_dir_all(&venv)?;
+        File::create(venv.join("six.py"))?.write_all(b"# six")?;
+
+        // __pycache__
+        let cache = temp_dir.path().join("__pycache__");
+        std::fs::create_dir_all(&cache)?;
+        File::create(cache.join("main.cpython-311.pyc"))?.write_all(b"")?;
+
+        // Real source file
+        File::create(temp_dir.path().join("app.py"))?.write_all(b"x = 1")?;
+
+        let walker = FileWalker::new(temp_dir.path().to_str().unwrap(), WalkerConfig::default());
+        let result = walker.walk(None)?;
+
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"app.py"));
+        assert!(
+            !paths.iter().any(|p| p.contains("venv")),
+            "venv subtree must be excluded"
+        );
+        assert!(
+            !paths.iter().any(|p| p.contains("__pycache__")),
+            "__pycache__ must be excluded"
+        );
+        Ok(())
+    }
+
+    /// Fix 2 regression: segment-complete match must not exclude src/builder.rs or targets.rs
+    #[tokio::test]
+    async fn test_no_substring_false_positive() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // These names contain "build", "target", "node" as substrings but must NOT be excluded
+        let src = temp_dir.path().join("src");
+        std::fs::create_dir_all(&src)?;
+        File::create(src.join("builder.rs"))?.write_all(b"fn build() {}")?;
+        File::create(src.join("targets.rs"))?.write_all(b"fn targets() {}")?;
+        File::create(temp_dir.path().join("retargeting.ts"))?.write_all(b"export {}")?;
+
+        let walker = FileWalker::new(temp_dir.path().to_str().unwrap(), WalkerConfig::default());
+        let result = walker.walk(None)?;
+
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"src/builder.rs"), "src/builder.rs must NOT be excluded");
+        assert!(paths.contains(&"src/targets.rs"), "src/targets.rs must NOT be excluded");
+        assert!(paths.contains(&"retargeting.ts"), "retargeting.ts must NOT be excluded");
+        Ok(())
+    }
+
+    /// Fix 4: should_skip_relative_path guards index_file
+    #[test]
+    fn test_should_skip_relative_path() {
+        let walker = FileWalker::new(".", WalkerConfig::default());
+
+        // Hidden dir segments
+        assert!(walker.should_skip_relative_path(".venv/Lib/six.py"));
+        assert!(walker.should_skip_relative_path(".git/config"));
+
+        // extra_skip_names
+        assert!(walker.should_skip_relative_path("venv/lib/six.py"));
+        assert!(walker.should_skip_relative_path("src/__pycache__/main.pyc"));
+        assert!(walker.should_skip_relative_path("node_modules/react/index.js"));
+
+        // Normal source paths must NOT be skipped
+        assert!(!walker.should_skip_relative_path("src/main.rs"));
+        assert!(!walker.should_skip_relative_path("src/builder.rs"));
+        assert!(!walker.should_skip_relative_path("targets.rs"));
+        assert!(!walker.should_skip_relative_path("retargeting.ts"));
+    }
+
+    /// §4-2: files larger than max_file_bytes are skipped before hash calculation
+    #[tokio::test]
+    async fn test_walk_skips_oversized_files() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // Small file — must be indexed
+        File::create(temp_dir.path().join("small.rs"))?.write_all(b"fn main(){}")?;
+
+        // Large file — must be skipped (threshold set to 100 bytes for speed)
+        let big_content = vec![b'x'; 200];
+        File::create(temp_dir.path().join("big.bin"))?.write_all(&big_content)?;
+
+        let walker = FileWalker::new(
+            temp_dir.path().to_str().unwrap(),
+            WalkerConfig {
+                max_file_bytes: 100,
+                ..WalkerConfig::default()
+            },
+        );
+        let result = walker.walk(None)?;
+
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"small.rs"), "small.rs must be indexed");
+        assert!(!paths.contains(&"big.bin"), "big.bin must be skipped (oversized)");
+        Ok(())
+    }
+
+    /// Fix 3 / gitignore: .comp/ignore is respected when provided as custom_ignore_file
+    #[tokio::test]
+    async fn test_custom_ignore_file_respected() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // Write .comp/ignore
+        let comp_dir = temp_dir.path().join(".comp");
+        std::fs::create_dir_all(&comp_dir)?;
+        let mut ignore_file = File::create(comp_dir.join("ignore"))?;
+        writeln!(ignore_file, "legacy_data/")?;
+        writeln!(ignore_file, "*.log")?;
+
+        // Create matching files
+        let legacy = temp_dir.path().join("legacy_data");
+        std::fs::create_dir_all(&legacy)?;
+        File::create(legacy.join("dump.py"))?.write_all(b"# old")?;
+        File::create(temp_dir.path().join("error.log"))?.write_all(b"err")?;
+
+        // Create a normal source file
+        File::create(temp_dir.path().join("app.rs"))?.write_all(b"fn main(){}")?;
+
+        let walker = FileWalker::new(
+            temp_dir.path().to_str().unwrap(),
+            WalkerConfig {
+                custom_ignore_file: Some(comp_dir.join("ignore")),
+                ..WalkerConfig::default()
+            },
+        );
+        let result = walker.walk(None)?;
+
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"app.rs"), "app.rs should be indexed");
+        assert!(
+            !paths.iter().any(|p| p.contains("legacy_data")),
+            "legacy_data/ must be excluded by .comp/ignore"
+        );
+        assert!(
+            !paths.iter().any(|p| p.ends_with(".log")),
+            "*.log must be excluded by .comp/ignore"
+        );
+        Ok(())
+    }
+
+    /// 4-5: extra_skip_names added at runtime excludes the directory in both walk and should_skip_relative_path
+    #[tokio::test]
+    async fn test_extra_skip_names_runtime_extension() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // Simulate user-added "env" directory
+        let env_lib = temp_dir.path().join("env").join("lib");
+        std::fs::create_dir_all(&env_lib)?;
+        File::create(env_lib.join("six.py"))?.write_all(b"# env lib")?;
+
+        // Normal source file
+        File::create(temp_dir.path().join("app.py"))?.write_all(b"x = 1")?;
+
+        let walker = FileWalker::new(
+            temp_dir.path().to_str().unwrap(),
+            WalkerConfig {
+                extra_skip_names: {
+                    let mut names = WalkerConfig::default().extra_skip_names;
+                    names.push("env".to_string());
+                    names
+                },
+                ..WalkerConfig::default()
+            },
+        );
+
+        // walk: env/ subtree must be excluded
+        let result = walker.walk(None)?;
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(paths.contains(&"app.py"), "app.py must be indexed");
+        assert!(
+            !paths.iter().any(|p| p.contains("env")),
+            "env/ subtree must be excluded via extra_skip_names"
+        );
+
+        // should_skip_relative_path: guard path inside env/
+        assert!(
+            walker.should_skip_relative_path("env/lib/six.py"),
+            "env/lib/six.py must be skipped by should_skip_relative_path"
+        );
+        assert!(
+            !walker.should_skip_relative_path("app.py"),
+            "app.py must not be skipped"
+        );
 
         Ok(())
     }

@@ -22,10 +22,15 @@ use search::SearchEngine;
 /// Token statistics are stored exclusively in SQLite (via GraphDB::record_tool_call)
 /// so both the MCP daemon and the VSCode extension daemon read consistent numbers
 /// without any cross-process synchronisation overhead.
+///
+/// WHY workspace_root is stored here: handlers must not re-read COMP_WORKSPACE_ROOT
+/// from the environment at call time — the env var may be absent or stale after
+/// the process starts. Fixing root at construction time makes the value stable.
 pub struct AppState {
     pub graph_db: Arc<GraphDB>,
     pub search_engine: Arc<tokio::sync::Mutex<SearchEngine>>,
     pub session_id: String,
+    pub workspace_root: String,
 }
 
 impl AppState {
@@ -58,6 +63,7 @@ impl AppState {
             graph_db: Arc::new(graph_db),
             search_engine: Arc::new(tokio::sync::Mutex::new(search_engine)),
             session_id,
+            workspace_root: workspace_root.to_string(),
         })
     }
 }
@@ -155,6 +161,20 @@ mod integration_tests {
         // Verify AppState creation succeeded
 
         // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    /// 4-4: workspace_root stored in AppState matches the value passed to new()
+    #[tokio::test]
+    async fn test_appstate_workspace_root_stored() {
+        let temp_dir = std::env::temp_dir().join("comP_test_appstate_root");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).expect("Failed to create temp dir");
+
+        let root = temp_dir.to_str().unwrap();
+        let state = AppState::new(root).await.expect("AppState::new failed");
+        assert_eq!(state.workspace_root, root, "workspace_root must equal the path passed to new()");
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 

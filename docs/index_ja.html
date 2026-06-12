@@ -46,7 +46,7 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.7.0 リリース</div>
+        <div class="badge animate-fade-in">v0.8.1 リリース</div>
         <h1 class="animate-fade-in">あなたのAIエージェントに、<br><span class="gradient-text">完璧なローカルコード文脈</span>を。</h1>
         <p class="hero-desc animate-fade-in">comP（コンプ）は、AIエージェントがコードの構造、依存関係、全文情報を完全に把握できるように支援する、VS Code拡張機能およびRust製バックエンドデーモンです。</p>
         <div class="hero-cta animate-fade-in">
@@ -183,6 +183,14 @@
             <span class="status-tag">✅ リリース済み</span>
           </div>
         </div>
+        <div class="roadmap-item completed">
+          <div class="roadmap-badge">v0.8</div>
+          <div class="roadmap-content">
+            <h4>ディレクトリ走査の刷新と除外コントロール</h4>
+            <p>走査を ripgrep の <code>ignore</code> クレートへ置き換え、<code>.venv</code> や <code>node_modules</code> をサブツリーごと枝刈り。大規模Pythonリポジトリでも Force Re-index がタイムアウトしません。<code>.comp/ignore</code> ファイル、<code>comp.exclude</code> 設定、5&nbsp;MiB 超ファイルのスキップ、大規模ワークスペース警告を追加。<code>workspace_root</code> を daemon state に一元化。</p>
+            <span class="status-tag">✅ リリース済み</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -199,7 +207,7 @@
           <span class="step-num">1</span>
           <h4>拡張機能のインストール</h4>
           <p>リリースされた<code>.vsix</code>ファイルをダウンロードし、VS Codeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
-          <pre><code>code --install-extension comP-0.7.0.vsix</code></pre>
+          <pre><code>code --install-extension comP-0.8.1.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>

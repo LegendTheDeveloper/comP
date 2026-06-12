@@ -264,7 +264,13 @@ __pycache__/
 *.min.js
 ```
 
-The following patterns are excluded by default: `node_modules/`, `.git/`, `dist/`, `build/`, `target/`.
+Hidden directories (names starting with `.`, such as `.venv`, `.pytest_cache`) and `.gitignore`-matched
+paths are excluded automatically. The following non-hidden directory names are also skipped by default:
+`node_modules`, `venv`, `__pycache__`, `coverage`, `vendor`, `out`.
+
+To add more directory names without editing `.comp/ignore`, set `comp.exclude` in VS Code settings
+(e.g. `["env", "data"]`); the extension syncs it into `.comp/config.json` and the daemon applies it on
+the next Force Re-index.
 
 ### Index Limits
 
@@ -414,6 +420,7 @@ npm run lint:md:fix
 | **v0.5** | Clipboard copy of compressed active file (`copyActiveFileCompressed`), `@comp` Chat Participant integration using VS Code Chat Participant API, and automatic indexing & BM25 search support for Parquet (.parquet) files. | ✅ **Released** |
 | **v0.6** | Dynamic budget: `run_pipeline` reads `default_budget_tokens` from `.comp/config.json` and auto-selects compression level 0→1→2 to fit within budget. Response includes `compression_level_applied` and `budget_adjusted` flags. | ✅ **Released** |
 | **v0.7** | Per-extension compression rules in `.comp/config.json` (e.g. keep Markdown at level 0, skeleton Rust at level 2). Aider agent support via `.aider.conf.yml`. New `comP: Export Debug Log` command. Token visualization state bug fixes. | ✅ **Released** |
+| **v0.8** | Directory-walk overhaul (ripgrep `ignore` crate) that prunes `.venv`/`node_modules` subtrees so large Python repos no longer time out. `.comp/ignore` file, `comp.exclude` setting, 5 MiB file-size skip and large-workspace warning. `workspace_root` centralised in daemon state. | ✅ **Released** |
 | **v1.0** | Stable API, wider agent support, integrations | ⚪ Planning |
 
 ---

@@ -267,7 +267,13 @@ __pycache__/
 *.min.js
 ```
 
-デフォルトで除外されるパターン: `node_modules/`, `.git/`, `dist/`, `build/`, `target/`
+隠しディレクトリ（`.venv`・`.pytest_cache` など `.` 始まりの名前）と `.gitignore` に一致するパスは
+自動で除外されます。さらに以下の非隠しディレクトリ名も既定でスキップされます:
+`node_modules`, `venv`, `__pycache__`, `coverage`, `vendor`, `out`。
+
+`.comp/ignore` を編集せずに除外名を追加したい場合は、VS Code 設定の `comp.exclude`
+（例: `["env", "data"]`）を使います。拡張機能が `.comp/config.json` の `exclude` へ同期し、
+次回の Force Re-index で daemon に反映されます。
 
 ### インデックス上限
 
@@ -417,6 +423,7 @@ npm run lint:md:fix
 | **v0.5** | クリップボードへのコード圧縮コピーコマンド（`copyActiveFileCompressed`）、VS Code Chat Participant APIによる `@comp` チャット参加者機能、Parquet (.parquet) ファイルの自動インデックス化およびBM25全文検索サポート。 | ✅ **リリース済み** |
 | **v0.6** | 動的バジェット：`run_pipeline`が`.comp/config.json`の`default_budget_tokens`を読み込み、バジェット内に収まるよう圧縮レベル0→1→2を自動選択。レスポンスに`compression_level_applied` / `budget_adjusted`フラグを追加。 | ✅ **リリース済み** |
 | **v0.7** | 拡張子別圧縮ルール（`.comp/config.json`に`compression_rules`追加）。Aiderエージェント対応（`.aider.conf.yml`自動生成）。新コマンド`comP: Export Debug Log`。トークン可視化の状態バグ修正。 | ✅ **リリース済み** |
+| **v0.8** | ディレクトリ走査を ripgrep の `ignore` クレートへ刷新し、`.venv`/`node_modules` をサブツリーごと枝刈り（大規模Pythonリポジトリのタイムアウトを解消）。`.comp/ignore` ファイル、`comp.exclude` 設定、5 MiB 超のファイルスキップと大規模ワークスペース警告を追加。`workspace_root` を daemon state に一元化。 | ✅ **リリース済み** |
 | **v1.0** | API安定化、エージェント拡大、コミュニティ統合 | ⚪ 計画中 |
 
 ---

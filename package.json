@@ -2,7 +2,7 @@
   "name": "comp-vscode",
   "displayName": "comP - Code Context Engine",
   "description": "Local-first code indexing engine for AI agents with MCP support. Open-source alternative to Vexp.",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "publisher": "tsucky230",
   "license": "MIT",
   "icon": "resources/comp-icon.png",
@@ -109,6 +109,12 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically index files on workspace open"
+        },
+        "comp.exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Additional directory names to exclude from indexing (synced to .comp/config.json). Changes take effect after Force Re-index."
         }
       }
     }

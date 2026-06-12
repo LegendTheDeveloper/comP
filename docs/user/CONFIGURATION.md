@@ -7,6 +7,7 @@ All settings are under `comp.*` in VS Code settings (`Ctrl+,`).
 | `comp.maxTokens` | number | `8000` | Maximum tokens for `run_pipeline` context capsule |
 | `comp.enableCodeLens` | boolean | `true` | Show dependency counts as CodeLens above symbols |
 | `comp.autoIndex` | boolean | `true` | Automatically index files on workspace open |
+| `comp.exclude` | string[] | `[]` | Additional directory names to exclude from indexing. Synced to `.comp/config.json` on activation. Changes take effect after Force Re-index. |
 
 ## Workspace vs User settings
 
@@ -113,8 +114,76 @@ Relative paths are resolved from the workspace root.
 
 ## Excluding files from indexing
 
-comP respects `.gitignore`. To exclude additional paths, add them to `.gitignore`
-or configure `files.exclude` in VS Code settings.
+comP respects `.gitignore` (and nested `.gitignore` files throughout the workspace).
+Files and directories matching gitignore patterns are never indexed or re-indexed.
+
+Hidden directories (names starting with `.`) are also excluded automatically,
+so `.venv`, `.pytest_cache`, `.mypy_cache`, etc. require no additional configuration.
+
+### Excluding directories via VS Code settings
+
+Use the `comp.exclude` setting to specify directory names that should never be indexed:
+
+```json
+// .vscode/settings.json
+{
+  "comp.exclude": ["env", "data", "dist"]
+}
+```
+
+The extension syncs this list to `.comp/config.json` on activation. The daemon reads it each time
+an indexer is created, so both initial indexing and **Force Re-index** pick up the changes.
+
+> **Note**: Values in `comp.exclude` are matched against directory **name segments** (not paths),
+> so `"env"` excludes any directory named `env` at any depth.
+
+### Excluding via config.json directly
+
+You can also write the `exclude` array directly to `.comp/config.json`:
+
+```json
+{
+  "exclude": ["env", "data"]
+}
+```
+
+Changes to `.comp/config.json` take effect on the next **Force Re-index** (`Ctrl+Shift+P` →
+`comP: Force Re-index Workspace`).
+
+### Excluding via .comp/ignore
+
+To exclude additional paths that are **not** already covered by `.gitignore`, create
+`.comp/ignore` in the workspace root using standard gitignore syntax:
+
+```gitignore
+# .comp/ignore
+venv/
+__pycache__/
+legacy_data/
+*.log
+```
+
+Common patterns for Python projects:
+
+```gitignore
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+```
+
+> **Note**: `files.exclude` in VS Code settings has no effect on comP's daemon-side
+> indexing. Use `.gitignore` or `.comp/ignore` to control what the daemon indexes.
+
+## Automatic limits
+
+The following limits are applied automatically and require no configuration:
+
+| Limit | Value | Behavior |
+| --- | --- | --- |
+| Max file size | 5 MiB | Files larger than 5 MiB are silently skipped during indexing. Useful for large generated files, binary assets, or data files inadvertently left in the workspace. |
+| Large-workspace warning | 2 000 files | When more than 2 000 files are found after exclusions, a warning is logged listing the top directories by file count. Use this as a hint for which directories to add to `.comp/ignore`. |
 
 ## Manual re-indexing
 

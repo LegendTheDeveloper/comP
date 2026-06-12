@@ -38,21 +38,19 @@ pub struct SessionMemory {
     pub sessions: Vec<Session>,
 }
 
-fn get_session_memory_path() -> std::path::PathBuf {
-    let root = std::env::var("COMP_WORKSPACE_ROOT")
-        .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-        .unwrap_or_else(|_| ".".to_string());
-    std::path::Path::new(&root).join(".comp").join("session-memory.json")
+fn get_session_memory_path(root: &str) -> std::path::PathBuf {
+    std::path::Path::new(root).join(".comp").join("session-memory.json")
 }
 
 fn record_mcp_call(
+    workspace_root: &str,
     session_id: &str,
     query: String,
     symbols: Vec<String>,
     files: Vec<String>,
     tokens: u64,
 ) -> Result<()> {
-    let path = get_session_memory_path();
+    let path = get_session_memory_path(workspace_root);
     
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -315,7 +313,7 @@ impl MCPServer {
 
         // budget: explicit param overrides config default
         let budget = params["max_tokens"].as_u64().map(|v| v as usize)
-            .unwrap_or_else(Self::load_default_budget);
+            .unwrap_or_else(|| Self::load_default_budget(&self.state.workspace_root));
 
         let include_content = params["include_content"].as_bool().unwrap_or(false);
 
@@ -402,8 +400,7 @@ impl MCPServer {
         //      We read Markdown/Office files and score using BM25, then add to candidates.
         let mut bm25_hit_count: usize = 0;
         if !doc_paths.is_empty() && !keywords.is_empty() {
-            let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
-                .unwrap_or_else(|_| ".".to_string());
+            let workspace_root = self.state.workspace_root.clone();
             let bm25_hits = crate::indexer::doc_parser::Bm25Scorer::search_files(
                 &workspace_root,
                 &doc_paths,
@@ -429,8 +426,7 @@ impl MCPServer {
         // should rank above purely relevance-matched files regardless of TF-IDF score.
         // Any error (git unavailable, not a repo, no commits, detached HEAD without parent)
         // silently degrades to no boost — the rest of the pipeline is unaffected.
-        let git_ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
-        let git_diff_files = get_git_diff_files(&git_ws);
+        let git_diff_files = get_git_diff_files(&self.state.workspace_root);
         let git_diff_boosted_count: usize;
         if git_diff_files.is_empty() {
             git_diff_boosted_count = 0;
@@ -479,8 +475,8 @@ impl MCPServer {
 
         // 4. Build pivot_files JSON, compressing content at the chosen level.
         //    Per-extension rules from .comp/config.json may override level per file.
-        let ws = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
-        let compression_rules = Self::load_compression_rules();
+        let ws = self.state.workspace_root.clone();
+        let compression_rules = Self::load_compression_rules(&ws);
         let mut pivot_files: Vec<Value> = Vec::new();
         let mut pivot_paths: Vec<String> = Vec::new();
         let mut compression_rules_applied = false;
@@ -547,6 +543,7 @@ impl MCPServer {
         recorded_files.sort();
         recorded_files.dedup();
         if let Err(e) = record_mcp_call(
+            &self.state.workspace_root,
             &self.state.session_id,
             task.to_string(),
             recorded_symbols,
@@ -596,11 +593,8 @@ impl MCPServer {
 
     /// Read `default_budget_tokens` from `.comp/config.json`.
     /// Falls back to 8000 if the file is absent or the key is missing.
-    fn load_default_budget() -> usize {
-        let root = std::env::var("COMP_WORKSPACE_ROOT")
-            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-            .unwrap_or_else(|_| ".".to_string());
-        let path = std::path::Path::new(&root).join(".comp/config.json");
+    fn load_default_budget(root: &str) -> usize {
+        let path = std::path::Path::new(root).join(".comp/config.json");
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let json: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
         json["default_budget_tokens"].as_u64().unwrap_or(8000) as usize
@@ -610,11 +604,8 @@ impl MCPServer {
     ///
     /// Rules map glob patterns to compression levels (0/1/2).
     /// Returns an empty map when the file is absent, invalid, or has no rules key.
-    fn load_compression_rules() -> std::collections::HashMap<String, i64> {
-        let root = std::env::var("COMP_WORKSPACE_ROOT")
-            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-            .unwrap_or_else(|_| ".".to_string());
-        let path = std::path::Path::new(&root).join(".comp/config.json");
+    fn load_compression_rules(root: &str) -> std::collections::HashMap<String, i64> {
+        let path = std::path::Path::new(root).join(".comp/config.json");
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let json: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
 
@@ -821,6 +812,7 @@ impl MCPServer {
         recorded_files.dedup();
         let estimated_tokens = (count as u64) * 50;
         if let Err(e) = record_mcp_call(
+            &self.state.workspace_root,
             &self.state.session_id,
             query.to_string(),
             recorded_symbols,
@@ -1015,9 +1007,7 @@ impl MCPServer {
         info!("handle_force_reindex: clearing index");
         self.state.graph_db.clear_index()?;
 
-        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
-            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-            .unwrap_or_else(|_| ".".to_string());
+        let workspace_root = self.state.workspace_root.clone();
 
         info!("handle_force_reindex: rebuilding index for {}", workspace_root);
         let mut indexer = crate::indexer::Indexer::new(&workspace_root);
@@ -1050,9 +1040,7 @@ impl MCPServer {
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
 
-        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
-            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-            .unwrap_or_else(|_| ".".to_string());
+        let workspace_root = self.state.workspace_root.clone();
 
         let safe_path = validate_within_workspace(path_str, &workspace_root)?;
 
@@ -1072,9 +1060,7 @@ impl MCPServer {
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
 
-        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
-            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-            .unwrap_or_else(|_| ".".to_string());
+        let workspace_root = self.state.workspace_root.clone();
 
         // Convert to workspace-relative path if absolute, and normalize \ to / (DB uses / unified)
         let relative_path = std::path::Path::new(path_str)
@@ -1387,7 +1373,7 @@ impl MCPServer {
     /// Recall past MCP tool invocations for the current session.
     pub async fn handle_session_recall(&self, params: Value) -> Result<Value> {
         let query_filter = params["query"].as_str().map(|q| q.to_lowercase());
-        let path = get_session_memory_path();
+        let path = get_session_memory_path(&self.state.workspace_root);
 
         let mut markdown = String::new();
         markdown.push_str("### Session Recall\n\n");
@@ -1478,9 +1464,7 @@ impl MCPServer {
             return Ok(Value::String(format!("Symbol '{}' not found.", name)));
         }
 
-        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
-            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-            .unwrap_or_else(|_| ".".to_string());
+        let workspace_root = self.state.workspace_root.clone();
 
         let mut markdown = String::new();
         markdown.push_str(&format!("## {}\n\n", name));
@@ -1720,7 +1704,7 @@ impl MCPServer {
     pub async fn handle_get_git_diff_context(&self, params: Value) -> Result<Value> {
         let base_ref = params["base_ref"].as_str().unwrap_or("HEAD~1");
         validate_git_ref(base_ref)?;
-        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT").unwrap_or_else(|_| ".".to_string());
+        let workspace_root = self.state.workspace_root.clone();
 
         let output = std::process::Command::new("git")
             .args(["diff", "--name-only", base_ref])
@@ -1811,9 +1795,7 @@ impl MCPServer {
             .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
         let compression_level = params["compression_level"].as_i64().unwrap_or(1);
 
-        let workspace_root = std::env::var("COMP_WORKSPACE_ROOT")
-            .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-            .unwrap_or_else(|_| ".".to_string());
+        let workspace_root = self.state.workspace_root.clone();
 
         let safe_path = validate_within_workspace(path_str, &workspace_root)?;
 
@@ -1991,9 +1973,9 @@ mod tests {
     #[test]
     fn test_load_compression_rules_missing_file() {
         // Should return empty map when config.json doesn't exist
-        let rules = MCPServer::load_compression_rules();
-        // In test environment COMP_WORKSPACE_ROOT may not be set — just ensure no panic
-        let _ = rules;
+        let rules = MCPServer::load_compression_rules("/nonexistent/path");
+        // No config.json at this path — must return empty map without panic
+        assert!(rules.is_empty());
     }
 
     #[tokio::test]
@@ -2139,6 +2121,7 @@ mod tests {
         assert!(result.as_str().unwrap().contains("No past invocations recorded"));
 
         record_mcp_call(
+            temp_dir.to_str().unwrap(),
             &state.session_id,
             "test task".to_string(),
             vec!["test_symbol".to_string()],

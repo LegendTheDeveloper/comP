@@ -46,7 +46,7 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.7.0 Released</div>
+        <div class="badge animate-fade-in">v0.8.1 Released</div>
         <h1 class="animate-fade-in">Empower Your AI Agents with <br><span class="gradient-text">Flawless Local Code Context</span></h1>
         <p class="hero-desc animate-fade-in">comP is a local-first indexing engine and VSCode extension that helps AI coding agents understand your codebase structure, dependency graphs, and full-text content.</p>
         <div class="hero-cta animate-fade-in">
@@ -183,6 +183,14 @@
             <span class="status-tag">✅ Released</span>
           </div>
         </div>
+        <div class="roadmap-item completed">
+          <div class="roadmap-badge">v0.8</div>
+          <div class="roadmap-content">
+            <h4>Directory-Walk Overhaul & Exclusion Controls</h4>
+            <p>Switched the walker to the ripgrep <code>ignore</code> crate so excluded directories like <code>.venv</code> and <code>node_modules</code> are pruned subtree-wide — large Python repos no longer time out on Force Re-index. Adds the <code>.comp/ignore</code> file, <code>comp.exclude</code> setting, a 5&nbsp;MiB file-size skip, and a large-workspace warning. <code>workspace_root</code> is now centralised in daemon state.</p>
+            <span class="status-tag">✅ Released</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -199,7 +207,7 @@
           <span class="step-num">1</span>
           <h4>Install the Extension</h4>
           <p>Download the release <code>.vsix</code> file and drag-and-drop it into VSCode, or install via command line:</p>
-          <pre><code>code --install-extension comP-0.7.0.vsix</code></pre>
+          <pre><code>code --install-extension comP-0.8.1.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>

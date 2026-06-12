@@ -30,10 +30,16 @@ pub struct Indexer {
 impl Indexer {
     /// Create a new indexer for the given workspace
     pub fn new(workspace_root: &str) -> Self {
-        let config = WalkerConfig {
-            ignore_patterns: Self::load_ignore_patterns(workspace_root),
+        let comp_ignore = std::path::Path::new(workspace_root).join(".comp/ignore");
+        let mut config = WalkerConfig {
+            custom_ignore_file: Some(comp_ignore),
             ..WalkerConfig::default()
         };
+
+        // WHY: Extend the built-in skip list with user-defined excludes from
+        // .comp/config.json so comp.exclude settings take effect on every indexer
+        // creation (initial index and forceReindex alike).
+        config.extra_skip_names.extend(Self::load_exclude_patterns(workspace_root));
 
         let walker = FileWalker::new(workspace_root, config);
         let parser = CodeParser::default();
@@ -45,17 +51,6 @@ impl Indexer {
         }
     }
 
-    /// Load user-defined ignore patterns from .comp/ignore
-    fn load_ignore_patterns(workspace_root: &str) -> Vec<String> {
-        let path = std::path::Path::new(workspace_root).join(".comp/ignore");
-        std::fs::read_to_string(path)
-            .unwrap_or_default()
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && !l.starts_with('#'))
-            .collect()
-    }
-
     /// Read additional workspace paths from `.comp/config.json`.
     ///
     /// WHY: Monorepos or multi-root workspaces need all sub-paths indexed into
@@ -65,6 +60,25 @@ impl Indexer {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
         json["additional_paths"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Load user-defined exclude patterns from `.comp/config.json`.
+    ///
+    /// WHY: VS Code's `comp.exclude` setting is synced here by the extension.
+    /// Daemon reads this at Indexer::new time so forceReindex also picks up changes.
+    fn load_exclude_patterns(workspace_root: &str) -> Vec<String> {
+        let path = std::path::Path::new(workspace_root).join(".comp/config.json");
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+        json["exclude"]
             .as_array()
             .map(|arr| {
                 arr.iter()
@@ -114,6 +128,34 @@ impl Indexer {
         let walk_result = self.walker.walk(previous_hashes)?;
         let total_files = walk_result.files.len();
         let changed_count = walk_result.changed_files.len();
+
+        // WHY: Warn early when the file count is unexpectedly high so users can
+        //      add .comp/ignore entries before the slow indexing loop runs.
+        //      2 000 files is a reasonable ceiling for a single-language project.
+        const FILE_COUNT_WARN_THRESHOLD: usize = 2_000;
+        if total_files > FILE_COUNT_WARN_THRESHOLD {
+            let mut dir_counts: std::collections::HashMap<&str, usize> =
+                std::collections::HashMap::new();
+            for f in &walk_result.files {
+                let top = f.path.split('/').next().unwrap_or(".");
+                *dir_counts.entry(top).or_insert(0) += 1;
+            }
+            let mut sorted: Vec<_> = dir_counts.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            let breakdown: Vec<String> = sorted
+                .iter()
+                .take(5)
+                .map(|(dir, count)| format!("{}: {}", dir, count))
+                .collect();
+            log::warn!(
+                "Large workspace: {} files found (threshold {}). \
+                 Indexing may be slow. Add exclusions to .comp/ignore if needed. \
+                 Top directories — {}",
+                total_files,
+                FILE_COUNT_WARN_THRESHOLD,
+                breakdown.join(", ")
+            );
+        }
 
         // 2. Process changed files: parse, extract, store in DB
         let mut symbols_count = 0;
@@ -281,6 +323,13 @@ impl Indexer {
             .strip_prefix(&self.workspace_root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+
+        // WHY: FileSystemWatcher fires for any matching extension, including paths inside
+        //      excluded directories (.venv, node_modules, __pycache__, etc.).
+        //      Guard here so we never index library code from excluded subtrees.
+        if self.walker.should_skip_relative_path(&relative_path) {
+            return Ok(());
+        }
 
         let language = self.walker_detect_language(&relative_path);
 
@@ -501,6 +550,62 @@ mod tests {
         assert_eq!(edges[0].0, 1); // from_id
         assert_eq!(edges[0].1, 2); // to_id
         assert_eq!(edges[0].2, "function_call");
+    }
+
+    /// 4-5: load_exclude_patterns returns empty Vec when config.json has no exclude key
+    #[test]
+    fn test_load_exclude_patterns_missing() {
+        let patterns = Indexer::load_exclude_patterns("/nonexistent/path");
+        assert!(patterns.is_empty(), "missing config.json must yield empty exclude list");
+    }
+
+    /// 4-5: load_exclude_patterns reads the exclude array from config.json
+    #[test]
+    fn test_load_exclude_patterns_present() {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new().unwrap();
+        let comp_dir = temp_dir.path().join(".comp");
+        std::fs::create_dir_all(&comp_dir).unwrap();
+        std::fs::write(
+            comp_dir.join("config.json"),
+            r#"{"exclude": ["env", "data", "build"]}"#,
+        ).unwrap();
+
+        let patterns = Indexer::load_exclude_patterns(temp_dir.path().to_str().unwrap());
+        assert_eq!(patterns, vec!["env", "data", "build"]);
+    }
+
+    /// 4-5: Indexer::new with exclude in config.json skips the excluded directory
+    #[tokio::test]
+    async fn test_indexer_excludes_from_config() -> Result<()> {
+        use tempfile::TempDir;
+        use std::fs::File;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new()?;
+        let workspace_root = temp_dir.path().to_str().unwrap();
+
+        // Write config.json with "env" as an excluded directory name
+        let comp_dir = temp_dir.path().join(".comp");
+        std::fs::create_dir_all(&comp_dir)?;
+        std::fs::write(comp_dir.join("config.json"), r#"{"exclude": ["env"]}"#)?;
+
+        // Create an excluded directory with a file
+        let env_dir = temp_dir.path().join("env").join("lib");
+        std::fs::create_dir_all(&env_dir)?;
+        File::create(env_dir.join("six.py"))?.write_all(b"# excluded")?;
+
+        // Create a normal source file that must be indexed
+        File::create(temp_dir.path().join("app.py"))?.write_all(b"x = 1")?;
+
+        let db = crate::graph::GraphDB::new(workspace_root).await?;
+        let mut indexer = Indexer::new(workspace_root);
+        let (total, _indexed, _symbols) = indexer.index_workspace(None, &db).await?;
+
+        // Verify: env/ subtree is excluded; only app.py is found
+        assert_eq!(total, 1, "only app.py should be found, env/ must be excluded");
+
+        Ok(())
     }
 
     #[test]

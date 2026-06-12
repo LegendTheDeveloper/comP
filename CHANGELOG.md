@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.8.1] - 2026-06-13
+
+### Fixed
+
+- **`.venv` 等の大量混入バグ**: ディレクトリ走査を `walkdir` から `ignore` クレートへ置き換え。`filter_entry` で除外ディレクトリのサブツリーごと枝刈りするようにし、`.venv/Lib/site-packages/...` が再帰的にインデックスされ forceReindex がタイムアウトする問題を解消（別リポジトリで約 4,400 → 123 ファイルに減少）
+- **部分一致による誤除外**: `path.contains("build")` 方式をパスセグメント完全一致に変更。`src/builder.rs` や `targets.rs` が誤って除外される問題を修正
+- **FileSystemWatcher / `index_file` の除外漏れ**: daemon 側に単一ファイル用スキップガード、拡張側 watcher に早期 return を追加し、`.venv` 配下変更による不要な再インデックスを抑止
+
+### Added
+
+- **`.comp/ignore`**: gitignore 構文の補助除外ファイルに対応（`ignore` クレートの `add_ignore`）
+- **`comp.exclude` 設定**: VS Code 設定で除外ディレクトリ名を指定可能に。`.comp/config.json` の `exclude` 配列へ同期され、daemon の除外リストへ反映
+- **自動制限**: 5 MiB 超のファイルをスキップ、2,000 ファイル超で上位ディレクトリ内訳付きの警告ログを出力
+
+### Changed
+
+- **`workspace_root` を daemon state へ一元化**: 各ハンドラが `COMP_WORKSPACE_ROOT` 環境変数を都度読む方式から、起動時に `AppState` が保持する値を使う方式に変更し、起動時 root との乖離を排除
+- **ドキュメント同期**: CONFIGURATION / GETTING_STARTED に Python プロジェクト向け除外手順・`comp.exclude`・自動制限を追記。`.gitignore` を尊重する旨の誤記を実態（`.comp/ignore`）に修正
+
+---
+
 ## [0.8.0] - 2026-06-10
 
 ### Added

@@ -24,6 +24,37 @@ let statusBar: StatusBar | null = null;
 let sidebarPanel: SidebarPanel | null = null;
 let codeLensProvider: DependencyCodeLensProvider | null = null;
 
+/**
+ * Merge `comp.exclude` values into a `.comp/config.json` object.
+ *
+ * WHY pure function: enables unit testing without VS Code API or filesystem I/O.
+ *
+ * @param existing - Current parsed config.json content (any type; gracefully handles non-objects).
+ * @param exclude - New exclude array from `comp.exclude` setting.
+ * @returns Merged config object. Returns existing unchanged when the exclude value is already equal.
+ */
+export function mergeExcludeIntoConfig(
+  existing: unknown,
+  exclude: string[]
+): Record<string, unknown> {
+  const base: Record<string, unknown> =
+    existing !== null && typeof existing === "object" && !Array.isArray(existing)
+      ? { ...(existing as Record<string, unknown>) }
+      : {};
+
+  const current = Array.isArray(base["exclude"]) ? (base["exclude"] as unknown[]) : null;
+  const same =
+    current !== null &&
+    current.length === exclude.length &&
+    exclude.every((v, i) => v === current[i]);
+
+  if (same) {
+    return base;
+  }
+
+  return { ...base, exclude };
+}
+
 // Check if .comp directory exists in workspace root
 function hasCompDirectory(): boolean {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -35,6 +66,60 @@ function hasCompDirectory(): boolean {
 
 let watcherDisposable: vscode.Disposable | null = null;
 let codeLensDisposable: vscode.Disposable | null = null;
+
+/**
+ * Sync `comp.exclude` VS Code setting into `.comp/config.json`.
+ *
+ * WHY: The daemon reads exclude patterns from .comp/config.json at indexer
+ * creation time. By writing the VS Code setting here (before startDaemonStack),
+ * both initial indexing and forceReindex pick up the user's exclude list.
+ * Skips the write when the value is already equal to avoid unnecessary diffs.
+ */
+function syncExcludeToConfig(): void {
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!workspaceRoot) return;
+
+  const exclude = vscode.workspace
+    .getConfiguration("comp")
+    .get<string[]>("exclude", []);
+
+  const configPath = path.join(workspaceRoot, ".comp", "config.json");
+
+  let existing: unknown = {};
+  if (fs.existsSync(configPath)) {
+    try {
+      existing = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    } catch {
+      existing = {};
+    }
+  }
+
+  const merged = mergeExcludeIntoConfig(existing, exclude);
+
+  // Skip write when exclude is already equal (avoid diff noise)
+  const currentExclude = Array.isArray((existing as Record<string, unknown>)?.["exclude"])
+    ? ((existing as Record<string, unknown>)["exclude"] as unknown[])
+    : null;
+  const alreadySynced =
+    currentExclude !== null &&
+    currentExclude.length === exclude.length &&
+    exclude.every((v, i) => v === currentExclude[i]);
+
+  if (alreadySynced) {
+    return;
+  }
+
+  try {
+    const compDir = path.join(workspaceRoot, ".comp");
+    if (!fs.existsSync(compDir)) {
+      fs.mkdirSync(compDir, { recursive: true });
+    }
+    fs.writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", "utf8");
+    console.log(`[comP] Synced comp.exclude to ${configPath}`);
+  } catch (error) {
+    console.warn("[comP] Failed to sync comp.exclude:", error);
+  }
+}
 
 
 /** Activation: called when extension is loaded */
@@ -77,6 +162,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
     // 4. Auto mode: immediately start if .comp directory exists
     if (autoStartDaemon) {
+      // Sync comp.exclude to .comp/config.json before daemon starts so the
+      // initial indexer picks up the user's exclude list without a Force Re-index.
+      syncExcludeToConfig();
       await startDaemonStack(context);
       console.log("[comP] Extension activated successfully (auto-mode)");
     } else {
@@ -211,11 +299,24 @@ function setupFileWatchers(
   // Debounce timer for rapid file changes
   let debounceTimer: NodeJS.Timeout | null = null;
 
+  // WHY: Mirror the daemon-side exclusion list so we skip the IPC round-trip
+  //      entirely for paths inside excluded directories (e.g. pip-installed .venv).
+  //      The daemon also guards against these, but dropping them here saves overhead.
+  const EXCLUDED_SEGMENTS = new Set([
+    "node_modules", "venv", "__pycache__", "coverage", "vendor", "out",
+  ]);
+  function isExcludedPath(uri: vscode.Uri): boolean {
+    const rel = vscode.workspace.asRelativePath(uri, false).replace(/\\/g, "/");
+    return rel.split("/").some(seg => seg.startsWith(".") || EXCLUDED_SEGMENTS.has(seg));
+  }
+
   // Watch for file changes (only code files)
   const sourcePattern = "**/*.{ts,tsx,js,jsx,py,go,rs,java,cs,rb,php,sql,json,yaml,xml,md}";
   const watcher = vscode.workspace.createFileSystemWatcher(sourcePattern, false, false, false);
 
   watcher.onDidChange(async (uri) => {
+    if (isExcludedPath(uri)) { return; }
+
     // Debounce rapid changes (wait 500ms after last change)
     if (debounceTimer) {
       clearTimeout(debounceTimer);
@@ -241,6 +342,7 @@ function setupFileWatchers(
   });
 
   watcher.onDidDelete(async (uri) => {
+    if (isExcludedPath(uri)) { return; }
     try {
       // Notify daemon that file was deleted
       await daemonManager.removeFile(uri.fsPath);
