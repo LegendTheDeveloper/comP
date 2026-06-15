@@ -442,7 +442,7 @@ npm run lint:md:fix
 
 comPは完全無料・オープンソースです。このプロジェクトが役に立つなら、開発を支援していただけませんか？
 
-- ☕ **[GitHubスポンサー](https://github.com/sponsors/tsucky230)** — 開発を応援（近日公開）
+- ☕ **[GitHubスポンサー](https://github.com/sponsors/tsucky230)** — 開発を応援
 - 💖 **このリポジトリにStarをつける** — 他の人に知らせてください
 
 皆さんのご支援が、開発・保守・新機能追加を支えています。ありがとうございます！🙏
