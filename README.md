@@ -440,7 +440,7 @@ npm run lint:md:fix
 comP is free and open-source. If you find it valuable, consider supporting development:
 
 - ☕ **[GitHub Sponsors](https://github.com/sponsors/tsucky230)** — Support
-  ongoing development (coming soon)
+  ongoing development
 - 💖 **Star this repository** — Help others discover comP
 
 Your support enables faster development, better maintenance, and new
