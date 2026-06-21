@@ -86,7 +86,12 @@ The backend coordinates high-performance AST parsing, graph DB compilation, BM25
    - **BM25 Search**: Tokenizes queries and indexes code definitions and document bodies using the BM25 relevance ranking algorithm.
    - **TF-IDF & LIKE Filter**: Complements BM25 with substring LIKE filters and TF-IDF term weights to maximize search recall.
 
-4. **`ASTCompressor` (`daemon/src/mcp/compress.rs`)**
+4. **`DependencyAnalyzer` (`daemon/src/indexer/dependency.rs`)**
+   - **Extraction**: Pulls imports, function/method calls, and `new` type references from Rust / TypeScript / JavaScript / Python / Go. Definition lines (`fn`/`def`/`func`/`function`) and control-flow keywords are excluded so they are not mistaken for calls.
+   - **Two-pass cross-file resolution (`resolve_global`)**: After all nodes are inserted, edges are resolved using a global symbol index (`name → [(node_id, file_id, is_exported)]`). The caller (`from`) is approximated as the nearest preceding symbol above the dependency line (the `nodes` table has no `end_line`); the callee (`to`) is resolved same-file first, then globally. Ambiguous names with multiple exported definitions are skipped to avoid false edges (precision over recall).
+   - On re-index, `GraphDB::clear_file_edges` rebuilds each file's outbound edges to prevent stale-edge accumulation.
+
+5. **`ASTCompressor` (`daemon/src/mcp/compress.rs`)**
    - Shrinks code context size at the syntax tree level. Supports three compression tiers:
      - **Level 0 (Raw)**: Returns unmodified file content.
      - **Level 1 (Compact)**: Strips single-line and multi-line comments and minimizes trailing blank spaces via `tree-sitter` syntax queries.

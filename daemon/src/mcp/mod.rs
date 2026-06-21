@@ -220,6 +220,15 @@ impl MCPServer {
             let params = request["params"].clone();
             let id = request["id"].clone();
 
+            // JSON-RPC 2.0 notifications (requests without an "id") must not
+            // receive a response. MCP clients such as Claude Code send
+            // `notifications/initialized` right after the handshake; replying to
+            // it with an `id: null` error makes strict clients drop the
+            // connection (-32000 Connection closed).
+            if id.is_null() {
+                continue;
+            }
+
             // Call appropriate handler
             let result = match method {
                 "initialize" => self.handle_initialize(params).await,

@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.8.3] - 2026-06-21
+
+### Fixed
+
+- **MCP 通知への不正応答で接続が切れるバグ**: JSON-RPC 通知（`id` を持たないメッセージ）を通常リクエストとして処理し、Claude Code がハンドシェイク直後に送る `notifications/initialized` に対して `id: null` のエラー応答を返していた。厳格な MCP クライアント（Claude Code）がこれを受けてトランスポートを破棄し `-32000: Connection closed` となる問題を修正。通知には応答を返さないようガードを追加（`daemon/src/mcp/mod.rs`）
+- **依存エッジがほぼ生成されないバグ**: 依存解析が実質スタブ状態で、48,762 ノードに対しエッジが 31 本しか作られず、影響グラフ（CodeLens の dependents / `get_impact_graph`）が機能していなかった問題を修正。
+  - Python / Go の依存抽出が常に空を返していたのを実装（`from ... import`、関数・メソッド呼び出し）
+  - import の `from` が常に `"module"` 固定でノードに一致しなかった問題を、呼び出し元＝行直前の最近接シンボルで解決する方式に変更
+  - クロスファイル解決を有効化（同一ファイル → グローバル索引の順で解決。同名 export が複数ある曖昧ケースはスキップし誤エッジを防止）
+  - Rust/TypeScript に一般呼び出し・`new` 型参照の抽出を追加
+  - 同一プロジェクトでの実測: エッジ 31 → 636
+
+### Changed
+
+- インデックス処理を 2 パス化（全ノード登録後にエッジを解決）。`GraphDB::get_global_symbol_index` / `clear_file_edges` を追加し、再インデックス時の stale エッジを排除
+- Rust テスト 6 件追加（Python/Go 抽出・クロスファイル解決・曖昧/自己参照スキップ・2 ファイル間エッジ生成の統合テスト）
+
+---
+
 ## [0.8.1] - 2026-06-13
 
 ### Fixed

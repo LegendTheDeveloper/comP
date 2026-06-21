@@ -157,14 +157,31 @@ impl Indexer {
             );
         }
 
-        // 2. Process changed files: parse, extract, store in DB
+        // 2. Pass 1 — parse, extract symbols, store nodes. Defer edges so callee
+        //    names can be resolved across files once every node exists.
         let mut symbols_count = 0;
+        let mut deps_by_file: Vec<(String, Vec<dependency::Dependency>)> = Vec::new();
         for file_entry in walk_result.changed_files {
             match self.parse_and_extract(&file_entry, db).await {
-                Ok(count) => symbols_count += count,
+                Ok((count, deps)) => {
+                    symbols_count += count;
+                    if !deps.is_empty() {
+                        deps_by_file.push((file_entry.path.clone(), deps));
+                    }
+                }
                 Err(e) => {
                     eprintln!("Error parsing {}: {}", file_entry.path, e);
                     // Continue with next file on error
+                }
+            }
+        }
+
+        // 2b. Pass 2 — resolve dependencies into edges via the global symbol index.
+        if !deps_by_file.is_empty() {
+            let global_index = db.get_global_symbol_index()?;
+            for (path, deps) in &deps_by_file {
+                if let Err(e) = Self::resolve_edges_for_file(db, path, deps, &global_index) {
+                    log::warn!("Failed to resolve edges for {}: {}", path, e);
                 }
             }
         }
@@ -218,7 +235,11 @@ impl Indexer {
     ///
     /// # Returns
     /// - Number of symbols extracted and stored
-    async fn parse_and_extract(&mut self, file_entry: &FileEntry, db: &crate::graph::GraphDB) -> Result<usize> {
+    async fn parse_and_extract(
+        &mut self,
+        file_entry: &FileEntry,
+        db: &crate::graph::GraphDB,
+    ) -> Result<(usize, Vec<dependency::Dependency>)> {
         use std::fs;
 
         // 1. Read file content based on type
@@ -246,7 +267,7 @@ impl Indexer {
                 Ok(c) => c,
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
                     log::debug!("Skipping non-UTF-8 file: {} ({})", file_entry.path, e);
-                    return Ok(0);
+                    return Ok((0, Vec::new()));
                 }
                 Err(e) => return Err(e.into()),
             };
@@ -283,8 +304,10 @@ impl Indexer {
             symbol_map.insert(symbol.name.clone(), node_id);
         }
 
-        // 5. Extract and store dependencies (edges) — Phase 4
-        // Extract raw dependencies from source code
+        // 5. Extract raw dependencies from source code.
+        // Edges are resolved in a second pass (see resolve_edges_for_file), once
+        // all nodes exist, so callee names can be linked across files.
+        let _ = &symbol_map;
         let raw_deps = if is_binary {
             Vec::new()
         } else {
@@ -295,18 +318,39 @@ impl Indexer {
             ).unwrap_or_default()
         };
 
-        // Resolve dependency names to node IDs
-        let edges = DependencyAnalyzer::resolve_dependencies(&raw_deps, &symbol_map, &HashMap::new());
+        Ok((symbols.len(), raw_deps))
+    }
 
-        // Store edges in database
+    /// Resolve and store edges for a single file using the global symbol index.
+    ///
+    /// WHY: A separate pass over already-inserted nodes lets us link a callee
+    /// name to a definition in any file, not just the current one.
+    fn resolve_edges_for_file(
+        db: &crate::graph::GraphDB,
+        path: &str,
+        deps: &[dependency::Dependency],
+        global_index: &crate::graph::GlobalSymbolIndex,
+    ) -> Result<()> {
+        let Some(file_id) = db.get_file_id_by_path(path)? else {
+            return Ok(());
+        };
+
+        // Rebuild this file's outbound edges from scratch to avoid stale entries.
+        db.clear_file_edges(file_id)?;
+
+        let local_nodes: Vec<(i64, String, i32)> = db
+            .get_file_symbols_sorted(file_id)?
+            .into_iter()
+            .map(|n| (n.id, n.name, n.line))
+            .collect();
+
+        let edges = DependencyAnalyzer::resolve_global(deps, &local_nodes, global_index, file_id);
         for (from_id, to_id, edge_kind) in edges {
             if let Err(e) = db.insert_edge(from_id, to_id, &edge_kind) {
-                eprintln!("Warning: Failed to insert edge {}->{}: {}", from_id, to_id, e);
-                // Continue on edge insertion failures
+                log::warn!("Failed to insert edge {}->{}: {}", from_id, to_id, e);
             }
         }
-
-        Ok(symbols.len())
+        Ok(())
     }
 
     /// Index a single file (incremental update)
@@ -347,8 +391,13 @@ impl Indexer {
             modified_time: 0,
         };
 
-        // parse_and_extract performs parsing and writes to database
-        self.parse_and_extract(&file_entry, db).await?;
+        // parse_and_extract writes nodes; resolve this file's edges against the
+        // global index so incremental updates also populate the dependency graph.
+        let (_count, deps) = self.parse_and_extract(&file_entry, db).await?;
+        if !deps.is_empty() {
+            let global_index = db.get_global_symbol_index()?;
+            Self::resolve_edges_for_file(db, &file_entry.path, &deps, &global_index)?;
+        }
 
         Ok(())
     }
@@ -450,7 +499,7 @@ mod tests {
             modified_time: 0,
         };
 
-        let count = indexer.parse_and_extract(&file_entry, &db).await?;
+        let (count, _deps) = indexer.parse_and_extract(&file_entry, &db).await?;
 
         // Verify: Should extract multiple symbols (hello, Point, main)
         assert!(count > 0, "Should extract at least one symbol");
@@ -664,16 +713,41 @@ mod tests {
         };
 
         // Parse and extract
-        let symbol_count = indexer.parse_and_extract(&file_entry, &db).await?;
+        let (symbol_count, _deps) = indexer.parse_and_extract(&file_entry, &db).await?;
 
         // Verify symbols were extracted
         assert!(symbol_count > 0);
 
         // Verify database state
-        let (file_count, node_count, edge_count) = db.get_stats()?;
+        let (file_count, node_count, _edge_count) = db.get_stats()?;
         assert_eq!(file_count, 1);
         assert!(node_count > 0);
-        // Note: edges may be 0 if dependency extraction is not yet implemented
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_index_workspace_builds_cross_file_edges() -> Result<()> {
+        use tempfile::TempDir;
+        use std::fs::File;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new()?;
+        let workspace_root = temp_dir.path().to_string_lossy().to_string();
+
+        // lib.rs exports `helper`; main.rs calls it → one cross-file edge expected.
+        let mut lib = File::create(temp_dir.path().join("lib.rs"))?;
+        writeln!(lib, "pub fn helper() {{}}")?;
+
+        let mut main = File::create(temp_dir.path().join("main.rs"))?;
+        writeln!(main, "fn run() {{\n    helper();\n}}")?;
+
+        let db = crate::graph::GraphDB::new(&workspace_root).await?;
+        let mut indexer = Indexer::new(&workspace_root);
+        indexer.index_workspace(None, &db).await?;
+
+        let (_files, _nodes, edges) = db.get_stats()?;
+        assert!(edges > 0, "cross-file call should produce at least one edge");
 
         Ok(())
     }

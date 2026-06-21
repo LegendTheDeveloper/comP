@@ -86,7 +86,12 @@ graph TD
    - **BM25 検索**: 登録されたコード定義、コメント、および抽出ドキュメントテキスト（Office/PDF/Parquet）を対象に、BM25（Best Matching 25）アルゴリズムに基づいた高精度なキーワード全文検索を実行します。
    - **TF-IDF & LIKE 検索**: 曖昧一致 (LIKE 検索) と TF-IDF による語彙マッチングをマージし、エージェントの求めるファイルコンテキストの再現率（Recall）を最大化します。
 
-4. **`ASTCompressor` (`daemon/src/mcp/compress.rs`)**
+4. **`DependencyAnalyzer` (`daemon/src/indexer/dependency.rs`)**
+   - **依存抽出**: Rust / TypeScript / JavaScript / Python / Go のソースから、import・関数呼び出し・メソッド呼び出し・`new` による型参照を抽出します。定義行（`fn`/`def`/`func`/`function`）や制御構文キーワードは呼び出しとして誤検出しないよう除外します。
+   - **2 パス・クロスファイル解決 (`resolve_global`)**: 全ファイルのノード登録後に、グローバルシンボル索引（`name → [(node_id, file_id, is_exported)]`）を用いてエッジを解決します。呼び出し元は「依存行の直前にある最近接シンボル」で近似し（`nodes` に `end_line` を持たないため）、呼び出し先は「同一ファイル → グローバル索引」の順で解決します。**同名の export が複数存在する曖昧なケースはエッジを張らず**、誤った依存（false edge）を防ぎます（再現率より精度を優先）。
+   - 再インデックス時は `GraphDB::clear_file_edges` で当該ファイル発のエッジを再構築し、stale エッジの蓄積を防ぎます。
+
+5. **`ASTCompressor` (`daemon/src/mcp/compress.rs`)**
    - 生成 AI エージェントの入力トークン数を削減するための、AST レベルでのテキスト圧縮エンジン。以下の3つのレベルをサポートします。
      - **Level 0 (Raw)**: 元のコードをそのまま返却。
      - **Level 1 (Compact)**: tree-sitter を利用して、コード内のコメント（ラインコメント・ブロックコメント）および冗長な空行を除去。

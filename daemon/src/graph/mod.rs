@@ -18,6 +18,9 @@ mod schema;
 
 pub use schema::Schema;
 
+/// Cross-file symbol lookup: `name -> [(node_id, file_id, is_exported)]`.
+pub type GlobalSymbolIndex = HashMap<String, Vec<(i64, i64, bool)>>;
+
 /// Graph database interface for storing code structure
 pub struct GraphDB {
     // WHY: Use Mutex<Connection> to obtain Send+Sync.
@@ -115,6 +118,43 @@ impl GraphDB {
             "INSERT OR IGNORE INTO edges (from_id, to_id, kind)
              VALUES (?, ?, ?)",
             rusqlite::params![from_id, to_id, kind],
+        )?;
+        Ok(())
+    }
+
+    /// Build a global symbol index for cross-file dependency resolution.
+    ///
+    /// Returns: `name -> [(node_id, file_id, is_exported)]`. Used by
+    /// `DependencyAnalyzer::resolve_global` to link a callee name to its
+    /// definition in any indexed file.
+    pub fn get_global_symbol_index(&self) -> Result<GlobalSymbolIndex> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT name, id, file_id, is_exported FROM nodes")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)? != 0,
+            ))
+        })?;
+        let mut map: GlobalSymbolIndex = HashMap::new();
+        for row in rows {
+            let (name, id, file_id, is_exported) = row?;
+            map.entry(name).or_default().push((id, file_id, is_exported));
+        }
+        Ok(map)
+    }
+
+    /// Delete all edges originating from a file's nodes.
+    ///
+    /// WHY: On re-index of a changed file, its outbound edges must be rebuilt
+    /// from scratch; otherwise stale edges accumulate (FK CASCADE is not enabled).
+    pub fn clear_file_edges(&self, file_id: i64) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute(
+            "DELETE FROM edges WHERE from_id IN (SELECT id FROM nodes WHERE file_id = ?)",
+            [file_id],
         )?;
         Ok(())
     }
