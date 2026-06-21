@@ -7,16 +7,13 @@ daemon/src/
 daemon/tests/
 daemon/Cargo.toml
 daemon/Cargo.lock
-daemon/target/debug/
-daemon/target/release/deps/
-daemon/target/release/build/
-daemon/target/release/incremental/
-daemon/target/release/.fingerprint/
-daemon/target/release/*.d
-daemon/target/release/*.rlib
-daemon/target/release/*.pdb
-daemon/target/release/comp-daemon
-daemon/target/release/comp-daemon.exe
+daemon/audit.toml
+# Ship ONLY the prebuilt release binaries; exclude everything else under target/
+# (the directory-slash form does not recurse in vsce's matcher, so use ** + negation).
+daemon/target/**
+!daemon/target/release/comp-daemon-win.exe
+!daemon/target/release/comp-daemon-linux
+!daemon/target/release/comp-daemon-macos
 
 # ===== Build/Config =====
 
@@ -57,6 +54,16 @@ docs/
 # ===== Node/Rust Build =====
 
 node_modules/
+
+# ===== Python (venv & caches) =====
+
+.venv/
+**/.venv/**
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+**/__pycache__/**
 
 # ===== Logs =====
 
