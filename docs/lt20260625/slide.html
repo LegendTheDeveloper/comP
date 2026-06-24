@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>現場からみたインターン必勝法</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --color-primary: #CC785C;
+      --color-secondary: #EFE9DF;
+      --color-background: #F5F0E8;
+      --color-accent: #CC785C;
+      --color-text: #1A1A1A;
+      --color-text-muted: #6B6560;
+      --color-line: #DCD5CB;
+      --font: 'Noto Sans JP', sans-serif;
+      --slide-padding-v: 56px;
+      --slide-padding-h: 72px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #D8D2C8;
+      font-family: var(--font);
+      color: var(--color-text);
+      padding: 40px 20px;
+    }
+
+    .slide-label {
+      text-align: center;
+      font-size: 12px;
+      color: #888;
+      margin-bottom: 8px;
+      font-family: monospace;
+      letter-spacing: 0.05em;
+    }
+
+    .slide {
+      width: 960px;
+      height: 540px;
+      background: var(--color-background);
+      padding: var(--slide-padding-v) var(--slide-padding-h);
+      margin: 0 auto 48px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.14);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .slide-number {
+      position: absolute;
+      bottom: 22px;
+      right: 72px;
+      font-size: 13px;
+      color: var(--color-text-muted);
+    }
+
+    .accent-bar {
+      width: 48px;
+      height: 4px;
+      background: var(--color-accent);
+      margin-bottom: 22px;
+      flex-shrink: 0;
+    }
+
+    /* 共通：コンテンツスライドの見出し */
+    .slide-title {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--color-text);
+      margin-bottom: 6px;
+      flex-shrink: 0;
+    }
+
+    .content { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+    /* ============ 表紙 ============ */
+    .slide-cover { justify-content: center; }
+    .slide-cover .eyebrow {
+      font-size: 13px; font-weight: 700; letter-spacing: 0.15em;
+      text-transform: uppercase; color: var(--color-primary); margin-bottom: 18px;
+    }
+    .slide-cover h1 {
+      font-size: 52px; font-weight: 700; line-height: 1.25;
+      color: var(--color-text); max-width: 680px; margin-bottom: 22px;
+    }
+    .slide-cover .subtitle {
+      font-size: 19px; color: var(--color-text-muted);
+      max-width: 520px; line-height: 1.6; margin-bottom: 36px;
+    }
+    .slide-cover .meta { display: flex; gap: 32px; font-size: 14px; color: var(--color-text-muted); }
+    .slide-cover .meta span strong { color: var(--color-text); }
+    .deco-circle {
+      position: absolute; right: -70px; top: -70px; width: 340px; height: 340px;
+      border-radius: 50%; background: var(--color-secondary); opacity: 0.7;
+    }
+    .deco-circle-sm {
+      position: absolute; right: 140px; bottom: -50px; width: 170px; height: 170px;
+      border-radius: 50%; background: var(--color-primary); opacity: 0.12;
+    }
+
+    /* ============ 章扉 ============ */
+    .slide-section {
+      background: var(--color-text);
+      justify-content: center;
+    }
+    .slide-section::before {
+      content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+      width: 8px; background: var(--color-primary);
+    }
+    .slide-section .section-number {
+      font-size: 80px; font-weight: 700; color: var(--color-primary);
+      line-height: 1; margin-bottom: 10px;
+    }
+    .slide-section h2 {
+      font-size: 46px; font-weight: 700; color: #F5F0E8;
+      line-height: 1.2; max-width: 620px; margin-bottom: 18px;
+    }
+    .slide-section .section-desc { font-size: 19px; color: #A09890; max-width: 480px; line-height: 1.6; }
+    .slide-section .slide-number { color: #5A5550; }
+
+    /* ============ キーメッセージ ============ */
+    .slide-key { align-items: center; justify-content: center; text-align: center; }
+    .slide-key .warn { font-size: 30px; margin-bottom: 18px; }
+    .slide-key .kdiv { width: 64px; height: 1px; background: #C7BFB3; }
+    .slide-key .kmsg {
+      font-size: 38px; font-weight: 700; color: var(--color-text);
+      line-height: 1.45; margin: 26px 0; max-width: 760px;
+    }
+    .slide-key .ksub { font-size: 18px; color: var(--color-text-muted); margin-top: 22px; max-width: 600px; line-height: 1.6; }
+
+    /* ============ プロフィール ============ */
+    .profile-body { flex: 1; display: flex; gap: 36px; }
+    .profile-left { flex: 1.4; display: flex; flex-direction: column; justify-content: center; }
+    .prow { display: flex; gap: 18px; padding: 11px 0; border-bottom: 1px solid var(--color-line); }
+    .prow:last-child { border-bottom: none; }
+    .plabel { width: 84px; flex-shrink: 0; font-size: 13px; font-weight: 700; color: var(--color-primary); padding-top: 2px; }
+    .pval { font-size: 16px; color: var(--color-text); line-height: 1.55; }
+    .profile-right { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 52px; }
+    .pphoto {
+      width: 190px; height: 190px; border-radius: 50%; object-fit: cover; object-position: center 0%;
+      border: 4px solid #fff; box-shadow: 0 6px 22px rgba(0,0,0,0.16); margin-bottom: 16px;
+    }
+    .pname { font-size: 22px; font-weight: 700; color: var(--color-text); }
+    .ptitle { font-size: 13px; color: var(--color-text-muted); margin-top: 4px; text-align: center; }
+
+    /* ============ 2段スタック ============ */
+    .stack { flex: 1; display: flex; flex-direction: column; }
+    .stack-sec { flex: 1; padding: 14px 0; }
+    .stack-sec + .stack-sec { border-top: 1px solid var(--color-line); }
+    .stack-h { font-size: 18px; font-weight: 700; color: var(--color-text); border-left: 4px solid var(--color-primary); padding-left: 12px; margin-bottom: 12px; }
+    .stack-body { font-size: 15px; color: #4A453F; line-height: 1.8; }
+    .stack-list { list-style: none; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .stack-list li { font-size: 15px; color: #4A453F; display: flex; gap: 12px; align-items: flex-start; }
+    .stack-list .num { color: var(--color-primary); font-weight: 700; flex-shrink: 0; }
+
+    /* ============ 2カラム本文 ============ */
+    .twocol { flex: 1; display: flex; gap: 0; }
+    .tcol { flex: 1; padding: 8px 36px; display: flex; flex-direction: column; justify-content: center; }
+    .tcol + .tcol { border-left: 1px solid var(--color-line); }
+    .tcol:first-child { padding-left: 4px; }
+    .tlabel { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-primary); margin-bottom: 10px; }
+    .th { font-size: 22px; font-weight: 700; color: var(--color-text); margin-bottom: 12px; }
+    .tdiv { width: 40px; height: 2px; background: #C7BFB3; margin-bottom: 16px; }
+    .tbody { font-size: 15px; color: #4A453F; line-height: 1.85; }
+
+    /* ============ 番号リスト ============ */
+    .numlist { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    .nitem { display: flex; gap: 22px; align-items: flex-start; padding: 16px 0; }
+    .nitem + .nitem { border-top: 1px solid var(--color-line); }
+    .nbadge {
+      width: 46px; height: 46px; border-radius: 50%; background: var(--color-primary); color: #fff;
+      font-size: 19px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .ntext h3 { font-size: 19px; font-weight: 700; color: var(--color-text); margin-bottom: 5px; }
+    .ntext p { font-size: 15px; color: #4A453F; line-height: 1.65; }
+
+    /* ============ アイコン左リスト ============ */
+    .iconlist { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    .iitem { display: flex; gap: 22px; align-items: center; padding: 16px 0; }
+    .iitem + .iitem { border-top: 1px solid var(--color-line); }
+    .iicon {
+      width: 58px; height: 58px; border-radius: 14px; background: var(--color-secondary);
+      font-size: 28px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .itext h3 { font-size: 19px; font-weight: 700; color: var(--color-primary); margin-bottom: 4px; }
+    .itext p { font-size: 15px; color: #4A453F; line-height: 1.6; }
+
+    /* ============ 4ステップフロー ============ */
+    .flow-lead { font-size: 15px; color: #4A453F; line-height: 1.6; margin-bottom: 20px; }
+    .flow-cards { flex: 1; display: flex; gap: 16px; position: relative; }
+    .flow-cards::before {
+      content: ""; position: absolute; top: 22px; left: 6%; right: 6%; height: 2px;
+      background: repeating-linear-gradient(to right, #C7BFB3 0 6px, transparent 6px 12px);
+    }
+    .fcard {
+      flex: 1; background: #fff; border: 1px solid var(--color-line); border-radius: 10px;
+      padding: 16px 14px; display: flex; flex-direction: column; position: relative;
+    }
+    .fdot { position: absolute; top: -23px; left: 50%; transform: translateX(-50%); width: 12px; height: 12px; border-radius: 50%; background: var(--color-primary); border: 3px solid var(--color-background); }
+    .fstep { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: var(--color-primary); }
+    .fnum { font-size: 30px; font-weight: 700; color: var(--color-primary); line-height: 1; margin-bottom: 6px; }
+    .fname { font-size: 15px; font-weight: 700; color: var(--color-text); margin-bottom: 8px; }
+    .fcard hr { border: none; border-top: 1px solid var(--color-line); margin-bottom: 8px; }
+    .fcard p { font-size: 12.5px; color: #4A453F; line-height: 1.6; }
+
+    /* ============ タイムラインカード ============ */
+    .tl-top { height: 26px; position: relative; margin-bottom: 10px; }
+    .tl-top::before { content:""; position:absolute; top: 11px; left: 11%; right: 11%; height: 2px; background: repeating-linear-gradient(to right,#C7BFB3 0 6px,transparent 6px 12px); }
+    .tl-dot { position: absolute; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--color-primary); }
+    .tl-cards { flex: 1; display: flex; gap: 16px; }
+    .tlcard { flex: 1; background: #fff; border: 1px solid var(--color-line); border-radius: 10px; padding: 16px 14px; }
+    .tlstep { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: var(--color-primary); }
+    .tlnum { font-size: 28px; font-weight: 700; color: var(--color-primary); line-height: 1; margin-bottom: 8px; }
+    .tlh { font-size: 15px; font-weight: 700; color: var(--color-text); margin-bottom: 8px; }
+    .tlcard ul { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+    .tlcard li { font-size: 12.5px; color: #4A453F; line-height: 1.5; padding-left: 12px; position: relative; }
+    .tlcard li::before { content: "▶"; position: absolute; left: 0; color: var(--color-primary); font-size: 8px; top: 4px; }
+
+    /* ============ 3段セグメント ============ */
+    .seg-body { flex: 1; display: flex; }
+    .seg-left { width: 22%; border-right: 1px dashed #C7BFB3; padding-right: 18px; display: flex; flex-direction: column; justify-content: center; }
+    .seg-left .lbl { font-size: 11px; letter-spacing: 0.12em; color: var(--color-text-muted); text-transform: uppercase; margin-bottom: 10px; }
+    .seg-left .bracket { font-size: 18px; font-weight: 700; color: var(--color-text); line-height: 1.4; }
+    .seg-right { flex: 1; padding-left: 28px; display: flex; flex-direction: column; justify-content: center; }
+    .seg-row { display: flex; gap: 18px; align-items: center; padding: 13px 0; }
+    .seg-row + .seg-row { border-top: 1px solid var(--color-line); }
+    .seg-icon { width: 46px; height: 46px; border-radius: 50%; background: var(--color-secondary); display: flex; align-items: center; justify-content: center; font-size: 22px; flex-shrink: 0; }
+    .seg-tlabel { font-size: 11px; color: var(--color-text-muted); }
+    .seg-th { font-size: 17px; font-weight: 700; color: var(--color-text); }
+    .seg-sub { font-size: 13px; color: var(--color-primary); margin-bottom: 3px; }
+    .seg-bul { font-size: 13px; color: #4A453F; }
+
+    /* ============ 3カード ============ */
+    .divider-head { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+    .divider-head .line { flex: 1; height: 1px; background: var(--color-line); }
+    .divider-head .dtext { font-size: 15px; font-weight: 700; color: var(--color-text); white-space: nowrap; }
+    .cards3 { flex: 1; display: flex; gap: 18px; }
+    .c3 { flex: 1; background: #fff; border: 1px solid var(--color-line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+    .c3 .banner { background: var(--color-secondary); text-align: center; padding: 6px; font-size: 12px; font-weight: 700; color: var(--color-primary); letter-spacing: 0.1em; }
+    .c3 .cbody { padding: 22px 18px; display: flex; flex-direction: column; align-items: center; gap: 12px; flex: 1; }
+    .c3 .cicon { width: 64px; height: 64px; border-radius: 50%; background: var(--color-background); display: flex; align-items: center; justify-content: center; font-size: 30px; }
+    .c3 .ch { font-size: 18px; font-weight: 700; color: var(--color-text); }
+    .c3 .cp { font-size: 13.5px; color: #4A453F; text-align: center; line-height: 1.65; }
+
+    /* ============ まとめ ============ */
+    .sumlabel { font-size: 12px; letter-spacing: 0.12em; color: var(--color-text-muted); margin-bottom: 6px; }
+    .sumlist { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+    .sitem { display: flex; gap: 20px; align-items: flex-start; padding: 16px 0; }
+    .sitem + .sitem { border-top: 1px solid var(--color-line); }
+    .scheck { width: 30px; height: 30px; border: 2px solid var(--color-primary); border-radius: 6px; color: var(--color-primary); display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 700; flex-shrink: 0; }
+    .stext h3 { font-size: 18px; font-weight: 700; color: var(--color-text); margin-bottom: 4px; }
+    .stext p { font-size: 14px; color: #4A453F; line-height: 1.6; }
+
+    /* ============ クロージング ============ */
+    .slide-closing { align-items: center; justify-content: center; text-align: center; }
+    .slide-closing .cline { width: 48px; height: 3px; background: var(--color-primary); margin-bottom: 26px; }
+    .slide-closing .cmain { font-size: 34px; font-weight: 700; color: var(--color-text); }
+    .slide-closing .csub { font-size: 15px; color: var(--color-text-muted); margin-top: 10px; letter-spacing: 0.04em; }
+    .slide-closing .cdiv { width: 320px; height: 1px; background: var(--color-line); margin: 28px 0; }
+    .slide-closing .cinfo { font-size: 16px; color: #4A453F; }
+    .slide-closing .ccontact { font-size: 13px; color: var(--color-text-muted); margin-top: 6px; }
+
+    /* ============ プレゼンモード ============ */
+    #pageind {
+      display: none; position: fixed; bottom: 14px; right: 18px; z-index: 100;
+      font-size: 13px; color: #fff; background: rgba(0,0,0,0.45);
+      padding: 4px 12px; border-radius: 20px; font-family: monospace; letter-spacing: 0.05em;
+    }
+    #helpbar {
+      display: none; position: fixed; bottom: 14px; left: 18px; z-index: 100;
+      font-size: 12px; color: #ccc; background: rgba(0,0,0,0.4);
+      padding: 4px 12px; border-radius: 6px; font-family: monospace;
+    }
+    body.present { background: #000; padding: 0; overflow: hidden; height: 100vh; }
+    body.present .slide-label { display: none; }
+    body.present .slide {
+      position: fixed; left: 50%; top: 50%;
+      transform-origin: center center; margin: 0;
+      box-shadow: 0 0 60px rgba(0,0,0,0.55);
+    }
+    body.present #pageind, body.present #helpbar { display: block; }
+
+    @media print {
+      body, body.present { background: #fff; padding: 0; overflow: visible; height: auto; }
+      .slide-label { display: none !important; }
+      #pageind, #helpbar { display: none !important; }
+      body.present .slide, .slide {
+        position: static !important; transform: none !important;
+        display: flex !important; margin: 0; box-shadow: none; page-break-after: always;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- SLIDE 1: 表紙 -->
+<p class="slide-label">SLIDE 1 / Cover</p>
+<section class="slide slide-cover">
+  <div class="deco-circle"></div>
+  <div class="deco-circle-sm"></div>
+  <div class="eyebrow">Lightning Talk · 2026</div>
+  <div class="accent-bar"></div>
+  <h1>現場からみた<br>インターン必勝法</h1>
+  <p class="subtitle">インターン選考・現場理解・勝ち筋を中心に</p>
+  <div class="meta">
+    <span><strong>発表者：</strong> 築山 史郎（tsucky）</span>
+  </div>
+  <div class="slide-number">01</div>
+</section>
+
+<!-- SLIDE 2: 自己紹介 -->
+<p class="slide-label">SLIDE 2 / Profile</p>
+<section class="slide">
+  <div class="slide-title">自己紹介</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="profile-body">
+      <div class="profile-left">
+        <div class="prow"><div class="plabel">所属</div><div class="pval">パナソニック エレクトリックワークス株式会社</div></div>
+        <div class="prow"><div class="plabel">役職</div><div class="pval">ソフトウェア品質アーキテクト</div></div>
+        <div class="prow"><div class="plabel">経歴</div><div class="pval">設計者～テスト技術者を経て、SEPG・PSIRT・PMO・OSPO・DX推進など多岐に活動中</div></div>
+        <div class="prow"><div class="plabel">最近</div><div class="pval">本を執筆したり、OSSを公開したり…</div></div>
+      </div>
+      <div class="profile-right">
+        <img class="pphoto" src="image-2.png" alt="プロフィール写真">
+        <div class="pname">築山 史郎</div>
+        <div class="ptitle">tsucky / ソフトウェア品質アーキテクト</div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">02</div>
+</section>
+
+<!-- SLIDE 3: お断り -->
+<p class="slide-label">SLIDE 3 / Key Message</p>
+<section class="slide slide-key">
+  <div class="warn">⚠️ お断り</div>
+  <div class="kdiv"></div>
+  <div class="kmsg">本発表は<span style="color:var(--color-primary);">築山個人の感想</span>です</div>
+  <div class="kdiv"></div>
+  <div class="ksub">会社の意見は一切反映していません</div>
+  <div class="slide-number">03</div>
+</section>
+
+<!-- SLIDE 4: 章扉 01 -->
+<p class="slide-label">SLIDE 4 / Section</p>
+<section class="slide slide-section">
+  <div class="section-number">01</div>
+  <div class="accent-bar"></div>
+  <h2>採用現場で<br>起きていること</h2>
+  <p class="section-desc">高齢化・キャリア採用・インターン経由採用へ</p>
+  <div class="slide-number">04</div>
+</section>
+
+<!-- SLIDE 5: 学生〜新人時代 -->
+<p class="slide-label">SLIDE 5 / Stacked</p>
+<section class="slide">
+  <div class="slide-title">私の学生〜新人時代</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="stack">
+      <div class="stack-sec">
+        <div class="stack-h">入社と面接</div>
+        <div class="stack-body">松下電工に入社（のち松下電器産業と合併、三洋電機も併合 → 4月に再独立）。入社面接は体育会系の雰囲気で、「お父さん仕事何やってんの？」「お酒飲める？」ほぼそれだけだった。（今じゃ絶対あかんヤツ）</div>
+      </div>
+      <div class="stack-sec">
+        <div class="stack-h">研修と配属</div>
+        <div class="stack-body">同期400人・集合研修1か月、バブルはじけ組。その後、東京・大阪・地方工場・海外へ散り散りに。</div>
+        <ul class="stack-list">
+          <li><span class="num">1</span>地方で設計・品質評価を担当</li>
+          <li><span class="num">2</span>4年後に大阪へ異動</li>
+          <li><span class="num">3</span>採用は完全に売り手・買い手の時代背景に左右された</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">05</div>
+</section>
+
+<!-- SLIDE 6: 反動 / コロナ明け -->
+<p class="slide-label">SLIDE 6 / Two Column</p>
+<section class="slide">
+  <div class="slide-title">その後の反動と、コロナ明け</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="twocol">
+      <div class="tcol">
+        <div class="tlabel">Before</div>
+        <div class="th">その後の反動</div>
+        <div class="tdiv"></div>
+        <div class="tbody">干支1周分、人が来ない時期が続いた。派遣・請負社員を大量に活用し、30歳で派遣社員の部下が15名という状態に。</div>
+      </div>
+      <div class="tcol">
+        <div class="tlabel">After</div>
+        <div class="th">コロナ明け</div>
+        <div class="tdiv"></div>
+        <div class="tbody">高齢化が一気に進行。嘱託や定年延長で数年はしのげたが…現場には若い人がいない！</div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">06</div>
+</section>
+
+<!-- SLIDE 7: 採用の変化 -->
+<p class="slide-label">SLIDE 7 / Numbered List</p>
+<section class="slide">
+  <div class="slide-title">採用の変化</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="numlist">
+      <div class="nitem">
+        <div class="nbadge">1</div>
+        <div class="ntext"><h3>キャリア採用が増加</h3><p>約100名の部署で3割が転職組（キャリア採用）に。</p></div>
+      </div>
+      <div class="nitem">
+        <div class="nbadge">2</div>
+        <div class="ntext"><h3>新卒も増加</h3><p>若手不足の反動で、新卒採用の枠も広がっている。</p></div>
+      </div>
+      <div class="nitem">
+        <div class="nbadge">3</div>
+        <div class="ntext"><h3>ほぼインターン経由</h3><p>新卒のほとんどがインターンシップを経て採用される流れに。</p></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">07</div>
+</section>
+
+<!-- SLIDE 8: 章扉 02 -->
+<p class="slide-label">SLIDE 8 / Section</p>
+<section class="slide slide-section">
+  <div class="section-number">02</div>
+  <div class="accent-bar"></div>
+  <h2>インターンという<br>仕組み</h2>
+  <p class="section-desc">マッチング・2週間の就業・三者評価</p>
+  <div class="slide-number">08</div>
+</section>
+
+<!-- SLIDE 9: 制度の価値 -->
+<p class="slide-label">SLIDE 9 / Icon List</p>
+<section class="slide">
+  <div class="slide-title">インターン制度の価値</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="iconlist">
+      <div class="iitem">
+        <div class="iicon">📈</div>
+        <div class="itext"><h3>定着率アップ</h3><p>新卒定着率が大幅に向上した。</p></div>
+      </div>
+      <div class="iitem">
+        <div class="iicon">🗣️</div>
+        <div class="itext"><h3>現場の声が通る</h3><p>人事任せの採用ではなく、現場の意見が採用に反映される。</p></div>
+      </div>
+      <div class="iitem">
+        <div class="iicon">🤝</div>
+        <div class="itext"><h3>相互理解の上での応募</h3><p>学生は実際の職場の雰囲気を確認したうえで応募してくれる。</p></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">09</div>
+</section>
+
+<!-- SLIDE 10: マッチング〜受け入れ -->
+<p class="slide-label">SLIDE 10 / Four Step Flow</p>
+<section class="slide">
+  <div class="slide-title">マッチングから受け入れまで</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="flow-lead">パナGではインターン候補を多数募集し、企業と学生が相互に希望を出し合うマッチング方式をとっている。</div>
+    <div class="flow-cards">
+      <div class="fcard"><div class="fdot"></div><div class="fstep">STEP</div><div class="fnum">01</div><div class="fname">候補募集</div><hr><p>各部署が求人票のような紹介資料を提示。面白そうな技術・お題を準備。</p></div>
+      <div class="fcard"><div class="fdot"></div><div class="fstep">STEP</div><div class="fnum">02</div><div class="fname">相互チェック</div><hr><p>学生が第10希望までチェック。受入現場も学生の技術を第10希望まで確認。</p></div>
+      <div class="fcard"><div class="fdot"></div><div class="fstep">STEP</div><div class="fnum">03</div><div class="fname">マッチング成立</div><hr><p>双方の希望が合えば、インターン受け入れが決定する。</p></div>
+      <div class="fcard"><div class="fdot"></div><div class="fstep">STEP</div><div class="fnum">04</div><div class="fname">2週間の就業</div><hr><p>実際に2週間一緒に働く。開始後に本人の希望と技術力で課題を調整。</p></div>
+    </div>
+  </div>
+  <div class="slide-number">10</div>
+</section>
+
+<!-- SLIDE 11: 期間〜最終日 -->
+<p class="slide-label">SLIDE 11 / Timeline Cards</p>
+<section class="slide">
+  <div class="slide-title">インターン期間〜最終日</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="tl-top">
+      <div class="tl-dot" style="left:11%;"></div>
+      <div class="tl-dot" style="left:37%;"></div>
+      <div class="tl-dot" style="left:63%;"></div>
+      <div class="tl-dot" style="left:89%;"></div>
+    </div>
+    <div class="tl-cards">
+      <div class="tlcard"><div class="tlstep">STEP 01</div><div class="tlnum">課題</div><div class="tlh">課題に取り組む</div><ul><li>1週間ほどで取り組める分析・開発課題</li><li>手厚い指導つき</li></ul></div>
+      <div class="tlcard"><div class="tlstep">STEP 02</div><div class="tlnum">交流</div><div class="tlh">職場を知る</div><ul><li>座談会・工場見学・交流会も多数</li><li>期間があるので普段の職場を見せられる</li></ul></div>
+      <div class="tlcard"><div class="tlstep">STEP 03</div><div class="tlnum">発表</div><div class="tlh">成果発表</div><ul><li>最終日に偉い人へ成果発表</li><li>取り組みの成果を披露</li></ul></div>
+      <div class="tlcard"><div class="tlstep">STEP 04</div><div class="tlnum">期待</div><div class="tlh">期待の声</div><ul><li>コメントや期待の声をもらう</li><li>「ぜひ来てね」という流れに</li></ul></div>
+    </div>
+  </div>
+  <div class="slide-number">11</div>
+</section>
+
+<!-- SLIDE 12: 三者評価 -->
+<p class="slide-label">SLIDE 12 / Segment List</p>
+<section class="slide">
+  <div class="slide-title">インターン後の三者評価</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="seg-body">
+      <div class="seg-left">
+        <div class="lbl">Evaluation</div>
+        <div class="bracket">三者が互いに<br>評価する</div>
+      </div>
+      <div class="seg-right">
+        <div class="seg-row">
+          <div class="seg-icon">🏢</div>
+          <div><div class="seg-tlabel">評価者 A</div><div class="seg-th">人事</div><div class="seg-sub">足切り的な選考</div><div class="seg-bul">能力・人柄・成績を厳しく見る ／ 一次フィルタとして機能</div></div>
+        </div>
+        <div class="seg-row">
+          <div class="seg-icon">🔧</div>
+          <div><div class="seg-tlabel">評価者 B</div><div class="seg-th">現場</div><div class="seg-sub">ラブコール</div><div class="seg-bul">伸びそうか・適応できそうか ／ 「ぜひ来てほしい」と評価</div></div>
+        </div>
+        <div class="seg-row">
+          <div class="seg-icon">🎓</div>
+          <div><div class="seg-tlabel">評価者 C</div><div class="seg-th">学生</div><div class="seg-sub">本人の意思</div><div class="seg-bul">職場の雰囲気を確認 ／ 「ここに行きたい！」と評価</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">12</div>
+</section>
+
+<!-- SLIDE 13: 章扉 03 -->
+<p class="slide-label">SLIDE 13 / Section</p>
+<section class="slide slide-section">
+  <div class="section-number">03</div>
+  <div class="accent-bar"></div>
+  <h2>必勝法<br>現場が見るポイント</h2>
+  <p class="section-desc">好奇心・元気・変化を楽しむ姿勢を伝えよう</p>
+  <div class="slide-number">13</div>
+</section>
+
+<!-- SLIDE 14: 見ているポイント -->
+<p class="slide-label">SLIDE 14 / Numbered List</p>
+<section class="slide">
+  <div class="slide-title">現場が見ているポイント</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="numlist">
+      <div class="nitem">
+        <div class="nbadge">1</div>
+        <div class="ntext"><h3>説明できるか</h3><p>スゴい研究やってるぜアピールは逆効果。難しく書いても説明させられる。如何に自分の言葉で分かりやすく説明できるかを見ている。</p></div>
+      </div>
+      <div class="nitem">
+        <div class="nbadge">2</div>
+        <div class="ntext"><h3>技術の素養</h3><p>技術の基礎的な素養は見る。資格試験は良い指標になる。</p></div>
+      </div>
+      <div class="nitem">
+        <div class="nbadge">3</div>
+        <div class="ntext"><h3>経験</h3><p>趣味・サークル・バイト経験などでの行動エピソードなどもアピールポイント。</p></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">14</div>
+</section>
+
+<!-- SLIDE 15: 好印象の3要素 -->
+<p class="slide-label">SLIDE 15 / Three Cards</p>
+<section class="slide">
+  <div class="slide-title">現場が「この人と働きたい」と思う3タイプ</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="divider-head"><div class="line"></div><div class="dtext">好印象なのは、こんな人</div><div class="line"></div></div>
+    <div class="cards3">
+      <div class="c3"><div class="banner">01</div><div class="cbody"><div class="cicon">🔍</div><div class="ch">好奇心がある人</div><div class="cp">「何でもやってみよう」と思える人。座談会で質問が出る、興味を持って踏み込める人は強い。</div></div></div>
+      <div class="c3"><div class="banner">02</div><div class="cbody"><div class="cicon">🙌</div><div class="ch">元気に人と接する人</div><div class="cp">大きな声で挨拶し、明るく人と関われる人。分からないことを素直に聞ける人。</div></div></div>
+      <div class="c3"><div class="banner">03</div><div class="cbody"><div class="cicon">🌱</div><div class="ch">変化を楽しめる人</div><div class="cp">新しい環境や想定外の仕事も面白がれる人。技術や事業の変化に前向きに適応できる。</div></div></div>
+    </div>
+  </div>
+  <div class="slide-number">15</div>
+</section>
+
+<!-- SLIDE 16: 大企業の特徴 / 技術志向の注意 -->
+<p class="slide-label">SLIDE 16 / Two Column</p>
+<section class="slide">
+  <div class="slide-title">大きな会社の特徴と、技術志向の注意点</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="twocol">
+      <div class="tcol">
+        <div class="tlabel">Merit</div>
+        <div class="th">つぶしが効きまくり・活躍エリアは無限大
+        </div>
+        <div class="tdiv"></div>
+        <div class="tbody">行きたい部署でなくても、入ってしまえばこちらのもの。社内転職も可能、希望外の仕事が面白くなることも。やりたいことは自分で作れるし言い続ければいつか叶う。</div>
+      </div>
+      <div class="tcol">
+        <div class="tlabel">Caution</div>
+        <div class="th">技術を狭めると“損”</div>
+        <div class="tdiv"></div>
+        <div class="tbody">「この分野・技術しか興味ない」は自分の可能性を狭めるだけ。技術の世界は数年おきに刷新される。極めたい意欲はOK、ただし事業の方向性とマッチすれば。開発・研究以外にも面白い仕事は山ほどある。</div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">16</div>
+</section>
+
+<!-- SLIDE 17: 好感度が高い学生 -->
+<p class="slide-label">SLIDE 17 / Key Message</p>
+<section class="slide slide-key">
+  <div class="kdiv"></div>
+  <div class="kmsg">「なんでもやってみたい」人を、<br>現場は待っています</div>
+  <div class="kdiv"></div>
+  <div class="ksub">好奇心をもって飛び込み、元気に人と接し、変化を楽しめる人。技術を狭めず、可能性を広げよう。</div>
+  <div class="slide-number">17</div>
+</section>
+
+<!-- SLIDE 18: まとめ -->
+<p class="slide-label">SLIDE 18 / Summary</p>
+<section class="slide">
+  <div class="slide-title">まとめ</div>
+  <div class="accent-bar"></div>
+  <div class="content">
+    <div class="sumlabel">SUMMARY</div>
+    <div class="sumlist">
+      <div class="sitem">
+        <div class="scheck">✓</div>
+        <div class="stext"><h3>現場が見るのは「人柄」と「伸びしろ」</h3><p>技術の完成度より、好奇心・元気・変化を楽しむ姿勢を見ている。</p></div>
+      </div>
+      <div class="sitem">
+        <div class="scheck">✓</div>
+        <div class="stext"><h3>技術を狭めると損</h3><p>「これしかやらない」より「何でもやってみる」。可能性は自分で狭めない。</p></div>
+      </div>
+      <div class="sitem">
+        <div class="scheck">✓</div>
+        <div class="stext"><h3>入社後のキャリアは自分でつくれる</h3><p>大きな会社ほど社内で道は広がる。変化を楽しんで飛び込もう。</p></div>
+      </div>
+    </div>
+  </div>
+  <div class="slide-number">18</div>
+</section>
+
+<!-- SLIDE 19: クロージング -->
+<p class="slide-label">SLIDE 19 / Closing</p>
+<section class="slide slide-closing">
+  <div class="cline"></div>
+  <div class="cmain">ご清聴ありがとうございました</div>
+  <div class="csub">Thank you for your attention</div>
+  <div class="cdiv"></div>
+  <div class="cinfo">築山 史郎（tsucky）</div>
+  <div class="ccontact">質問があればどうぞ</div>
+  <div class="slide-number">19</div>
+</section>
+
+<div id="pageind"></div>
+<div id="helpbar">← → 送る ／ F 全画面 ／ O 一覧</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var ind = document.getElementById('pageind');
+  var idx = 0;
+  var present = true; // 起動時はプレゼンモード
+
+  function fit() {
+    if (!present) return;
+    var s = Math.min(window.innerWidth / 960, window.innerHeight / 540);
+    slides.forEach(function (sl) {
+      sl.style.transform = 'translate(-50%, -50%) scale(' + s + ')';
+    });
+  }
+
+  function render() {
+    document.body.classList.toggle('present', present);
+    if (present) {
+      slides.forEach(function (sl, i) { sl.style.display = (i === idx) ? 'flex' : 'none'; });
+      fit();
+      ind.textContent = (idx + 1) + ' / ' + slides.length;
+    } else {
+      slides.forEach(function (sl) { sl.style.display = 'flex'; sl.style.transform = 'none'; });
+    }
+  }
+
+  function next() { if (idx < slides.length - 1) { idx++; render(); } }
+  function prev() { if (idx > 0) { idx--; render(); } }
+
+  function toggleFs() {
+    if (!document.fullscreenElement) {
+      if (document.documentElement.requestFullscreen) document.documentElement.requestFullscreen();
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen();
+    }
+  }
+
+  document.addEventListener('keydown', function (e) {
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': case ' ': case 'PageDown': case 'Enter':
+        e.preventDefault(); next(); break;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp': case 'Backspace':
+        e.preventDefault(); prev(); break;
+      case 'Home': idx = 0; render(); break;
+      case 'End': idx = slides.length - 1; render(); break;
+      case 'f': case 'F': toggleFs(); break;
+      case 'o': case 'O': case 'Escape':
+        present = !present; render(); window.scrollTo(0, 0); break;
+    }
+  });
+
+  document.addEventListener('click', function (e) {
+    if (!present) return;
+    if (e.target.closest('#pageind') || e.target.closest('#helpbar')) return;
+    next();
+  });
+
+  window.addEventListener('resize', fit);
+  render();
+})();
+</script>
+
+</body>
+</html>
