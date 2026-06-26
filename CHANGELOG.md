@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.8.4] - 2026-06-26
+
+### Fixed
+
+- **`.jsonl` ファイルがインデックスされないバグ**: `walker.rs` の `detect_language()` に `"jsonl"` エントリが欠落しており、`.jsonl` ファイルが `"unknown"` に分類されてシンボル0件でインデックスされていた問題を修正。`doc_parser.rs::parse_jsonl()` および `mod.rs` 側は実装済みだった。
+
+---
+
 ## [0.8.3] - 2026-06-21
 
 ### Fixed

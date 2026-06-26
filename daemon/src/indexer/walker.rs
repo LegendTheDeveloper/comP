@@ -245,6 +245,7 @@ impl FileWalker {
                 "html" | "htm" => "html",
                 "css" | "scss" | "less" => "css",
                 "json" => "json",
+                "jsonl" => "jsonl",
                 "yaml" | "yml" => "yaml",
                 "xml" => "xml",
                 "md" => "markdown",
@@ -288,6 +289,7 @@ mod tests {
         assert_eq!(walker.detect_language("data.parquet"), "parquet");
         assert_eq!(walker.detect_language("slides.pptx"), "pptx");
         assert_eq!(walker.detect_language("sheet.xlsx"), "xlsx");
+        assert_eq!(walker.detect_language("data.jsonl"), "jsonl");
     }
 
     #[test]
