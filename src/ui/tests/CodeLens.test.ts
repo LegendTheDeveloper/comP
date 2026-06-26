@@ -197,4 +197,94 @@ describe("DependencyCodeLensProvider", () => {
       }).not.to.throw();
     });
   });
+
+  describe("provideCodeLenses with symbols", () => {
+    it("should generate CodeLens for exported symbol", async () => {
+      const daemonWithSymbols = {
+        getSymbols: async (_p: string) => [
+          { id: 1, name: "MyClass", kind: "class", line: 0, column: 0, scope: "export", dependents: 2 },
+          { id: 2, name: "hidden", kind: "variable", line: 1, column: 0, scope: null, dependents: 0 },
+        ],
+        isRunning: () => true,
+      };
+      const p = new DependencyCodeLensProvider(daemonWithSymbols as any);
+      const doc = {
+        languageId: "typescript",
+        uri: { fsPath: "/path/file.ts" },
+        lineCount: 10,
+        lineAt: (_line: number) => ({ range: { end: { character: 80 } } }),
+      } as any;
+      const lenses = await p.provideCodeLenses(doc, null as any);
+      expect(lenses.length).to.equal(1);
+      p.dispose();
+    });
+
+    it("should skip symbol when line exceeds document bounds", async () => {
+      const daemonOOB = {
+        getSymbols: async (_p: string) => [
+          { id: 1, name: "Foo", kind: "function", line: 99, column: 0, scope: "export", dependents: 0 },
+        ],
+        isRunning: () => true,
+      };
+      const p = new DependencyCodeLensProvider(daemonOOB as any);
+      const doc = {
+        languageId: "typescript",
+        uri: { fsPath: "/path/oob.ts" },
+        lineCount: 5,
+        lineAt: (_line: number) => ({ range: { end: { character: 80 } } }),
+      } as any;
+      const lenses = await p.provideCodeLenses(doc, null as any);
+      expect(lenses.length).to.equal(0);
+      p.dispose();
+    });
+
+    it("should use cache on second call", async () => {
+      let calls = 0;
+      const d = { getSymbols: async (_p: string) => { calls++; return []; }, isRunning: () => true };
+      const p = new DependencyCodeLensProvider(d as any);
+      const doc = { languageId: "typescript", uri: { fsPath: "/path/c.ts" } } as any;
+      await p.provideCodeLenses(doc, null as any);
+      await p.provideCodeLenses(doc, null as any);
+      expect(calls).to.equal(1);
+      p.dispose();
+    });
+
+    it("invalidateFile() forces re-query on next call", async () => {
+      let calls = 0;
+      const d = { getSymbols: async (_p: string) => { calls++; return []; }, isRunning: () => true };
+      const p = new DependencyCodeLensProvider(d as any);
+      const doc = { languageId: "typescript", uri: { fsPath: "/path/inv.ts" } } as any;
+      await p.provideCodeLenses(doc, null as any);
+      p.invalidateFile("/path/inv.ts");
+      await p.provideCodeLenses(doc, null as any);
+      expect(calls).to.equal(2);
+      p.dispose();
+    });
+
+    it("clearCache() forces re-query on next call", async () => {
+      let calls = 0;
+      const d = { getSymbols: async (_p: string) => { calls++; return []; }, isRunning: () => true };
+      const p = new DependencyCodeLensProvider(d as any);
+      const doc = { languageId: "typescript", uri: { fsPath: "/path/clr.ts" } } as any;
+      await p.provideCodeLenses(doc, null as any);
+      p.clearCache();
+      await p.provideCodeLenses(doc, null as any);
+      expect(calls).to.equal(2);
+      p.dispose();
+    });
+
+    it("should not display symbol with non-displayable kind", async () => {
+      const d = {
+        getSymbols: async (_p: string) => [
+          { id: 1, name: "x", kind: "variable", line: 0, column: 0, scope: "export", dependents: 1 },
+        ],
+        isRunning: () => true,
+      };
+      const p = new DependencyCodeLensProvider(d as any);
+      const doc = { languageId: "typescript", uri: { fsPath: "/path/v.ts" } } as any;
+      const lenses = await p.provideCodeLenses(doc, null as any);
+      expect(lenses.length).to.equal(0);
+      p.dispose();
+    });
+  });
 });

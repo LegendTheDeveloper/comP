@@ -361,14 +361,130 @@ describe('DaemonManager', () => {
 
   describe('Daemon Lifecycle', () => {
     it('should set isReady to false when daemon exits', () => {
-      // Setup: Ensure isReady is true
       (daemonManager as any).isReady = true;
-
-      // Execute: Trigger exit event
-      mockExitEmitter.emit('exit', 0); // Exit code 0 (normal)
-
-      // Assert: isReady should be false
+      mockExitEmitter.emit('exit', 0);
       expect((daemonManager as any).isReady).to.be.false;
+    });
+  });
+
+  describe('stop()', () => {
+    it('should set process to null and clear isReady', async () => {
+      mockProcess.once = sinon.stub().callsFake((event: string, handler: any) => {
+        if (event === 'exit') setImmediate(() => handler(0));
+      });
+      await daemonManager.stop();
+      expect((daemonManager as any).process).to.be.null;
+      expect((daemonManager as any).isReady).to.be.false;
+      expect((daemonManager as any).isProcessSpawned).to.be.false;
+    });
+
+    it('should do nothing when no process is running', async () => {
+      (daemonManager as any).process = null;
+      await daemonManager.stop(); // must not throw
+    });
+  });
+
+  describe('request()', () => {
+    it('should send JSON-RPC and resolve on valid response', async () => {
+      const promise = daemonManager.request('getStats', {});
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit('data', JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { total_files: 3 } }) + '\n');
+      const result = await promise;
+      expect((result as any).total_files).to.equal(3);
+    });
+
+    it('should throw when daemon is not running', async () => {
+      (daemonManager as any).isReady = false;
+      (daemonManager as any).process = null;
+      try {
+        await daemonManager.request('getStats', {});
+        expect.fail('should have thrown');
+      } catch (e: any) {
+        expect(e.message).to.include('not running');
+      }
+    });
+
+    it('should reject on error response', async () => {
+      const promise = daemonManager.request('someMethod', {});
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit('data', JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -1, message: 'bad' } }) + '\n');
+      try {
+        await promise;
+        expect.fail('should have thrown');
+      } catch (e: any) {
+        expect(e.message).to.equal('bad');
+      }
+    });
+  });
+
+  describe('isRunning()', () => {
+    it('should return true when isReady and process exist', () => {
+      expect(daemonManager.isRunning()).to.be.true;
+    });
+
+    it('should return false when process is null', () => {
+      (daemonManager as any).process = null;
+      expect(daemonManager.isRunning()).to.be.false;
+    });
+
+    it('should return false when isReady is false', () => {
+      (daemonManager as any).isReady = false;
+      expect(daemonManager.isRunning()).to.be.false;
+    });
+  });
+
+  describe('getStats()', () => {
+    it('should return parsed stats', async () => {
+      const promise = daemonManager.getStats();
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit('data', JSON.stringify({
+        jsonrpc: '2.0', id: req.id,
+        result: { total_files: 3, total_nodes: 15, total_edges: 7, efficiency: '80%' }
+      }) + '\n');
+      const stats = await promise;
+      expect(stats.total_files).to.equal(3);
+      expect(stats.efficiency).to.equal('80%');
+    });
+  });
+
+  describe('indexFile() / removeFile() / getSymbols()', () => {
+    it('indexFile() sends indexFile request', async () => {
+      const promise = daemonManager.indexFile('/path/to/file.ts');
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      expect(req.method).to.equal('indexFile');
+      mockStdout.emit('data', JSON.stringify({ jsonrpc: '2.0', id: req.id, result: null }) + '\n');
+      await promise;
+    });
+
+    it('removeFile() sends removeFile request', async () => {
+      const promise = daemonManager.removeFile('/path/to/file.ts');
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      expect(req.method).to.equal('removeFile');
+      mockStdout.emit('data', JSON.stringify({ jsonrpc: '2.0', id: req.id, result: null }) + '\n');
+      await promise;
+    });
+
+    it('getSymbols() returns symbol array', async () => {
+      const symbols = [{ id: 1, name: 'Foo', kind: 'class' }];
+      const promise = daemonManager.getSymbols('/path/to/file.ts');
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit('data', JSON.stringify({ jsonrpc: '2.0', id: req.id, result: symbols }) + '\n');
+      const result = await promise;
+      expect(result).to.deep.equal(symbols);
+    });
+  });
+
+  describe('compressFile()', () => {
+    it('should return text and compressionRate', async () => {
+      const promise = daemonManager.compressFile('/path/to/file.ts', 1);
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit('data', JSON.stringify({
+        jsonrpc: '2.0', id: req.id,
+        result: { compressed_text: 'fn foo(){}', compression_rate: '42%' }
+      }) + '\n');
+      const result = await promise;
+      expect(result.text).to.equal('fn foo(){}');
+      expect(result.compressionRate).to.equal('42%');
     });
   });
 });

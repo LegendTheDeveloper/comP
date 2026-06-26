@@ -131,6 +131,53 @@ describe("registerCommands", () => {
     expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
   });
 
+  it("comp.showImpactGraph with active editor shows information message", async () => {
+    (vscode.window as any).activeTextEditor = {
+      document: { fileName: "/path/file.ts" },
+      selection: { active: { line: 5, character: 3 } },
+    };
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
+    await handlers.get("comp.showImpactGraph")!();
+    expect((vscode.window as any).showInformationMessage.calledOnce).to.be.true;
+  });
+
+  it("comp.showStats shows error when daemon is not running", async () => {
+    const notRunning = { ...mockDaemon, isRunning: sinon.stub().returns(false) };
+    registerCommands(mockContext, () => notRunning, mockStatusBar);
+    await handlers.get("comp.showStats")!();
+    expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
+  });
+
+  it("comp.forceReindex shows error when daemon is not running", async () => {
+    (vscode.window as any).showWarningMessage = sinon.stub().resolves("Yes");
+    const notRunning = { ...mockDaemon, isRunning: sinon.stub().returns(false) };
+    registerCommands(mockContext, () => notRunning, mockStatusBar);
+    await handlers.get("comp.forceReindex")!();
+    expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
+  });
+
+  it("comp.exportDebugLog shows warning when session-memory.json not found", async () => {
+    const fs = require("fs");
+    const existsStub = sinon.stub(fs, "existsSync").returns(false);
+    try {
+      registerCommands(mockContext, () => mockDaemon, mockStatusBar);
+      await handlers.get("comp.exportDebugLog")!();
+      expect((vscode.window as any).showWarningMessage.calledOnce).to.be.true;
+    } finally {
+      existsStub.restore();
+    }
+  });
+
+  it("comp.copyActiveFileCompressed shows error when daemon is not running", async () => {
+    (vscode.window as any).activeTextEditor = {
+      document: { uri: vscode.Uri.file("/workspace/test.rs") },
+    };
+    const notRunning = { ...mockDaemon, isRunning: sinon.stub().returns(false) };
+    registerCommands(mockContext, () => notRunning, mockStatusBar);
+    await handlers.get("comp.copyActiveFileCompressed")!();
+    expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
+  });
+
   it("comp.copyActiveFileCompressed with active editor and selection calls compressFile and writes clipboard", async () => {
     // Setup active editor
     (vscode.window as any).activeTextEditor = {

@@ -132,4 +132,75 @@ describe("SidebarPanel", () => {
     };
     expect(() => panel.setLifecycleCallbacks(callbacks)).to.not.throw();
   });
+
+  it("handleWebviewMessage('clearLogs') posts empty logsUpdate", async () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    postedMessages.length = 0;
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "clearLogs" });
+    const msg = postedMessages.find((m) => m.type === "logsUpdate");
+    expect(msg).to.not.be.undefined;
+    expect(msg.logs).to.deep.equal([]);
+  });
+
+  it("handleWebviewMessage('refresh') calls getStats when daemon is set", async () => {
+    const mockDaemon: any = {
+      getStats: sinon.stub().resolves({ total_files: 1, total_nodes: 2, total_edges: 0 }),
+      isRunning: () => true,
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setDaemonManager(mockDaemon);
+    postedMessages.length = 0;
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "refresh" });
+    expect(mockDaemon.getStats.called).to.be.true;
+  });
+
+  it("handleWebviewMessage('startDaemon') calls onStartRequest", async () => {
+    const mockDaemon: any = {
+      isRunning: () => true,
+      getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),
+    };
+    const callbacks = {
+      onStartRequest: sinon.stub().resolves(mockDaemon),
+      onStopRequest: sinon.stub().resolves(),
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setLifecycleCallbacks(callbacks);
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "startDaemon" });
+    expect(callbacks.onStartRequest.calledOnce).to.be.true;
+  });
+
+  it("handleWebviewMessage('stopDaemon') calls onStopRequest", async () => {
+    const mockDaemon: any = {
+      isRunning: () => true,
+      getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),
+    };
+    const callbacks = {
+      onStartRequest: sinon.stub().resolves(null),
+      onStopRequest: sinon.stub().resolves(),
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setDaemonManager(mockDaemon);
+    panel.setLifecycleCallbacks(callbacks);
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "stopDaemon" });
+    expect(callbacks.onStopRequest.calledOnce).to.be.true;
+  });
+
+  it("dispose() clears the stats interval without throwing", () => {
+    const mockDaemon: any = {
+      getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),
+      isRunning: () => true,
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setDaemonManager(mockDaemon);
+    expect(() => panel.dispose()).not.to.throw();
+  });
 });
