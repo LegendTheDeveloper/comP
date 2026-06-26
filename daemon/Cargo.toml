@@ -31,7 +31,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-python = "0.23"
 tree-sitter-go = "0.23"
 tree-sitter-html = "0.23"
-lopdf = "0.32"
+lopdf = "0.42"
 parquet2 = "0.17.2"
 
 [dev-dependencies]
