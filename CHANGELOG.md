@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.8.5] - 2026-06-26
+
+### Security
+
+- **lopdf 0.32 → 0.42**: スタックオーバーフロー脆弱性 (RUSTSEC-2026-0187, High 7.5) を修正。深くネストされた PDF オブジェクトによる DoS が可能だった問題。
+
+### Tests
+
+- TypeScript ユニットテストカバレッジを 44.56% → 57.17% に改善（`src/ui` は 80% 達成）
+- `DaemonManager`, `CodeLens`, `SidebarPanel`, `commands` に 29 テスト追加
+
+---
+
 ## [0.8.4] - 2026-06-26
 
 ### Fixed
