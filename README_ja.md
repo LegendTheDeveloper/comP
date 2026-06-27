@@ -87,96 +87,26 @@ AIエージェントを選択すると、comPは新しいタブでMarkdownの手
 
 ---
 
-## エージェント別セットアップ手順
-
-### Claude Code（CLI）
-
-「comP: Setup Agents」を実行すると、ターミナルで実行可能な設定コマンド（およびLLM向けプロンプト）が記載されたMarkdownの手順書が開きます。手順書を見逃した場合は `.comp/config/claude_desktop_config.json` を開き、`command` のパスを使用してください。
-
-**Windows (PowerShell)**:
-
-```powershell
-# .comp/config/claude_desktop_config.json の "command" の値を使用してください
-claude mcp add comp "C:\path\from\generated\file\comp-daemon.exe" -e COMP_WORKSPACE_ROOT="e:\your\project" -e RUST_LOG=info
-```
-
-**macOS / Linux**:
-
-```bash
-# .comp/config/claude_desktop_config.json の "command" の値を使用してください
-claude mcp add comp "/path/from/generated/file/comp-daemon" -e COMP_WORKSPACE_ROOT="/your/project" -e RUST_LOG=info
-```
-
-`claude mcp list` で確認できます。
-
----
-
-### Cursor
-
-生成されるファイル: `.comp/config/cursor_config.json`
-
-`mcpServers` ブロックを以下にマージしてください：
-
-- **グローバル**（全プロジェクト共通）: `~/.cursor/mcp.json`
-- **プロジェクト限定**: ワークスペースルートの `.cursor/mcp.json`
-
-保存後、Cursorを再起動してください。
-
----
-
-### Cline（VS Code拡張）
-
-生成されるファイル: `.comp/config/cline_config.json`
-
-1. VS Code設定を開く（`Ctrl+,`）
-2. `Cline › MCP Servers` を検索
-3. **settings.jsonで編集** をクリックし、`mcpServers.comp` ブロックを貼り付け
-
-またはClineパネル → **MCP Servers** タブ → **Add Server** からJSONを貼り付け。
-
----
-
-### Windsurf
-
-生成されるファイル: `.comp/config/windsurf_config.json`
-
-内容を以下にマージしてください：
+## エージェント別セットアップ
 
 ```text
-~/.codeium/windsurf/mcp_config.json
+Ctrl+Shift+P → "comP: Setup Agents"
 ```
 
-保存後、Windsurfを再起動してください。
+エージェントを選択するだけで、設定ファイルの生成と詳細手順書（Markdownタブ）が自動で表示されます。
 
----
+| エージェント | 設定方法 |
+| --- | --- |
+| **Claude Code** | 生成された `claude mcp add` コマンドを端末で実行 |
+| **GitHub Copilot** | `.vscode/mcp.json` に自動書き込み — **手順不要** |
+| **Antigravity** | MCP設定ファイルに自動書き込み — **手順不要** |
+| **Aider** | `.aider.conf.yml` に自動書き込み — **手順不要** |
+| **Cursor** | 生成された `cursor_config.json` を `~/.cursor/mcp.json` にコピー |
+| **Cline** | 生成された `cline_config.json` をCline MCP設定に貼り付け |
+| **Windsurf** | 生成された `windsurf_config.json` を `~/.codeium/windsurf/mcp_config.json` にコピー |
+| **Continue.dev** | 生成された `continue_config.py` を `~/.continue/config.py` に追加 |
 
-### GitHub Copilot（VS Code）
-
-comPがワークスペースの `.vscode/mcp.json` に直接書き込みます。**追加手順は不要**です。ワークスペースを開き直すと自動で有効になります。
-
----
-
-### Antigravity
-
-comPが `~/.gemini/antigravity-ide/mcp_config.json` に直接書き込みます。**追加手順は不要**です。Antigravity IDEを再起動してください。
-
----
-
-### Continue.dev
-
-生成されるファイル: `.comp/config/continue_config.py`
-
-`mcp_servers` ブロックをContinueの設定ファイルに追加してください：
-
-```text
-~/.continue/config.py
-```
-
----
-
-### Aider
-
-comPがワークスペースルートの`.aider.conf.yml`に直接書き込みます。**追加手順は不要**です。Aiderを再起動してください。
+詳細手順: [docs/user/MCP_SETUP.md](docs/user/MCP_SETUP.md)
 
 ---
 
