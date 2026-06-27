@@ -294,6 +294,12 @@ export class AgentSetupManager {
       }
       if (config.constitutionGuide) {
         result.constitutionGuide = config.constitutionGuide;
+        // Also append Session Continuity to agent-specific constitution file
+        // (e.g., .github/copilot-instructions.md, .cursor/rules, etc.)
+        const constitutionPath = path.isAbsolute(config.constitutionGuide.filePath)
+          ? config.constitutionGuide.filePath
+          : path.join(this.workspaceRoot, config.constitutionGuide.filePath);
+        this.ensureSessionContinuityInstructions(constitutionPath);
       }
 
       // Auto-generate .claude/CLAUDE.md with session_recall instructions
