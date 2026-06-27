@@ -107,6 +107,32 @@ fn record_mcp_call(
     Ok(())
 }
 
+/// Format a Unix-epoch millisecond timestamp as "YYYY-MM-DD HH:MM" in UTC.
+///
+/// WHY: session_recall must show *when* past work happened so resumed work can be
+/// placed in time. We compute the civil date by hand (Howard Hinnant's days-from-civil
+/// algorithm) to avoid pulling in a date crate for this single formatting need.
+fn format_epoch_ms(ms: u64) -> String {
+    let secs = (ms / 1000) as i64;
+    let days = secs.div_euclid(86_400);
+    let secs_of_day = secs.rem_euclid(86_400);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if m <= 2 { y + 1 } else { y };
+
+    format!("{:04}-{:02}-{:02} {:02}:{:02}", year, m, d, hour, minute)
+}
+
 
 /// MCP Server
 ///
@@ -1228,13 +1254,17 @@ impl MCPServer {
                 },
                 {
                     "name": "session_recall",
-                    "description": "Recall past MCP tool invocations (queries, symbols, tokens) for the current session. Returns a Markdown list with stale status. If query is provided, filters the history by query similarity or matching.",
+                    "description": "Recall past MCP tool invocations (queries, symbols, files, tokens) across ALL sessions, newest first, each tagged with its date/time. Survives daemon restarts and session breaks — call this when resuming work to reconstruct what was previously asked and done. Returns a Markdown list with stale status. If query is provided, filters by substring match.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "query": {
                                 "type": "string",
-                                "description": "Optional search query to filter past invocations"
+                                "description": "Optional search query to filter past invocations (case-insensitive substring)"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Max number of past invocations to return (default: 20)"
                             }
                         }
                     }
@@ -1382,17 +1412,20 @@ impl MCPServer {
     /// Recall past MCP tool invocations for the current session.
     pub async fn handle_session_recall(&self, params: Value) -> Result<Value> {
         let query_filter = params["query"].as_str().map(|q| q.to_lowercase());
+        let limit = params["limit"].as_u64().unwrap_or(20) as usize;
         let path = get_session_memory_path(&self.state.workspace_root);
 
         let mut markdown = String::new();
         markdown.push_str("### Session Recall\n\n");
 
+        let no_result_msg = if query_filter.is_some() {
+            "No matching past invocations found for the query."
+        } else {
+            "No past invocations recorded."
+        };
+
         if !path.exists() {
-            if query_filter.is_some() {
-                markdown.push_str("No matching past invocations found for the query.");
-            } else {
-                markdown.push_str("No past invocations recorded in the current session.");
-            }
+            markdown.push_str(no_result_msg);
             return Ok(Value::String(markdown));
         }
 
@@ -1400,28 +1433,29 @@ impl MCPServer {
         let reader = std::io::BufReader::new(file);
         let memory: SessionMemory = serde_json::from_reader(reader).unwrap_or(SessionMemory { sessions: Vec::new() });
 
-        let current_session = memory.sessions.iter().find(|s| s.id == self.state.session_id);
+        // WHY: recall must survive daemon restarts / session breaks. session-memory.json
+        // accumulates a new Session per daemon start, so flatten calls across ALL sessions
+        // (not just the current id) and show them newest-first to reconstruct prior context.
+        let mut calls: Vec<&SessionCall> =
+            memory.sessions.iter().flat_map(|s| s.calls.iter()).collect();
+        calls.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
 
-        let calls = match current_session {
-            Some(s) => &s.calls,
-            None => &vec![],
-        };
-
-        let mut filtered_count = 0;
-
+        let mut shown = 0;
         for call in calls {
             if let Some(ref q_filter) = query_filter {
                 if !call.query.to_lowercase().contains(q_filter) {
                     continue;
                 }
             }
-
-            filtered_count += 1;
+            if shown >= limit {
+                break;
+            }
+            shown += 1;
 
             let stale_flag = if call.stale { " [Stale]" } else { "" };
             markdown.push_str(&format!(
-                "- **Query**: \"{}\" (Tokens: {}){}\n",
-                call.query, call.tokens, stale_flag
+                "- `{}` **Query**: \"{}\" (Tokens: {}){}\n",
+                format_epoch_ms(call.timestamp), call.query, call.tokens, stale_flag
             ));
             if !call.symbols.is_empty() {
                 markdown.push_str(&format!(
@@ -1437,12 +1471,8 @@ impl MCPServer {
             }
         }
 
-        if filtered_count == 0 {
-            if query_filter.is_some() {
-                markdown.push_str("No matching past invocations found for the query.");
-            } else {
-                markdown.push_str("No past invocations recorded in the current session.");
-            }
+        if shown == 0 {
+            markdown.push_str(no_result_msg);
         }
 
         Ok(Value::String(markdown))
@@ -2149,6 +2179,48 @@ mod tests {
 
         let result = server.handle_session_recall(json!({ "query": "nomatch" })).await.unwrap();
         assert!(result.as_str().unwrap().contains("No matching past invocations"));
+
+        std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_format_epoch_ms() {
+        // Unix epoch start.
+        assert_eq!(format_epoch_ms(0), "1970-01-01 00:00");
+        // 1_700_000_000_000 ms == 2023-11-14T22:13:20Z.
+        assert_eq!(format_epoch_ms(1_700_000_000_000), "2023-11-14 22:13");
+    }
+
+    #[tokio::test]
+    async fn test_session_recall_cross_session() {
+        // Recall must surface calls from sessions other than the current one
+        // (i.e. survive daemon restarts), each tagged with a date and capped by limit.
+        let temp_dir = std::env::temp_dir().join("comP_test_session_recall_cross");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let root = temp_dir.to_str().unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", root);
+        let state = Arc::new(crate::AppState::new(root).await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state.clone());
+
+        // Two records under two DIFFERENT session ids, neither equal to the current
+        // session_id — the old per-session filter would have returned nothing.
+        record_mcp_call(root, "sess-old", "alpha task".to_string(), vec![], vec![], 10).unwrap();
+        record_mcp_call(root, "sess-new", "beta task".to_string(), vec![], vec![], 20).unwrap();
+
+        let markdown = server.handle_session_recall(json!({})).await.unwrap();
+        let markdown = markdown.as_str().unwrap();
+        assert!(markdown.contains("alpha task"), "cross-session recall must include older session");
+        assert!(markdown.contains("beta task"), "cross-session recall must include newer session");
+        // Date tag present (UTC year prefix).
+        assert!(markdown.contains("- `20"), "each entry must be tagged with a date");
+
+        // limit caps the number of entries returned.
+        let limited = server.handle_session_recall(json!({ "limit": 1 })).await.unwrap();
+        let limited = limited.as_str().unwrap();
+        assert_eq!(limited.matches("**Query**").count(), 1, "limit must cap shown entries");
 
         std::env::remove_var("COMP_WORKSPACE_ROOT");
         let _ = std::fs::remove_dir_all(&temp_dir);
