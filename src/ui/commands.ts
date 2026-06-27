@@ -63,7 +63,13 @@ export function registerCommands(
             mdContent += `\`\`\`text\n${llmInstruction}\n\`\`\`\n`;
           }
 
-          const doc = await vscode.workspace.openTextDocument({ content: mdContent, language: "markdown" });
+          const tempDir = path.join(workspaceRoot, ".comp");
+          if (!fs.existsSync(tempDir)) {
+            fs.mkdirSync(tempDir, { recursive: true });
+          }
+          const tempFile = path.join(tempDir, `setup-${Date.now()}.md`);
+          fs.writeFileSync(tempFile, mdContent, "utf-8");
+          const doc = await vscode.workspace.openTextDocument(tempFile);
           await vscode.window.showTextDocument(doc, { preview: false });
           vscode.window.showInformationMessage(`${selected} 向けの設定を生成しました。開かれたタブの手順に従ってください。`);
         } else {
