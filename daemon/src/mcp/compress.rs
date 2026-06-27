@@ -26,7 +26,13 @@ pub fn compress(source: &str, language: &str, level: CompressionLevel) -> String
     match level {
         CompressionLevel::Full => source.to_string(),
         CompressionLevel::Compact => compact(source, language),
-        CompressionLevel::Skeleton => skeleton(source, language),
+        CompressionLevel::Skeleton => {
+            if matches!(language, "md" | "markdown") {
+                markdown_compress(source)
+            } else {
+                skeleton(source, language)
+            }
+        }
     }
 }
 
@@ -37,6 +43,10 @@ fn make_parser(language: &str) -> Option<Parser> {
         "js" | "jsx" | "javascript" => tree_sitter_javascript::LANGUAGE.into(),
         "py" | "python" => tree_sitter_python::LANGUAGE.into(),
         "go" => tree_sitter_go::LANGUAGE.into(),
+        "html" | "htm" => tree_sitter_html::LANGUAGE.into(),
+        "c" => tree_sitter_c::LANGUAGE.into(),
+        "cpp" | "cc" | "cxx" | "c++" => tree_sitter_cpp::LANGUAGE.into(),
+        "java" => tree_sitter_java::LANGUAGE.into(),
         _ => return None,
     };
     let mut parser = Parser::new();
@@ -114,6 +124,47 @@ fn skeleton(source: &str, language: &str) -> String {
     let mut out = String::new();
     emit_children(&tree.root_node(), bytes, language, &mut out);
     out.trim_end().to_string()
+}
+
+fn markdown_compress(source: &str) -> String {
+    let mut kept_lines = Vec::new();
+    let mut in_code_block = false;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("```") {
+            in_code_block = !in_code_block;
+            kept_lines.push(line);
+            continue;
+        }
+
+        if in_code_block {
+            kept_lines.push(line);
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let is_keep = trimmed.starts_with('#')
+            || trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("+ ")
+            || trimmed.starts_with("> ")
+            || trimmed == "---"
+            || trimmed == "***"
+            || trimmed == "___"
+            || trimmed.chars().next().map_or(false, |c| c.is_numeric());
+
+        if is_keep {
+            kept_lines.push(line);
+        }
+    }
+
+    let out = kept_lines.join("\n");
+    collapse_blank_lines(&out)
 }
 
 fn emit_children(node: &Node, bytes: &[u8], lang: &str, out: &mut String) {

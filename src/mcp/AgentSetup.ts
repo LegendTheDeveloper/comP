@@ -99,11 +99,11 @@ export class AgentSetupManager {
   private buildConstitutionGuide(filePath: string): ConstitutionGuide {
     const snippet = this.compRuleSnippet();
     const llmInstruction = [
-      `\`${filePath}\` にプロジェクトルート基準で以下の内容を追記してください。`,
+      `\`${filePath}\` にプロジェクトルート基準で以下を追記してください。`,
       `ファイルが存在しない場合は新規作成し、既存の場合は末尾に追記してください。`,
       `すでに "comP MCP Tool Usage" というセクションがある場合は追記不要です。`,
       ``,
-      "```markdown",
+      "```",
       snippet,
       "```",
     ].join("\n");
