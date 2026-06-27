@@ -165,8 +165,14 @@ Returns a Markdown table of changed files with language, symbol count, and wheth
 レスポンス形式（Markdown テキスト）:
 
 ```
+### Session Recall
+
 - `2026-06-27 01:30` **Query**: "session_log MCPツールを追加する" (Tokens: 4200)
   - **Outcome**: daemon/src/mcp/mod.rs に handle_session_log を実装し JSONL 追記＋即時インデックスを完了
+  - **Symbols**: `SessionCall`, `format_epoch_ms`（該当する場合）
+  - **Files**: `daemon/src/mcp/mod.rs`, `daemon/src/indexer/walker.rs`（該当する場合）
 ```
+
+各項目（Outcome・Symbols・Files）は、データが存在する場合のみ表示されます。
 
 **推奨**: 新しいセッション開始時や作業再開時に `session_recall` を呼び、前回の依頼と対応を確認してください。
