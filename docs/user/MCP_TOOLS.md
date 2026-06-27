@@ -115,3 +115,58 @@ Parameters:
 - `base_ref` (string, optional, default `HEAD~1`) — git ref to diff against. Use `main` or `master` for branch comparisons.
 
 Returns a Markdown table of changed files with language, symbol count, and whether each file is indexed.
+
+---
+
+### `session_log`
+
+ユーザーの依頼と対応結果を `.comp/history/log-YYYY-MM.jsonl` に永続記録します。
+書き込み直後に BM25 インデックスへ即時反映されるため、次回以降の `run_pipeline` 検索で過去のやりとりが自然に参照されます。
+
+セッション切れ・デーモン再起動後も残る「作業ログ」として、重要タスクの完了時に呼んでください。
+
+```json
+{
+  "request": "session_log MCPツールを追加する",
+  "outcome": "daemon/src/mcp/mod.rs に handle_session_log を実装し JSONL 追記＋即時インデックスを完了",
+  "files": ["daemon/src/mcp/mod.rs", "daemon/src/indexer/walker.rs"]
+}
+```
+
+パラメータ:
+
+- `request` (string, 必須) — ユーザーの依頼テキスト（最大 600 文字）
+- `outcome` (string, 省略可) — 対応結果の要約（最大 400 文字）
+- `files` (string[], 省略可) — 変更したファイルパスの一覧
+
+レスポンス例:
+
+```json
+{ "status": "ok", "path": ".comp/history/log-2026-06.jsonl", "timestamp": 1751023456789 }
+```
+
+---
+
+### `session_recall`
+
+過去のやりとりをセッション横断で検索・返却します。デーモン再起動をまたいだ **全セッション** を対象とします。
+
+`.comp/session-memory.json`（run_pipeline / get_context の自動記録）と `.comp/history/*.jsonl`（session_log の明示記録・Stop hook 自動記録）を統合し、新しい順で返します。
+
+```json
+{ "query": "session_log", "limit": 10 }
+```
+
+パラメータ:
+
+- `query` (string, 省略可) — request・outcome 両フィールドへの部分一致フィルタ
+- `limit` (number, 省略可, デフォルト 20) — 返却件数の上限
+
+レスポンス形式（Markdown テキスト）:
+
+```
+- `2026-06-27 01:30` **Query**: "session_log MCPツールを追加する" (Tokens: 4200)
+  - **Outcome**: daemon/src/mcp/mod.rs に handle_session_log を実装し JSONL 追記＋即時インデックスを完了
+```
+
+**推奨**: 新しいセッション開始時や作業再開時に `session_recall` を呼び、前回の依頼と対応を確認してください。

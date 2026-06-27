@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.8.6] - 2026-06-27
+
+### Added
+
+- **`session_log` MCPツール**: ユーザーの依頼と対応結果を `.comp/history/log-YYYY-MM.jsonl` に永続記録するツールを追加（`daemon/src/mcp/mod.rs`）。書き込み直後に `index_file` を呼び BM25 インデックスへ即時反映するため、以降の `run_pipeline` が過去のやりとりを自然にランク付け候補として扱う。
+- **`session_recall` 全セッション横断化**: 従来は現行セッション内のみを返していた `session_recall` を、デーモン再起動をまたいだ全セッション横断検索に拡張。`.comp/session-memory.json` の全セッションエントリと `.comp/history/*.jsonl` のログを統合し、日時付き・新しい順で返却。`query` フィルタは `request`・`outcome` 両フィールドに対して部分一致検索。`limit` パラメータ追加（デフォルト 20）。
+- **対話履歴の BM25 インデックス化**: `walker.rs` に `.comp/history/` ディレクトリのカーブアウトを追加し、隠しディレクトリスキップルールから除外。`run_pipeline` の全文検索が `.comp/history/*.jsonl` の内容を自動的に候補として扱う。
+- **Stop hook 自動記録**: `.claude/hooks/history-record.sh` を追加。Stop hook 発火時にトランスクリプトを解析し、直近のユーザー依頼・アシスタント応答を `.comp/history/` へ自動追記。LLM の自発的記録に依存せず確実に履歴を蓄積する。
+- **UserPromptSubmit hook 自動注入**: `context-inject.sh` を拡張。プロンプト送信ごとに `.comp/history/` から直近 5 件を読み込み `<system-reminder>` として自動注入し、セッション切れ後も前回の作業文脈が自動復元される。
+
+### Changed
+
+- `SessionCall` 構造体に `outcome: Option<String>` を追加（`#[serde(default)]` で後方互換）。`session_recall` レスポンスにアウトカム行を追加。
+
+---
+
 ## [0.8.5] - 2026-06-26
 
 ### Security
