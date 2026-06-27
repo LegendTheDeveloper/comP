@@ -8,23 +8,37 @@
 
 🌐 **[Official Website](https://tsucky230.github.io/comP/)**
 
-> **AI coding agents burn tokens browsing your files.**
-> comP stops that by automatically indexing your entire codebase and building a semantic code graph.
-> Instead of reading dozens of files, agents query the graph and get exactly what they need—
-> **reducing LLM token consumption by up to 60–80%.** Everything runs 100% locally.
+> 🚀 **LLMエージェントが忘れない開発パートナーに変わる**
+>
+> comPは、あなたの開発プロジェクトを「知的記憶」に変えます。
 
-comP works with Claude Code, Cursor, Cline, Antigravity, GitHub Copilot,
-and any MCP-compatible agent.
+✨ **入力トークン 94% 削減** — LLMに渡すコンテキストを劇的に圧縮。
+同じ質問でも、60行のファイルを1行に。$0.10のコストが$0.006に。
+
+🧠 **セッション記憶で「3ヶ月後も前の決定を覚えてる」**
+チャット履歴をBM25インデックス化—セッション横断で完全検索可能。
+デーモン再起動後も自動で過去の文脈を復元。
+
+🔒 **完全ローカル実行 — クラウドに何も上げない**
+データはマシンの中だけ。セキュリティ懸念ゼロ。企業・個人情報も安全。
+
+🤖 **あらゆるAIエージェントに対応**
+Claude Code / Cursor / Cline / Antigravity / GitHub Copilot など、MCP互換なら全部対応。
+
+🔗 **MAGATAMA と自動連携**
+comP のインデックスを MAGATAMA がそのまま活用。
+「何が壊れるか」「イディオムパターン」を 1/500 トークンで取得可能に。
 
 ---
 
 ## What It Does
 
 - **📑 Code Indexing**: Automatically builds a searchable graph of your codebase using tree-sitter (30+ languages) with **concurrent background indexing** to prevent editor startup blocking.
-- **🎯 Smart Context**: Provides AI agents with only the most relevant code, reducing tokens by ~60%.
+- **🎯 Smart Context**: Provides AI agents with only the most relevant code, reducing input tokens by **94%**.
 - **🔍 Impact Analysis**: Shows what code could break when you change a symbol.
 - **📊 Token Counter**: Displays exactly how many tokens your context uses, and tracks **accumulated token savings and efficiency** across sessions.
 - **🔍 BM25 Search**: Complements symbol graph traversal with full-text search capability for Markdown files.
+- **🧠 Session Memory**: Chat history automatically indexed and cross-session searchable. Daemon restarts restore context automatically—*LLM standard features can't do this*.
 - **🤝 MCP Integration**: Works with Claude Code, Cursor, Cline, and other AI agents via Model Context Protocol.
 - **100% Local**: Everything runs on your machine—no cloud calls, no data sharing.
 
@@ -285,6 +299,15 @@ When you run **"comP: Generate Context Capsule"**:
 
 ---
 
+## Security & Privacy
+
+- **🔐 Complete Local Execution**: Code and chat history are never sent to the cloud.
+- **🛡️ Data Protection**: The `.comp/` directory is automatically added to `.gitignore`—your workspace data never leaves your machine.
+- **📋 Auditable**: All processing happens inside your machine—no external APIs, no telemetry, no data collection.
+- **🏢 Enterprise-Ready**: Safe for confidential code. Works entirely on-premises with zero privacy concerns.
+
+---
+
 ## Troubleshooting
 
 ### Issue: "comP is not indexing"
@@ -357,6 +380,7 @@ npm run lint:md:fix
 | **v0.6** | Dynamic budget: `run_pipeline` reads `default_budget_tokens` from `.comp/config.json` and auto-selects compression level 0→1→2 to fit within budget. Response includes `compression_level_applied` and `budget_adjusted` flags. | ✅ **Released** |
 | **v0.7** | Per-extension compression rules in `.comp/config.json` (e.g. keep Markdown at level 0, skeleton Rust at level 2). Aider agent support via `.aider.conf.yml`. New `comP: Export Debug Log` command. Token visualization state bug fixes. | ✅ **Released** |
 | **v0.8** | Directory-walk overhaul (ripgrep `ignore` crate) that prunes `.venv`/`node_modules` subtrees so large Python repos no longer time out. `.comp/ignore` file, `comp.exclude` setting, 5 MiB file-size skip and large-workspace warning. `workspace_root` centralised in daemon state. | ✅ **Released** |
+| **v0.9** | **Session history & memory**: `session_log` and `session_recall` MCP tools for persistent chat history across daemon restarts. Automatic transcript recording via Stop hook, full-text BM25 indexing of session logs, UserPromptSubmit hook auto-injection of recent conversation context for seamless context recovery across sessions. *LLM standard features cannot replicate this capability—only comP enables cross-session persistent memory with automatic context injection.* | ✅ **Released** |
 | **v1.0** | Stable API, wider agent support, integrations | ⚪ Planning |
 
 ---
