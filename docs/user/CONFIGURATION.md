@@ -112,6 +112,32 @@ Relative paths are resolved from the workspace root.
 
 ---
 
+## Agent Setup Configuration
+
+### Auto-generation of LLM Constitution Files
+
+When you run `comP: Setup Agents`, comP automatically creates or updates local constitution files
+(`.claude/CLAUDE.md`, `CLAUDE.md`, and agent-specific files like `.github/copilot-instructions.md`)
+with **Session Continuity** instructions that prompt the LLM to call `session_recall()` when resuming work.
+
+To **disable** this auto-generation (if you prefer to manage constitution files manually),
+add this to `.comp/config.json`:
+
+```json
+{
+  "autoGenerateConstitution": false
+}
+```
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `autoGenerateConstitution` | boolean | `true` | When `true`, Setup Agents auto-creates/updates CLAUDE.md files with session_recall instructions. When `false`, skips auto-generation (manual control). |
+
+**Note**: Setting this to `false` does NOT prevent MCP configuration files (e.g., `claude_desktop_config.json`)
+from being generated — only the LLM instruction files are affected.
+
+---
+
 ## Excluding files from indexing
 
 comP respects `.gitignore` (and nested `.gitignore` files throughout the workspace).
