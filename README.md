@@ -88,90 +88,26 @@ Choose your AI agent. comP will open a new Markdown tab with step-by-step instru
 
 ---
 
-## Agent Setup (Per-Agent Steps)
-
-### Claude Code (CLI)
-
-Running `comP: Setup Agents` opens a Markdown guide with a ready-to-copy terminal command (or an LLM prompt) to automatically configure Claude Code. If you miss the guide, you can open `.comp/config/claude_desktop_config.json` manually.
-
-**Windows (PowerShell)**:
-
-```powershell
-# Use the "command" value from .comp/config/claude_desktop_config.json
-claude mcp add comp "C:\path\from\generated\file\comp-daemon.exe" -e COMP_WORKSPACE_ROOT="e:\your\project" -e RUST_LOG=info
-```
-
-**macOS / Linux**:
-
-```bash
-# Use the "command" value from .comp/config/claude_desktop_config.json
-claude mcp add comp "/path/from/generated/file/comp-daemon" -e COMP_WORKSPACE_ROOT="/your/project" -e RUST_LOG=info
-```
-
-Verify with `claude mcp list`.
-
----
-
-### Cursor
-
-comP generates `.comp/config/cursor_config.json`. Merge its `mcpServers` block into:
-
-- **Global** (all projects): `~/.cursor/mcp.json`
-- **Project-only**: `.cursor/mcp.json` in your workspace root
-
-Restart Cursor after saving.
-
----
-
-### Cline (VS Code Extension)
-
-comP generates `.comp/config/cline_config.json`. Then:
-
-1. Open VS Code Settings (`Ctrl+,`)
-2. Search for `Cline › MCP Servers`
-3. Click **Edit in settings.json** and paste the `mcpServers.comp` block
-
-Or open the Cline panel → **MCP Servers** tab → **Add Server** → paste the JSON.
-
----
-
-### Windsurf
-
-comP generates `.comp/config/windsurf_config.json`. Merge its contents into:
+## Agent Setup
 
 ```text
-~/.codeium/windsurf/mcp_config.json
+Ctrl+Shift+P → "comP: Setup Agents"
 ```
 
-Restart Windsurf after saving.
+Select your agent, and comP will generate the configuration file and detailed setup instructions (Markdown tab).
 
----
+| Agent | Setup Method |
+| --- | --- |
+| **Claude Code** | Run generated `claude mcp add` command in terminal |
+| **GitHub Copilot** | Auto-writes to `.vscode/mcp.json` — **no extra steps** |
+| **Antigravity** | Auto-writes to MCP config — **no extra steps** |
+| **Aider** | Auto-writes to `.aider.conf.yml` — **no extra steps** |
+| **Cursor** | Copy generated `cursor_config.json` to `~/.cursor/mcp.json` |
+| **Cline** | Paste generated `cline_config.json` into Cline MCP settings |
+| **Windsurf** | Copy generated `windsurf_config.json` to `~/.codeium/windsurf/mcp_config.json` |
+| **Continue.dev** | Add generated `continue_config.py` to `~/.continue/config.py` |
 
-### GitHub Copilot (VS Code)
-
-comP writes directly to `.vscode/mcp.json` in your workspace — **no extra steps needed**. The MCP server activates automatically when you reopen the workspace.
-
----
-
-### Antigravity
-
-comP writes directly to `~/.gemini/antigravity-ide/mcp_config.json` — **no extra steps needed**. Restart Antigravity IDE to pick up the new server.
-
----
-
-### Continue.dev
-
-comP generates `.comp/config/continue_config.py`. Add the `mcp_servers` block to your Continue config:
-
-```text
-~/.continue/config.py
-```
-
----
-
-### Aider
-
-comP writes directly to `.aider.conf.yml` in your workspace root — **no extra steps needed**. Restart Aider to pick up the new server.
+**For detailed per-agent instructions**, see [docs/user/MCP_SETUP.md](docs/user/MCP_SETUP.md).
 
 ---
 
