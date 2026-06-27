@@ -96,6 +96,73 @@ export class AgentSetupManager {
     return { filePath, snippet, llmInstruction };
   }
 
+  private sessionContinuitySnippet(): string {
+    return [
+      "## Session Continuity (デーモン再起動・セッション切れ対応)",
+      "",
+      "セッションはデーモン再起動をまたいで永続化されます。",
+      "作業を再開したり、エージェントを再起動した場合は、まず `session_recall` を呼んで過去の文脈を復帰させてください。",
+      "",
+      "**When resuming work**:",
+      "",
+      "1. Call `session_recall()` to view past interactions",
+      "   - `session_recall({ \"query\": \"keyword\" })` — filter by task keywords",
+      "   - `session_recall({ \"limit\": 5 })` — show last N interactions",
+      "2. Review what was done previously and continue in that context",
+      "",
+      "**Note**: The hook system also auto-injects recent history into each prompt (`<system-reminder>`),",
+      "but explicit `session_recall` is useful to manually review past work or search specific tasks.",
+    ].join("\n");
+  }
+
+  private ensureSessionContinuityInstructions(filePath: string): void {
+    try {
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+
+      const snippet = this.sessionContinuitySnippet();
+      let content = "";
+
+      // Read existing file if it exists
+      if (fs.existsSync(filePath)) {
+        content = fs.readFileSync(filePath, "utf-8");
+        // Skip if Session Continuity section already exists
+        if (content.includes("Session Continuity")) {
+          return;
+        }
+        // Append to existing content
+        content = content.trimEnd() + "\n\n---\n\n" + snippet;
+      } else {
+        // Create new file with minimal header (only for .claude/CLAUDE.md)
+        if (filePath.endsWith(".claude/CLAUDE.md")) {
+          content = [
+            "# comP — Context-Aware AI Coding",
+            "",
+            "## MANDATORY: use comP MCP pipeline — do NOT grep or glob the codebase",
+            "",
+            "For every task — bug fixes, features, refactors, debugging:",
+            "**call `run_pipeline` FIRST**. It searches the indexed codebase and returns",
+            "the most relevant files and symbols for your task.",
+            "",
+            "---",
+            "",
+            snippet,
+          ].join("\n");
+        } else {
+          // For CLAUDE.md (project root), just the snippet
+          content = snippet;
+        }
+      }
+
+      fs.writeFileSync(filePath, content, "utf-8");
+    } catch (error) {
+      // Best-effort: log but don't fail the whole operation
+      console.warn(`Warning: failed to ensure session continuity in ${filePath}: ${error}`);
+    }
+  }
+
   getAgentConfig(agentName: string): AgentConfig | null {
 
     switch (agentName) {
@@ -228,6 +295,11 @@ export class AgentSetupManager {
       if (config.constitutionGuide) {
         result.constitutionGuide = config.constitutionGuide;
       }
+
+      // Auto-generate .claude/CLAUDE.md with session_recall instructions
+      this.ensureSessionContinuityInstructions(path.join(this.workspaceRoot, ".claude", "CLAUDE.md"));
+      // Auto-generate CLAUDE.md (project root) with session continuity
+      this.ensureSessionContinuityInstructions(path.join(this.workspaceRoot, "CLAUDE.md"));
 
       return result;
     } catch (error) {
