@@ -19,6 +19,11 @@ use std::sync::Arc;
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SessionCall {
     pub query: String,
+    /// What was done in response (set by session_log / Stop-hook records).
+    /// Defaulted for backward compatibility with older session-memory.json files
+    /// and auto-recorded run_pipeline/get_context calls that have no outcome.
+    #[serde(default)]
+    pub outcome: Option<String>,
     pub symbols: Vec<String>,
     pub files: Vec<String>,
     pub tokens: u64,
@@ -74,6 +79,7 @@ fn record_mcp_call(
         if session.id == session_id {
             session.calls.push(SessionCall {
                 query: query.clone(),
+                outcome: None,
                 symbols: symbols.clone(),
                 files: files.clone(),
                 tokens,
@@ -91,6 +97,7 @@ fn record_mcp_call(
             timestamp: now,
             calls: vec![SessionCall {
                 query,
+                outcome: None,
                 symbols,
                 files,
                 tokens,
@@ -270,6 +277,7 @@ impl MCPServer {
                 "indexFile" => self.handle_index_file(params).await,
                 "removeFile" => self.handle_remove_file(params).await,
                 "session_recall" => self.handle_session_recall(params).await,
+                "session_log" => self.handle_session_log(params).await,
                 "get_symbol" => self.handle_get_symbol(params).await,
                 "get_dependencies" => self.handle_get_dependencies(params).await,
                 "get_file_summary" => self.handle_get_file_summary(params).await,
@@ -1270,6 +1278,29 @@ impl MCPServer {
                     }
                 },
                 {
+                    "name": "session_log",
+                    "description": "Record an interaction — a user request and what was done in response — so it can be recalled in later sessions (survives daemon restarts). Call this after completing a task to persist intent and outcome. Stored in .comp/history and indexed so run_pipeline can also surface it.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "request": {
+                                "type": "string",
+                                "description": "What the user asked for (their request/instruction)"
+                            },
+                            "outcome": {
+                                "type": "string",
+                                "description": "What was done in response (summary of the action and result)"
+                            },
+                            "files": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Optional list of files touched"
+                            }
+                        },
+                        "required": ["request"]
+                    }
+                },
+                {
                     "name": "get_symbol",
                     "description": "Get source code, outbound dependencies, and inbound dependents for a specific symbol by name. Useful when you need to inspect a function, class, or type definition.",
                     "inputSchema": {
@@ -1386,6 +1417,7 @@ impl MCPServer {
             "list_indexed_files" => self.handle_list_indexed_files().await?,
             "get_token_usage" => self.handle_get_token_usage().await?,
             "session_recall" => self.handle_session_recall(args).await?,
+            "session_log" => self.handle_session_log(args).await?,
             "get_symbol" => self.handle_get_symbol(args).await?,
             "get_dependencies" => self.handle_get_dependencies(args).await?,
             "get_file_summary" => self.handle_get_file_summary(args).await?,
@@ -1424,26 +1456,59 @@ impl MCPServer {
             "No past invocations recorded."
         };
 
-        if !path.exists() {
-            markdown.push_str(no_result_msg);
-            return Ok(Value::String(markdown));
+        // WHY: recall must survive daemon restarts / session breaks. Gather from BOTH stores:
+        //   1. session-memory.json — auto run_pipeline/get_context query records (per-session,
+        //      accumulated across daemon starts);
+        //   2. .comp/history/*.jsonl — explicit interaction logs (request + outcome) written by
+        //      session_log / the Stop hook, which also feed BM25 recall via run_pipeline.
+        // Flatten everything across ALL sessions and show newest-first to reconstruct context.
+        let mut calls: Vec<SessionCall> = Vec::new();
+
+        if path.exists() {
+            if let Ok(file) = std::fs::File::open(&path) {
+                let reader = std::io::BufReader::new(file);
+                let memory: SessionMemory =
+                    serde_json::from_reader(reader).unwrap_or(SessionMemory { sessions: Vec::new() });
+                for session in memory.sessions {
+                    calls.extend(session.calls);
+                }
+            }
         }
 
-        let file = std::fs::File::open(&path)?;
-        let reader = std::io::BufReader::new(file);
-        let memory: SessionMemory = serde_json::from_reader(reader).unwrap_or(SessionMemory { sessions: Vec::new() });
+        let hist_dir = std::path::Path::new(&self.state.workspace_root)
+            .join(".comp")
+            .join("history");
+        if let Ok(entries) = std::fs::read_dir(&hist_dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                if let Ok(content) = std::fs::read_to_string(&p) {
+                    for line in content.lines() {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if let Ok(c) = serde_json::from_str::<SessionCall>(line) {
+                            calls.push(c);
+                        }
+                    }
+                }
+            }
+        }
 
-        // WHY: recall must survive daemon restarts / session breaks. session-memory.json
-        // accumulates a new Session per daemon start, so flatten calls across ALL sessions
-        // (not just the current id) and show them newest-first to reconstruct prior context.
-        let mut calls: Vec<&SessionCall> =
-            memory.sessions.iter().flat_map(|s| s.calls.iter()).collect();
-        calls.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        calls.sort_by_key(|c| std::cmp::Reverse(c.timestamp));
 
         let mut shown = 0;
-        for call in calls {
+        for call in &calls {
             if let Some(ref q_filter) = query_filter {
-                if !call.query.to_lowercase().contains(q_filter) {
+                let hit = call.query.to_lowercase().contains(q_filter)
+                    || call
+                        .outcome
+                        .as_ref()
+                        .map(|o| o.to_lowercase().contains(q_filter))
+                        .unwrap_or(false);
+                if !hit {
                     continue;
                 }
             }
@@ -1457,6 +1522,11 @@ impl MCPServer {
                 "- `{}` **Query**: \"{}\" (Tokens: {}){}\n",
                 format_epoch_ms(call.timestamp), call.query, call.tokens, stale_flag
             ));
+            if let Some(ref o) = call.outcome {
+                if !o.is_empty() {
+                    markdown.push_str(&format!("  - **Outcome**: {}\n", o));
+                }
+            }
             if !call.symbols.is_empty() {
                 markdown.push_str(&format!(
                     "  - **Symbols**: {}\n",
@@ -1476,6 +1546,72 @@ impl MCPServer {
         }
 
         Ok(Value::String(markdown))
+    }
+
+    /// Tool: session_log
+    ///
+    /// Explicitly record an interaction — a user request and what was done in response —
+    /// so it can be recalled in later sessions. Appends one JSONL line to
+    /// `.comp/history/log-YYYY-MM.jsonl` and indexes that file so run_pipeline (BM25) can
+    /// also surface it. session_recall reads the same store directly.
+    pub async fn handle_session_log(&self, params: Value) -> Result<Value> {
+        let request = params["request"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'request' parameter"))?
+            .to_string();
+        let outcome = params["outcome"].as_str().map(|s| s.to_string());
+        let files: Vec<String> = params["files"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let call = SessionCall {
+            query: request,
+            outcome,
+            symbols: Vec::new(),
+            files,
+            tokens: 0,
+            stale: false,
+            timestamp: now,
+        };
+
+        // Monthly file bounds each log while preserving full history.
+        let month = &format_epoch_ms(now)[0..7]; // "YYYY-MM"
+        let hist_path = std::path::Path::new(&self.state.workspace_root)
+            .join(".comp")
+            .join("history")
+            .join(format!("log-{}.jsonl", month));
+        if let Some(parent) = hist_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let line = serde_json::to_string(&call)?;
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&hist_path)?;
+            writeln!(f, "{}", line)?;
+        }
+
+        // Index the history file so run_pipeline BM25 can surface past interactions.
+        // Best-effort: session_recall reads the file directly regardless of indexing.
+        let mut indexer = crate::indexer::Indexer::new(&self.state.workspace_root);
+        if let Err(e) = indexer.index_file(&hist_path, &self.state.graph_db).await {
+            info!("session_log: failed to index history file: {}", e);
+        }
+
+        Ok(json!({
+            "status": "ok",
+            "path": hist_path.to_string_lossy(),
+            "timestamp": now
+        }))
     }
 
     /// Tool 7: get_symbol
@@ -2221,6 +2357,59 @@ mod tests {
         let limited = server.handle_session_recall(json!({ "limit": 1 })).await.unwrap();
         let limited = limited.as_str().unwrap();
         assert_eq!(limited.matches("**Query**").count(), 1, "limit must cap shown entries");
+
+        std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_session_log_and_recall() {
+        // session_log persists request+outcome to .comp/history and session_recall surfaces it.
+        let temp_dir = std::env::temp_dir().join("comP_test_session_log");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let root = temp_dir.to_str().unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", root);
+        let state = Arc::new(crate::AppState::new(root).await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state.clone());
+
+        let logged = server
+            .handle_session_log(json!({
+                "request": "fix the login redirect bug",
+                "outcome": "patched auth middleware and added a regression test",
+                "files": ["src/auth.rs"]
+            }))
+            .await
+            .unwrap();
+        assert_eq!(logged["status"], "ok");
+
+        // A monthly history JSONL file must now exist with one record.
+        let hist_dir = temp_dir.join(".comp").join("history");
+        let mut jsonl_files: Vec<_> = std::fs::read_dir(&hist_dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("jsonl"))
+            .collect();
+        assert_eq!(jsonl_files.len(), 1, "one monthly history file expected");
+        let content = std::fs::read_to_string(jsonl_files.pop().unwrap()).unwrap();
+        assert!(content.contains("login redirect"));
+        assert!(content.contains("auth middleware"));
+
+        // Recall surfaces the request and its outcome.
+        let recall = server.handle_session_recall(json!({})).await.unwrap();
+        let recall = recall.as_str().unwrap();
+        assert!(recall.contains("fix the login redirect bug"), "request must be recalled");
+        assert!(recall.contains("Outcome"), "outcome must be rendered");
+        assert!(recall.contains("regression test"), "outcome text must be recalled");
+
+        // Filtering on a word that appears only in the outcome still matches.
+        let filtered = server
+            .handle_session_recall(json!({ "query": "regression" }))
+            .await
+            .unwrap();
+        assert!(filtered.as_str().unwrap().contains("login redirect"));
 
         std::env::remove_var("COMP_WORKSPACE_ROOT");
         let _ = std::fs::remove_dir_all(&temp_dir);

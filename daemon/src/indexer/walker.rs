@@ -192,6 +192,12 @@ impl FileWalker {
     /// is handled by the ignore crate during batch walk.
     pub fn should_skip_relative_path(&self, relative_path: &str) -> bool {
         let normalized = relative_path.replace('\\', "/");
+        // WHY: interaction history under .comp/history/ must be indexable so BM25 recall
+        // (run_pipeline) can surface past requests/outcomes, even though .comp/ is an
+        // otherwise hidden, non-source directory that is skipped wholesale.
+        if normalized.starts_with(".comp/history/") {
+            return false;
+        }
         for segment in normalized.split('/') {
             if segment.starts_with('.') {
                 return true;
@@ -469,6 +475,12 @@ mod tests {
         assert!(!walker.should_skip_relative_path("src/builder.rs"));
         assert!(!walker.should_skip_relative_path("targets.rs"));
         assert!(!walker.should_skip_relative_path("retargeting.ts"));
+
+        // .comp/history/ is carved out so interaction logs are indexable for BM25 recall,
+        // while the rest of .comp/ (index.db, config) stays excluded.
+        assert!(!walker.should_skip_relative_path(".comp/history/log-2026-06.jsonl"));
+        assert!(walker.should_skip_relative_path(".comp/index.db"));
+        assert!(walker.should_skip_relative_path(".comp/config.json"));
     }
 
     /// §4-2: files larger than max_file_bytes are skipped before hash calculation
