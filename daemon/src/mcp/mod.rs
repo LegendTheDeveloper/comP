@@ -18,15 +18,25 @@ use std::sync::Arc;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct SessionCall {
+    /// The Stop hook (history-record.sh) writes this field as "request";
+    /// session_log writes "query". Accept both so hook-written JSONL lines
+    /// are not silently dropped during recall.
+    #[serde(alias = "request")]
     pub query: String,
     /// What was done in response (set by session_log / Stop-hook records).
     /// Defaulted for backward compatibility with older session-memory.json files
     /// and auto-recorded run_pipeline/get_context calls that have no outcome.
     #[serde(default)]
     pub outcome: Option<String>,
+    /// Hook-written records carry only timestamp/request/outcome —
+    /// everything else must default rather than fail deserialization.
+    #[serde(default)]
     pub symbols: Vec<String>,
+    #[serde(default)]
     pub files: Vec<String>,
+    #[serde(default)]
     pub tokens: u64,
+    #[serde(default)]
     pub stale: bool,
     pub timestamp: u64,
 }
@@ -45,6 +55,21 @@ pub struct SessionMemory {
 
 fn get_session_memory_path(root: &str) -> std::path::PathBuf {
     std::path::Path::new(root).join(".comp").join("session-memory.json")
+}
+
+/// Render a backtick-quoted, comma-separated list capped at `cap` items,
+/// with an overflow marker ("… (+N more)") instead of the full enumeration.
+///
+/// WHY: recall entries auto-recorded by run_pipeline can carry 30-50 symbols
+/// and files each; enumerating them all makes session_recall output so long
+/// it defeats its own purpose (fast context reconstruction, low tokens).
+fn format_capped_list(items: &[String], cap: usize) -> String {
+    let shown: Vec<String> = items.iter().take(cap).map(|s| format!("`{}`", s)).collect();
+    let mut out = shown.join(", ");
+    if items.len() > cap {
+        out.push_str(&format!(" … (+{} more)", items.len() - cap));
+    }
+    out
 }
 
 fn record_mcp_call(
@@ -394,6 +419,7 @@ impl MCPServer {
         all_hits.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
         let hits = all_hits;
         let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
+        let char_counts = self.state.graph_db.get_file_char_counts()?;
         let files_list = self.state.graph_db.list_files()?;
         // WHY: Save language info before consuming. BM25 requires the list of Markdown and Office files.
         let doc_paths: Vec<String> = files_list
@@ -421,8 +447,18 @@ impl MCPServer {
         //    Content compression is deferred until after level selection so we
         //    only read each file once at the chosen level.
         let mut seen = std::collections::HashSet::new();
-        // (path, sym_count)
-        let mut candidates: Vec<(String, usize)> = Vec::new();
+        // Uncompressed token estimate: real file size (chars/4) when indexed;
+        // symbol-count heuristic (~50 tokens/symbol) only as fallback.
+        let base_tokens_for = |path: &str, sym: usize| -> usize {
+            path_to_id
+                .get(path)
+                .and_then(|id| char_counts.get(id))
+                .map(|c| (*c as usize) / 4)
+                .filter(|c| *c > 0)
+                .unwrap_or_else(|| sym.saturating_mul(50))
+        };
+        // (path, sym_count, base_tokens)
+        let mut candidates: Vec<(String, usize, usize)> = Vec::new();
         let mut recorded_symbols = Vec::new();
         let mut recorded_files = Vec::new();
         for (file, name, _kind, _line) in hits {
@@ -434,7 +470,8 @@ impl MCPServer {
                     .and_then(|id| symbol_counts.get(id))
                     .copied()
                     .unwrap_or(0) as usize;
-                candidates.push((file, sym));
+                let base = base_tokens_for(&file, sym);
+                candidates.push((file, sym, base));
             }
         }
 
@@ -459,7 +496,8 @@ impl MCPServer {
                         .and_then(|id| symbol_counts.get(id))
                         .copied()
                         .unwrap_or(0) as usize;
-                    candidates.push((path, sym));
+                    let base = base_tokens_for(&path, sym);
+                    candidates.push((path, sym, base));
                 }
             }
         }
@@ -478,7 +516,7 @@ impl MCPServer {
             // partition() preserves relative order within each group.
             let (mut diff_cands, other_cands): (Vec<_>, Vec<_>) = candidates
                 .into_iter()
-                .partition(|(path, _)| git_diff_files.contains(path));
+                .partition(|(path, _, _)| git_diff_files.contains(path));
 
             // Insert git-diff files that were not matched by LIKE/TF-IDF/BM25 but are indexed.
             // Sort for deterministic ordering (HashSet iteration is non-deterministic).
@@ -490,7 +528,8 @@ impl MCPServer {
             for diff_path in unmatched {
                 if let Some(&file_id) = path_to_id.get(diff_path) {
                     let sym = symbol_counts.get(&file_id).copied().unwrap_or(0) as usize;
-                    diff_cands.push((diff_path.clone(), sym));
+                    let base = base_tokens_for(diff_path, sym);
+                    diff_cands.push((diff_path.clone(), sym, base));
                     recorded_files.push(diff_path.clone());
                 }
                 // If not indexed, skip — no content to serve.
@@ -523,7 +562,7 @@ impl MCPServer {
         let mut pivot_files: Vec<Value> = Vec::new();
         let mut pivot_paths: Vec<String> = Vec::new();
         let mut compression_rules_applied = false;
-        for (file, sym) in &packed {
+        for (file, sym, base) in &packed {
             let file_level = match Self::apply_compression_rule(file, &compression_rules) {
                 Some(rule_level) if rule_level != final_level => {
                     compression_rules_applied = true;
@@ -531,7 +570,7 @@ impl MCPServer {
                 }
                 _ => final_level,
             };
-            let tokens = Self::estimate_tokens(*sym, file_level);
+            let tokens = Self::estimate_tokens(*base, file_level);
             let mut entry = json!({
                 "path": file,
                 "symbols": sym,
@@ -612,10 +651,22 @@ impl MCPServer {
                 m
             });
 
+        // Files one dependency hop away from the pivots (callers/callees in other
+        // files), ranked by connecting-edge count. Best-effort: an empty list on
+        // error must not fail the whole pipeline.
+        let related_files: Vec<Value> = self
+            .state
+            .graph_db
+            .get_related_files(&pivot_paths, 10)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(path, edge_count)| json!({ "path": path, "edge_count": edge_count }))
+            .collect();
+
         Ok(json!({
             "task": task,
             "pivot_files": pivot_files,
-            "related_files": [],  // TODO: calculate via impact graph (Phase 5)
+            "related_files": related_files,
             "total_tokens": total_tokens,
             "max_tokens": budget,
             "compression_level_applied": final_level,
@@ -731,18 +782,17 @@ impl MCPServer {
         Some(matches[0].1)
     }
 
-    /// Estimate token count for a file given its symbol count and compression level.
+    /// Estimate token count for a file given its uncompressed token estimate
+    /// (real chars/4, or the symbol-count fallback) and compression level.
     ///
     /// Reduction factors mirror the compression ratio ranges advertised in the tool schema:
     ///   level 1 (compact)   → ~30% reduction  → factor 0.70
     ///   level 2 (skeleton)  → ~75% reduction  → factor 0.25
-    fn estimate_tokens(sym_count: usize, level: i64) -> usize {
-        // WHY: sym*50 approximates ~50 tokens per symbol (signature + a few lines).
-        let base = sym_count.saturating_mul(50);
+    fn estimate_tokens(base_tokens: usize, level: i64) -> usize {
         match level {
-            1 => ((base as f64) * 0.70) as usize,
-            2 => ((base as f64) * 0.25) as usize,
-            _ => base,
+            1 => ((base_tokens as f64) * 0.70) as usize,
+            2 => ((base_tokens as f64) * 0.25) as usize,
+            _ => base_tokens,
         }
     }
 
@@ -750,10 +800,10 @@ impl MCPServer {
     ///
     /// Returns (level, budget_adjusted).
     /// If even level 2 overflows, returns (2, true) — greedy truncation handles the rest.
-    fn choose_compression_level(candidates: &[(String, usize)], budget: usize) -> (i64, bool) {
+    fn choose_compression_level(candidates: &[(String, usize, usize)], budget: usize) -> (i64, bool) {
         for level in [0i64, 1, 2] {
             let total: usize = candidates.iter()
-                .map(|(_, sym)| Self::estimate_tokens(*sym, level))
+                .map(|(_, _, base)| Self::estimate_tokens(*base, level))
                 .sum();
             if total <= budget {
                 return (level, level > 0);
@@ -767,13 +817,17 @@ impl MCPServer {
     /// Iterates in relevance order (highest first). A file that exceeds the remaining
     /// budget is skipped rather than stopping the loop, so smaller subsequent files
     /// can still fill remaining space.
-    fn pack_within_budget(candidates: &[(String, usize)], budget: usize, level: i64) -> Vec<(String, usize)> {
+    fn pack_within_budget(
+        candidates: &[(String, usize, usize)],
+        budget: usize,
+        level: i64,
+    ) -> Vec<(String, usize, usize)> {
         let mut remaining = budget;
         let mut packed = Vec::new();
-        for (path, sym) in candidates {
-            let tokens = Self::estimate_tokens(*sym, level);
+        for (path, sym, base) in candidates {
+            let tokens = Self::estimate_tokens(*base, level);
             if tokens <= remaining {
-                packed.push((path.clone(), *sym));
+                packed.push((path.clone(), *sym, *base));
                 remaining = remaining.saturating_sub(tokens);
             }
         }
@@ -1148,6 +1202,9 @@ impl MCPServer {
               file_count, node_count, edge_count);
 
         Ok(json!({
+            // Lets clients detect a stale running binary after an upgrade
+            // (Windows locks the exe, so rebuilds don't take effect until restart).
+            "daemon_version": env!("CARGO_PKG_VERSION"),
             "total_files": file_count,
             "total_nodes": node_count,
             "total_edges": edge_count,
@@ -1164,7 +1221,7 @@ impl MCPServer {
         Ok(json!({
             "protocolVersion": "2024-11-05",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "comP", "version": "0.1.0" }
+            "serverInfo": { "name": "comP", "version": env!("CARGO_PKG_VERSION") }
         }))
     }
 
@@ -1527,16 +1584,18 @@ impl MCPServer {
                     markdown.push_str(&format!("  - **Outcome**: {}\n", o));
                 }
             }
+            // Cap at 5: enough to identify the work, without flooding the output.
+            const RECALL_LIST_CAP: usize = 5;
             if !call.symbols.is_empty() {
                 markdown.push_str(&format!(
                     "  - **Symbols**: {}\n",
-                    call.symbols.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", ")
+                    format_capped_list(&call.symbols, RECALL_LIST_CAP)
                 ));
             }
             if !call.files.is_empty() {
                 markdown.push_str(&format!(
                     "  - **Files**: {}\n",
-                    call.files.iter().map(|f| format!("`{}`", f)).collect::<Vec<_>>().join(", ")
+                    format_capped_list(&call.files, RECALL_LIST_CAP)
                 ));
             }
         }
@@ -2279,6 +2338,10 @@ mod tests {
         assert!(response["total_files"].as_i64().unwrap_or(-1) >= 0);
         assert!(response["total_nodes"].as_i64().unwrap_or(-1) >= 0);
         assert!(response["total_edges"].as_i64().unwrap_or(-1) >= 0);
+
+        // The running binary must self-report its crate version so clients can
+        // detect a stale daemon after an upgrade.
+        assert_eq!(response["daemon_version"].as_str().unwrap(), env!("CARGO_PKG_VERSION"));
     }
 
     #[tokio::test]
@@ -2315,6 +2378,46 @@ mod tests {
 
         let result = server.handle_session_recall(json!({ "query": "nomatch" })).await.unwrap();
         assert!(result.as_str().unwrap().contains("No matching past invocations"));
+
+        std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_format_capped_list() {
+        let items: Vec<String> = (1..=8).map(|i| format!("sym{}", i)).collect();
+        let rendered = format_capped_list(&items, 5);
+        assert_eq!(rendered, "`sym1`, `sym2`, `sym3`, `sym4`, `sym5` … (+3 more)");
+
+        // At or under the cap: no overflow marker.
+        let few: Vec<String> = vec!["a".to_string(), "b".to_string()];
+        assert_eq!(format_capped_list(&few, 5), "`a`, `b`");
+    }
+
+    #[tokio::test]
+    async fn test_session_recall_caps_symbol_and_file_lists() {
+        // Auto-recorded run_pipeline calls can carry dozens of symbols/files;
+        // recall must summarize them instead of enumerating everything.
+        let temp_dir = std::env::temp_dir().join("comP_test_session_recall_cap");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let root = temp_dir.to_str().unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", root);
+        let state = Arc::new(crate::AppState::new(root).await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state.clone());
+
+        let symbols: Vec<String> = (1..=30).map(|i| format!("symbol_{}", i)).collect();
+        let files: Vec<String> = (1..=12).map(|i| format!("src/file_{}.rs", i)).collect();
+        record_mcp_call(root, &state.session_id, "big task".to_string(), symbols, files, 100).unwrap();
+
+        let markdown = server.handle_session_recall(json!({})).await.unwrap();
+        let markdown = markdown.as_str().unwrap();
+        assert!(markdown.contains("symbol_1"), "leading symbols must be shown");
+        assert!(!markdown.contains("symbol_6"), "symbols beyond the cap must be omitted");
+        assert!(markdown.contains("(+25 more)"), "symbol overflow count must be shown");
+        assert!(!markdown.contains("src/file_6.rs"), "files beyond the cap must be omitted");
+        assert!(markdown.contains("(+7 more)"), "file overflow count must be shown");
 
         std::env::remove_var("COMP_WORKSPACE_ROOT");
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -2410,6 +2513,43 @@ mod tests {
             .await
             .unwrap();
         assert!(filtered.as_str().unwrap().contains("login redirect"));
+
+        std::env::remove_var("COMP_WORKSPACE_ROOT");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_session_recall_hook_written_jsonl() {
+        // The Stop hook (history-record.sh) writes {"timestamp","request","outcome"} —
+        // no query/symbols/files/tokens/stale fields. Recall must still parse these
+        // lines instead of silently dropping them.
+        let temp_dir = std::env::temp_dir().join("comP_test_session_recall_hook");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let root = temp_dir.to_str().unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", root);
+        let state = Arc::new(crate::AppState::new(root).await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state.clone());
+
+        let hist_dir = temp_dir.join(".comp").join("history");
+        std::fs::create_dir_all(&hist_dir).unwrap();
+        std::fs::write(
+            hist_dir.join("log-2026-06.jsonl"),
+            concat!(
+                r#"{"timestamp":1782521356807,"request":"add session_log feature","outcome":"implemented session_log in mod.rs"}"#,
+                "\n",
+                r#"{"timestamp":1782521356900,"request":"outcome may be null","outcome":null}"#,
+                "\n"
+            ),
+        )
+        .unwrap();
+
+        let recall = server.handle_session_recall(json!({})).await.unwrap();
+        let recall = recall.as_str().unwrap();
+        assert!(recall.contains("add session_log feature"), "hook 'request' field must map to query");
+        assert!(recall.contains("implemented session_log"), "hook outcome must be rendered");
+        assert!(recall.contains("outcome may be null"), "null outcome must not break parsing");
 
         std::env::remove_var("COMP_WORKSPACE_ROOT");
         let _ = std::fs::remove_dir_all(&temp_dir);

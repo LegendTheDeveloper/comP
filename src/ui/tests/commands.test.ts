@@ -131,14 +131,48 @@ describe("registerCommands", () => {
     expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
   });
 
-  it("comp.showImpactGraph with active editor shows information message", async () => {
+  it("comp.showImpactGraph with active editor calls get_symbol and opens the result", async () => {
     (vscode.window as any).activeTextEditor = {
-      document: { fileName: "/path/file.ts" },
+      document: {
+        fileName: "/path/file.ts",
+        getWordRangeAtPosition: sinon.stub().returns({}),
+        getText: sinon.stub().returns("mySymbol"),
+      },
+      selection: { active: { line: 5, character: 3 } },
+    };
+    mockDaemon.request = sinon.stub().resolves("## mySymbol\n\n- dependents: ...");
+    (vscode.workspace as any).openTextDocument = sinon.stub().resolves({});
+    (vscode.window as any).showTextDocument = sinon.stub().resolves(undefined);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
+    await handlers.get("comp.showImpactGraph")!();
+    expect(mockDaemon.request.calledWith("get_symbol", sinon.match({ name: "mySymbol" }))).to.be.true;
+    expect((vscode.window as any).showTextDocument.calledOnce).to.be.true;
+  });
+
+  it("comp.showImpactGraph with no symbol at cursor shows error", async () => {
+    (vscode.window as any).activeTextEditor = {
+      document: {
+        fileName: "/path/file.ts",
+        getWordRangeAtPosition: sinon.stub().returns(undefined),
+        getText: sinon.stub(),
+      },
       selection: { active: { line: 5, character: 3 } },
     };
     registerCommands(mockContext, () => mockDaemon, mockStatusBar);
     await handlers.get("comp.showImpactGraph")!();
-    expect((vscode.window as any).showInformationMessage.calledOnce).to.be.true;
+    expect((vscode.window as any).showErrorMessage.calledOnce).to.be.true;
+    expect(mockDaemon.request.called).to.be.false;
+  });
+
+  it("comp.generateContext with task input calls run_pipeline and opens the result", async () => {
+    (vscode.window as any).showInputBox = sinon.stub().resolves("add user auth");
+    mockDaemon.request = sinon.stub().resolves({ pivot_files: [] });
+    (vscode.workspace as any).openTextDocument = sinon.stub().resolves({});
+    (vscode.window as any).showTextDocument = sinon.stub().resolves(undefined);
+    registerCommands(mockContext, () => mockDaemon, mockStatusBar);
+    await handlers.get("comp.generateContext")!();
+    expect(mockDaemon.request.calledWith("run_pipeline", sinon.match({ task: "add user auth" }))).to.be.true;
+    expect((vscode.window as any).showTextDocument.calledOnce).to.be.true;
   });
 
   it("comp.showStats shows error when daemon is not running", async () => {

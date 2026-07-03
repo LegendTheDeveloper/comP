@@ -46,7 +46,7 @@
   <header class="hero">
     <div class="container hero-container">
       <div class="hero-content">
-        <div class="badge animate-fade-in">v0.8.1 リリース</div>
+        <div class="badge animate-fade-in">v0.9.2 — セッション記憶＆スマートコンテキスト</div>
         <h1 class="animate-fade-in">あなたのAIエージェントに、<br><span class="gradient-text">完璧なローカルコード文脈</span>を。</h1>
         <p class="hero-desc animate-fade-in">comP（コンプ）は、AIエージェントがコードの構造、依存関係、全文情報を完全に把握できるように支援する、VS Code拡張機能およびRust製バックエンドデーモンです。</p>
         <div class="hero-cta animate-fade-in">
@@ -191,6 +191,22 @@
             <span class="status-tag">✅ リリース済み</span>
           </div>
         </div>
+        <div class="roadmap-item completed">
+          <div class="roadmap-badge">v0.9</div>
+          <div class="roadmap-content">
+            <h4>セッション記憶・永続対話履歴</h4>
+            <p>セッション切れ・デーモン再起動をまたいで残る対話履歴 — LLM標準機能では実現不可能な永続メモリです。新MCPツール <code>session_log</code> / <code>session_recall</code> が依頼と対応結果を <code>.comp/history/</code> に永続記録し、Stop hook が自動記録、履歴は BM25 インデックス化され <code>run_pipeline</code> の検索候補に自然に浮上します。v0.9.1 では Markdown 圧縮と C / C++ / Java の AST 圧縮に対応。</p>
+            <span class="status-tag">✅ リリース済み</span>
+          </div>
+        </div>
+        <div class="roadmap-item">
+          <div class="roadmap-badge">v0.9.2</div>
+          <div class="roadmap-content">
+            <h4>関連ファイル返却・実サイズトークン推定・信頼性向上</h4>
+            <p><code>run_pipeline</code> が <code>related_files</code>（ピボットファイルから依存エッジ1ホップで繋がるファイルをエッジ数順に返却）を実装。トークン推定をシンボル数ヒューリスティックから実ファイルサイズベースに刷新。<code>get_stats</code> でデーモンがバージョンを自己申告し旧バイナリ稼働を検知可能に。<code>Generate Context</code> / <code>Show Impact Graph</code> コマンドを本実装。フック記録が <code>session_recall</code> から漏れるバグも修正。</p>
+            <span class="status-tag">🔜 リリース予定</span>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -207,7 +223,7 @@
           <span class="step-num">1</span>
           <h4>拡張機能のインストール</h4>
           <p>リリースされた<code>.vsix</code>ファイルをダウンロードし、VS Codeにドラッグ＆ドロップするか、次のコマンドでインストールします：</p>
-          <pre><code>code --install-extension comP-0.8.1.vsix</code></pre>
+          <pre><code>code --install-extension comP-0.9.2.vsix</code></pre>
         </div>
         <div class="step">
           <span class="step-num">2</span>

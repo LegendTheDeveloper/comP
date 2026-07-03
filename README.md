@@ -268,7 +268,7 @@ C, C++, C#, Go, Java, JavaScript, TypeScript, Python, Rust, Ruby, Bash, Kotlin, 
 ### "Some languages not recognized"
 
 - comP supports 30+ languages; unsupported files are skipped
-- Office formats (Word, Excel) will be supported in v2.0
+- Office documents (Word / PowerPoint / Excel) and PDF are already supported (since v0.2–v0.3)
 
 ---
 
