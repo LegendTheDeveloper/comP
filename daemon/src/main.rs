@@ -68,6 +68,32 @@ impl AppState {
     }
 }
 
+/// Build the ordered (alias, root) repo list from the main workspace root and
+/// the additional_paths entries, assigning each a unique alias derived from its
+/// folder name. Collisions are disambiguated with a numeric suffix ("-2", "-3").
+/// The main root is always first.
+fn build_repo_list(main_root: &str, additional: &[String]) -> Vec<(String, String)> {
+    let mut repos: Vec<(String, String)> = Vec::new();
+    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for root in std::iter::once(main_root).chain(additional.iter().map(|s| s.as_str())) {
+        // Skip duplicate roots (e.g. main root accidentally also in additional_paths).
+        if repos.iter().any(|(_, r)| r == root) {
+            continue;
+        }
+        let base = indexer::derive_alias(root);
+        let mut alias = base.clone();
+        let mut n = 2;
+        while used.contains(&alias) {
+            alias = format!("{}-{}", base, n);
+            n += 1;
+        }
+        used.insert(alias.clone());
+        repos.push((alias, root.to_string()));
+    }
+    repos
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::new().default_filter_or("info")).init();
@@ -90,31 +116,37 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let state_for_idx = Arc::clone(&state);
         let root_for_idx = workspace_root.clone();
-        // Read additional paths before spawning (no async needed)
+        // Build the repo list: the main workspace root plus every additional_paths
+        // entry from .comp/config.json, each under a deduplicated alias.
         let additional_paths = indexer::Indexer::read_additional_paths(&workspace_root);
+        let repos = build_repo_list(&root_for_idx, &additional_paths);
         tokio::spawn(async move {
-            info!("Starting initial workspace indexing...");
-            // WHY: Load hashes from previous session database to only re-index modified files.
-            let previous_hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
-            let mut main_indexer = indexer::Indexer::new(&root_for_idx);
-            match main_indexer.index_workspace(Some(&previous_hashes), &state_for_idx.graph_db).await {
-                Ok((total, indexed, symbols)) => {
-                    info!(
-                        "Initial indexing complete: indexed {}/{} files, {} symbols",
-                        indexed, total, symbols
-                    );
+            // Register every repo first so the MCP layer can resolve qualified
+            // paths ("<alias>/<rel>") and scope queries by alias.
+            for (alias, root) in &repos {
+                if let Err(e) = state_for_idx.graph_db.upsert_repo(alias, root) {
+                    log::warn!("Failed to register repo {} ({}): {}", alias, root, e);
                 }
-                Err(e) => log::error!("Initial indexing failed: {}", e),
             }
 
-            // Index additional paths (monorepo / multi-root support)
-            for extra_root in &additional_paths {
-                info!("Indexing additional path: {}", extra_root);
-                let extra_hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
-                let mut extra_indexer = indexer::Indexer::new(extra_root);
-                match extra_indexer.index_workspace(Some(&extra_hashes), &state_for_idx.graph_db).await {
-                    Ok((t, i, s)) => info!("Additional path {}: indexed {}/{} files, {} symbols", extra_root, i, t, s),
-                    Err(e) => log::warn!("Failed to index additional path {}: {}", extra_root, e),
+            info!("Starting initial workspace indexing ({} repo(s))...", repos.len());
+            // WHY: Load hashes from previous session database to only re-index modified files.
+            for (i, (alias, root)) in repos.iter().enumerate() {
+                if i == 0 {
+                    info!("Indexing workspace root [{}]: {}", alias, root);
+                } else {
+                    info!("Indexing additional path [{}]: {}", alias, root);
+                }
+                // Reload hashes each pass so files already indexed (by this or an
+                // earlier repo pass) are skipped incrementally.
+                let hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
+                let mut idx = indexer::Indexer::with_alias(root, alias);
+                match idx.index_workspace(Some(&hashes), &state_for_idx.graph_db).await {
+                    Ok((total, indexed, symbols)) => info!(
+                        "Repo [{}]: indexed {}/{} files, {} symbols",
+                        alias, indexed, total, symbols
+                    ),
+                    Err(e) => log::warn!("Failed to index repo {} ({}): {}", alias, root, e),
                 }
             }
 

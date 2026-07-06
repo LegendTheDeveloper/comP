@@ -39,9 +39,18 @@ export interface IndexResponse {
 
 export interface StatsRequest {}
 
+// Per-repo breakdown in the multi-repo index (workspace root + additional_paths).
+export interface RepoStat {
+  alias: string;
+  root_path: string;
+  files: number;
+  nodes: number;
+}
+
 export interface StatsResponse {
   total_files: number;
   total_nodes: number;
   total_edges: number;
   indexed_time_ms: number;
+  repos?: RepoStat[];
 }

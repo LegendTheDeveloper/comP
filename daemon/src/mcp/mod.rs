@@ -198,10 +198,76 @@ fn get_git_diff_files(workspace_root: &str) -> std::collections::HashSet<String>
     }
 }
 
+/// Collect git-diff'd files across every registered repo, returned as
+/// repo-qualified paths ("<alias>/<rel>") so they match stored file paths.
+fn get_git_diff_files_multi(repos: &[(String, String)]) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for (alias, root) in repos {
+        for rel in get_git_diff_files(root) {
+            out.insert(format!("{}/{}", alias, rel));
+        }
+    }
+    out
+}
+
+/// Resolve a repo-qualified path ("<alias>/<rel>") to an absolute filesystem path
+/// using the registered (alias, root) list. Falls back to joining `main_root`
+/// when no alias prefix matches (legacy / single-repo paths).
+fn qualified_to_abs(repos: &[(String, String)], qualified: &str, main_root: &str) -> std::path::PathBuf {
+    for (alias, root) in repos {
+        if let Some(rel) = qualified.strip_prefix(&format!("{}/", alias)) {
+            return std::path::Path::new(root).join(rel);
+        }
+    }
+    std::path::Path::new(main_root).join(qualified)
+}
+
+/// Return the alias of the repo a qualified path belongs to, if any.
+fn repo_alias_of(repos: &[(String, String)], qualified: &str) -> Option<String> {
+    repos
+        .iter()
+        .find(|(alias, _)| qualified.starts_with(&format!("{}/", alias)))
+        .map(|(alias, _)| alias.clone())
+}
+
+/// Validate that `path_str` resolves inside the main root or one of the
+/// registered repo roots. Prevents path-traversal from MCP callers while
+/// allowing absolute paths into any indexed repo.
+fn validate_within_repos(
+    path_str: &str,
+    repos: &[(String, String)],
+    main_root: &str,
+) -> Result<std::path::PathBuf> {
+    let canonical = std::path::Path::new(path_str)
+        .canonicalize()
+        .map_err(|e| anyhow!("Cannot resolve path '{}': {}", path_str, e))?;
+    let roots = std::iter::once(main_root.to_string()).chain(repos.iter().map(|(_, r)| r.clone()));
+    for root in roots {
+        if let Ok(croot) = std::path::Path::new(&root).canonicalize() {
+            if canonical.starts_with(&croot) {
+                return Ok(canonical);
+            }
+        }
+    }
+    Err(anyhow!("Access denied: '{}' is outside all indexed repos", path_str))
+}
+
 impl MCPServer {
     /// Create a new MCP server
     pub fn new(state: Arc<crate::AppState>) -> Self {
         MCPServer { state }
+    }
+
+    /// (alias, root_path) for every registered repo. Empty until the first
+    /// indexing pass registers repos; callers fall back to the main root.
+    fn repos(&self) -> Vec<(String, String)> {
+        self.state
+            .graph_db
+            .list_repos()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(_, alias, root)| (alias, root))
+            .collect()
     }
 
     /// Run the MCP server
@@ -360,6 +426,13 @@ impl MCPServer {
 
         let include_content = params["include_content"].as_bool().unwrap_or(false);
 
+        // Multi-repo: load registered repos and parse the optional `repos` scope
+        // filter (list of aliases). None = search all repos.
+        let repos = self.repos();
+        let repo_filter: Option<std::collections::HashSet<String>> = params["repos"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect());
+
         // None = auto-adjust mode; Some(n) = fixed level, no compression adjustment.
         // WHY: Use params.get() to distinguish "omitted" (None → auto) from "explicitly 0" (Some(0) → fixed).
         let explicit_compression: Option<i64> = params.get("compression_level")
@@ -443,10 +516,14 @@ impl MCPServer {
         //      We read Markdown/Office files and score using BM25, then add to candidates.
         let mut bm25_hit_count: usize = 0;
         if !doc_paths.is_empty() && !keywords.is_empty() {
-            let workspace_root = self.state.workspace_root.clone();
+            // Resolve each qualified doc path to its absolute location in the
+            // owning repo so docs from additional repos are read correctly.
+            let doc_specs: Vec<(String, std::path::PathBuf)> = doc_paths
+                .iter()
+                .map(|p| (p.clone(), qualified_to_abs(&repos, p, &self.state.workspace_root)))
+                .collect();
             let bm25_hits = crate::indexer::doc_parser::Bm25Scorer::search_files(
-                &workspace_root,
-                &doc_paths,
+                &doc_specs,
                 &keywords,
                 20,
             );
@@ -469,7 +546,7 @@ impl MCPServer {
         // should rank above purely relevance-matched files regardless of TF-IDF score.
         // Any error (git unavailable, not a repo, no commits, detached HEAD without parent)
         // silently degrades to no boost — the rest of the pipeline is unaffected.
-        let git_diff_files = get_git_diff_files(&self.state.workspace_root);
+        let git_diff_files = get_git_diff_files_multi(&repos);
         let git_diff_boosted_count: usize;
         if git_diff_files.is_empty() {
             git_diff_boosted_count = 0;
@@ -500,6 +577,15 @@ impl MCPServer {
             // Reassemble: diff-boosted files first, then relevance-ranked remainder.
             candidates = diff_cands;
             candidates.extend(other_cands);
+        }
+
+        // Restrict to the requested repos (run_pipeline `repos` scoping). A path
+        // whose alias is not in the set is dropped; unknown/legacy paths are kept
+        // only when no filter was given.
+        if let Some(ref set) = repo_filter {
+            candidates.retain(|(p, _)| {
+                repo_alias_of(&repos, p).map(|a| set.contains(&a)).unwrap_or(false)
+            });
         }
 
         // 3. Choose compression level and pack within budget.
@@ -541,7 +627,7 @@ impl MCPServer {
                 entry["git_diff"] = Value::Bool(true);
             }
             if include_content {
-                let full_path = std::path::Path::new(&ws).join(file);
+                let full_path = qualified_to_abs(&repos, file, &ws);
                 let lang = path_to_lang.get(file).map(|s| s.as_str()).unwrap_or("");
                 let file_compression = compress::CompressionLevel::from_i64(file_level);
                 if let Ok(raw) = std::fs::read_to_string(&full_path) {
@@ -1144,8 +1230,19 @@ impl MCPServer {
             .unwrap_or_else(|| "0%".to_string());
         let avg_tokens_per_query = sent.checked_div(queries).unwrap_or(0);
 
-        info!("handle_get_stats: returning stats - files: {}, nodes: {}, edges: {}",
-              file_count, node_count, edge_count);
+        let repos: Vec<Value> = self.state.graph_db.get_repo_stats()
+            .unwrap_or_else(|e| { log::warn!("get_repo_stats failed in get_stats: {}", e); Vec::new() })
+            .into_iter()
+            .map(|(alias, root_path, files, nodes)| json!({
+                "alias": alias,
+                "root_path": root_path,
+                "files": files,
+                "nodes": nodes
+            }))
+            .collect();
+
+        info!("handle_get_stats: returning stats - files: {}, nodes: {}, edges: {}, repos: {}",
+              file_count, node_count, edge_count, repos.len());
 
         Ok(json!({
             "total_files": file_count,
@@ -1155,7 +1252,8 @@ impl MCPServer {
             "tokens_saved": saved,
             "queries_count": queries,
             "efficiency": efficiency,
-            "avg_tokens_per_query": avg_tokens_per_query
+            "avg_tokens_per_query": avg_tokens_per_query,
+            "repos": repos
         }))
     }
 
@@ -1178,13 +1276,18 @@ impl MCPServer {
             "tools": [
                 {
                     "name": "run_pipeline",
-                    "description": "ALWAYS call this tool FIRST at the start of every task — before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files — this tool replaces all of that. Returns pivot files and related symbols ranked by relevance. Files modified in the current branch (git diff HEAD) are ranked first and marked with `git_diff: true` in the response. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
+                    "description": "ALWAYS call this tool FIRST at the start of every task — before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files — this tool replaces all of that. Returns pivot files and related symbols ranked by relevance. MULTI-REPO: this index spans ALL registered repos (the workspace root plus every additional_paths entry); results are searched across every repo by default, and each returned path is repo-qualified as '<repo>/<relative>'. Use the `repos` parameter to scope to specific repos. Files modified in the current branch (git diff HEAD) of any repo are ranked first and marked with `git_diff: true`. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "task": {
                                 "type": "string",
                                 "description": "One sentence describing what you are about to implement, fix, or write. IMPORTANT: The task description MUST be in English. Translate to English if needed. Examples: 'fix JWT token expiry bug in auth middleware', 'write installation section in README.md'"
+                            },
+                            "repos": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Optional list of repo aliases to restrict the search to (e.g. [\"Frontend\", \"Backend\"]). Omit to search every indexed repo. Aliases are the repo folder names; see get_project_overview for the list."
                             },
                             "max_tokens": {
                                 "type": "integer",
@@ -1312,7 +1415,7 @@ impl MCPServer {
                             },
                             "file_path": {
                                 "type": "string",
-                                "description": "Optional file path relative to workspace root to narrow search"
+                                "description": "Optional repo-qualified file path ('<repo>/<relative>', exactly as returned by run_pipeline) to narrow the search to one file"
                             },
                             "compression_level": {
                                 "type": "integer",
@@ -1351,7 +1454,7 @@ impl MCPServer {
                         "properties": {
                             "file_path": {
                                 "type": "string",
-                                "description": "File path relative to workspace root (e.g., 'src/extension.ts')"
+                                "description": "Repo-qualified file path ('<repo>/<relative>', exactly as returned by run_pipeline, e.g. 'Frontend/src/app/app.component.ts')"
                             }
                         },
                         "required": ["file_path"]
@@ -1640,13 +1743,14 @@ impl MCPServer {
         }
 
         let workspace_root = self.state.workspace_root.clone();
+        let repos = self.repos();
 
         let mut markdown = String::new();
         markdown.push_str(&format!("## {}\n\n", name));
 
         for sym in symbols {
             let relative_path = self.state.graph_db.get_file_path_by_id(sym.file_id)?;
-            let absolute_path = std::path::Path::new(&workspace_root).join(&relative_path);
+            let absolute_path = qualified_to_abs(&repos, &relative_path, &workspace_root);
 
             markdown.push_str(&format!("`{}` L{} ({})\n\n", relative_path, sym.line, sym.kind));
 
@@ -1810,6 +1914,25 @@ impl MCPServer {
         markdown.push_str(&format!("- **Total Symbols (Nodes)**: {}\n", node_count));
         markdown.push_str(&format!("- **Total Dependencies (Edges)**: {}\n\n", edge_count));
 
+        // Repositories (multi-repo): list each registered repo alias and its file
+        // count so agents know which `repos` scopes are available for run_pipeline.
+        let repos = self.repos();
+        if !repos.is_empty() {
+            let mut repo_counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+            for (_, path, _) in &files {
+                if let Some(alias) = repo_alias_of(&repos, path) {
+                    *repo_counts.entry(alias).or_insert(0) += 1;
+                }
+            }
+            markdown.push_str("## Repositories\n");
+            for (alias, root) in &repos {
+                let c = repo_counts.get(alias).copied().unwrap_or(0);
+                markdown.push_str(&format!("- **{}** — {} files (`{}`)\n", alias, c, root));
+            }
+            markdown.push('\n');
+        }
+
         // Language distribution
         let mut lang_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
         for (_, _, lang) in &files {
@@ -1972,7 +2095,7 @@ impl MCPServer {
 
         let workspace_root = self.state.workspace_root.clone();
 
-        let safe_path = validate_within_workspace(path_str, &workspace_root)?;
+        let safe_path = validate_within_repos(path_str, &self.repos(), &workspace_root)?;
 
         let content = std::fs::read_to_string(&safe_path)?;
         let path = safe_path.as_path();
@@ -2279,6 +2402,29 @@ mod tests {
         assert!(response["total_files"].as_i64().unwrap_or(-1) >= 0);
         assert!(response["total_nodes"].as_i64().unwrap_or(-1) >= 0);
         assert!(response["total_edges"].as_i64().unwrap_or(-1) >= 0);
+
+        // repos breakdown is always present, even if empty (no repos registered
+        // via upsert_repo in this bare AppState::new test setup)
+        assert!(response["repos"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_handle_get_stats_includes_repo_breakdown() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        state.graph_db.upsert_repo("Alpha", "/tmp/Alpha").expect("upsert_repo Alpha");
+        state.graph_db.upsert_repo("Beta", "/tmp/Beta").expect("upsert_repo Beta");
+        state.graph_db.upsert_file("Alpha/main.rs", "hash1", "rust", 100).expect("upsert_file Alpha/main.rs");
+        state.graph_db.upsert_file("Alpha/lib.rs", "hash2", "rust", 50).expect("upsert_file Alpha/lib.rs");
+        state.graph_db.upsert_file("Beta/index.ts", "hash3", "typescript", 20).expect("upsert_file Beta/index.ts");
+
+        let server = MCPServer::new(state);
+        let response = server.handle_get_stats().await.expect("handle_get_stats");
+        let repos = response["repos"].as_array().expect("repos should be an array");
+
+        let alpha = repos.iter().find(|r| r["alias"] == "Alpha").expect("Alpha present");
+        assert_eq!(alpha["files"].as_i64().unwrap(), 2);
+        let beta = repos.iter().find(|r| r["alias"] == "Beta").expect("Beta present");
+        assert_eq!(beta["files"].as_i64().unwrap(), 1);
     }
 
     #[tokio::test]

@@ -62,6 +62,35 @@ impl GraphDB {
         Ok(())
     }
 
+    /// Register (or update) a repository root and return its id.
+    ///
+    /// `alias` is the short name that qualifies file paths and scopes queries;
+    /// `root_path` is the absolute filesystem root of that repo. Idempotent: an
+    /// existing alias keeps its id and has its root_path refreshed.
+    pub fn upsert_repo(&self, alias: &str, root_path: &str) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute(
+            "INSERT INTO repos (alias, root_path) VALUES (?, ?)
+             ON CONFLICT(alias) DO UPDATE SET root_path = excluded.root_path",
+            rusqlite::params![alias, root_path],
+        )?;
+        let id: i64 = conn.query_row("SELECT id FROM repos WHERE alias = ?", [alias], |row| row.get(0))?;
+        Ok(id)
+    }
+
+    /// List all registered repos as (id, alias, root_path), ordered by id.
+    ///
+    /// Used by the MCP layer to resolve qualified paths ("<alias>/<rel>") back to
+    /// absolute filesystem paths and to scope queries by repo alias.
+    pub fn list_repos(&self) -> Result<Vec<(i64, String, String)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT id, alias, root_path FROM repos ORDER BY id")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// Insert/update a file in the database
     ///
     /// `char_count` is the UTF-8 byte length of the file content, stored as the
@@ -264,6 +293,37 @@ impl GraphDB {
         )?;
 
         Ok((file_count, node_count, edge_count))
+    }
+
+    /// Get per-repo file/symbol counts for the multi-repo statistics panel.
+    ///
+    /// Returns (alias, root_path, file_count, node_count) for every registered
+    /// repo, ordered by id (workspace root first). Counts are derived from the
+    /// "<alias>/<rel>" qualified path prefix rather than a repo_id column on
+    /// files, since that prefix is already the qualification scheme; the
+    /// "/" delimiter in the LIKE pattern prevents one alias prefix-matching a
+    /// different alias that merely starts with the same characters.
+    pub fn get_repo_stats(&self) -> Result<Vec<(String, String, i64, i64)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT r.alias, r.root_path,
+                    COUNT(DISTINCT f.id) AS file_count,
+                    COUNT(n.id) AS node_count
+             FROM repos r
+             LEFT JOIN files f ON f.path LIKE r.alias || '/%'
+             LEFT JOIN nodes n ON n.file_id = f.id
+             GROUP BY r.id
+             ORDER BY r.id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     /// List all indexed files with id, path, language

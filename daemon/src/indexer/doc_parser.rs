@@ -615,37 +615,39 @@ impl Bm25Scorer {
     ///
     /// Returns (path, score) pairs sorted by score descending, capped at `top_k`.
     /// Files with score 0 (no query term present) are excluded.
+    /// `file_specs` pairs each file's display id (the repo-qualified path used as
+    /// the result key) with its already-resolved absolute filesystem path. This
+    /// keeps BM25 multi-repo aware: the absolute path is used for reading, while
+    /// the qualified path is what gets returned and matched against the index.
     pub fn search_files(
-        workspace_root: &str,
-        file_paths: &[String],
+        file_specs: &[(String, std::path::PathBuf)],
         query_terms: &[&str],
         top_k: usize,
     ) -> Vec<(String, f64)> {
         use std::collections::HashMap;
 
-        if query_terms.is_empty() || file_paths.is_empty() {
+        if query_terms.is_empty() || file_specs.is_empty() {
             return Vec::new();
         }
 
         let query_lower: Vec<String> = query_terms.iter().map(|t| t.to_lowercase()).collect();
 
         // Read and tokenize all files; skip unreadable ones silently
-        let docs: Vec<(String, Vec<String>)> = file_paths
+        let docs: Vec<(String, Vec<String>)> = file_specs
             .iter()
-            .filter_map(|path| {
-                let full = Path::new(workspace_root).join(path);
+            .filter_map(|(path, full)| {
                 let content = if path.ends_with(".docx") {
-                    DocumentParser::extract_docx_text(&full).ok()?
+                    DocumentParser::extract_docx_text(full).ok()?
                 } else if path.ends_with(".pptx") {
-                    DocumentParser::extract_pptx_text(&full).ok()?
+                    DocumentParser::extract_pptx_text(full).ok()?
                 } else if path.ends_with(".xlsx") {
-                    DocumentParser::extract_xlsx_text(&full).ok()?
+                    DocumentParser::extract_xlsx_text(full).ok()?
                 } else if path.ends_with(".pdf") {
-                    DocumentParser::extract_pdf_text(&full).ok()?
+                    DocumentParser::extract_pdf_text(full).ok()?
                 } else if path.ends_with(".parquet") {
-                    DocumentParser::extract_parquet_text(&full).ok()?
+                    DocumentParser::extract_parquet_text(full).ok()?
                 } else {
-                    std::fs::read_to_string(&full).ok()?
+                    std::fs::read_to_string(full).ok()?
                 };
                 let tokens = Self::tokenize(&content);
                 if tokens.is_empty() { return None; }

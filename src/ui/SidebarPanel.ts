@@ -292,6 +292,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
           tokensSaved,
           queriesCount,
           lastAgentConnection: lastAgentConnectionStr,
+          repos: stats.repos || [],
         },
       });
     } catch (error) {
@@ -393,6 +394,33 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     }
     .stat-label { font-size: 10px; opacity: 0.7; text-transform: uppercase; margin-bottom: 4px; }
     .stat-value { font-size: 18px; font-weight: bold; color: var(--vscode-terminal-ansiBlue); }
+    .repos-section {
+      padding: 10px;
+      background: var(--vscode-input-background);
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .repos-section h3 { font-size: 11px; font-weight: 600; margin-bottom: 6px; }
+    .repos-content { max-height: 160px; overflow-y: auto; }
+    .repo-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 2px;
+      font-size: 11px;
+      border-bottom: 1px solid var(--vscode-editorWidget-border);
+    }
+    .repo-row:last-child { border-bottom: none; }
+    .repo-alias {
+      opacity: 0.9;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .repo-counts { flex-shrink: 0; color: var(--vscode-terminal-ansiBlue); font-weight: 600; }
+    .repo-counts .repo-nodes { opacity: 0.6; font-weight: normal; margin-left: 4px; }
     .logs-section {
       padding: 10px;
       background: var(--vscode-input-background);
@@ -451,6 +479,10 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       <div style="font-size:10px;opacity:0.5;margin-top:2px;" id="queriesCount"></div>
     </div>
   </div>
+  <div class="repos-section" id="reposSection" style="display:none;">
+    <h3>Repositories</h3>
+    <div class="repos-content" id="reposContent"></div>
+  </div>
   <div class="logs-section">
     <div class="logs-header"><h3>Logs</h3><button onclick="clearLogs()">Clear</button></div>
     <div class="logs-content" id="logsContent"><div class="log-entry">Initializing...</div></div>
@@ -477,6 +509,28 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         const avgSavedStr = avgSaved > 1000 ? (avgSaved / 1000).toFixed(1) + 'K' : String(avgSaved);
         document.getElementById('tokensSaved').textContent = d.queriesCount > 0 ? '~' + avgSavedStr + ' tokens/query' : '';
         document.getElementById('queriesCount').textContent = 'vs full codebase · ' + (d.queriesCount || 0) + ' queries';
+        const reposSection = document.getElementById('reposSection');
+        const reposContent = document.getElementById('reposContent');
+        if (d.repos && d.repos.length > 0) {
+          reposSection.style.display = 'block';
+          reposContent.innerHTML = '';
+          d.repos.forEach(r => {
+            const row = document.createElement('div');
+            row.className = 'repo-row';
+            const alias = document.createElement('span');
+            alias.className = 'repo-alias';
+            alias.textContent = r.alias;
+            alias.title = r.root_path || r.alias;
+            const counts = document.createElement('span');
+            counts.className = 'repo-counts';
+            counts.innerHTML = r.files + ' files<span class="repo-nodes">' + r.nodes + ' nodes</span>';
+            row.appendChild(alias);
+            row.appendChild(counts);
+            reposContent.appendChild(row);
+          });
+        } else {
+          reposSection.style.display = 'none';
+        }
         if (d.daemonRunning) updateStatus(true);
       } else if (msg.type === 'daemonStatus') {
         updateStatus(msg.running);

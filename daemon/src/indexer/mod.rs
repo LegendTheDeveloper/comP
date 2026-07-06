@@ -20,16 +20,44 @@ pub use parser::CodeParser;
 pub use doc_parser::DocumentParser;
 pub use dependency::DependencyAnalyzer;
 
+/// Derive a repo alias from its root path (the final path component).
+///
+/// WHY: aliases qualify stored file paths ("<alias>/<rel>") and scope queries.
+/// Canonicalize first so "." resolves to a real directory name; fall back to the
+/// raw last component when the path can't be canonicalized (e.g. in unit tests).
+pub fn derive_alias(root: &str) -> String {
+    let p = std::path::Path::new(root);
+    std::fs::canonicalize(p)
+        .ok()
+        .and_then(|c| c.file_name().map(|s| s.to_string_lossy().to_string()))
+        .or_else(|| p.file_name().map(|s| s.to_string_lossy().to_string()))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "root".to_string())
+}
+
 /// Main indexer orchestrator
 pub struct Indexer {
     workspace_root: String,
+    /// Short repo name used to qualify stored paths as "<alias>/<relative>".
+    alias: String,
     walker: FileWalker,
     parser: CodeParser,
 }
 
 impl Indexer {
-    /// Create a new indexer for the given workspace
+    /// Create a new indexer for the given workspace, deriving the repo alias
+    /// from the workspace folder name.
     pub fn new(workspace_root: &str) -> Self {
+        let alias = derive_alias(workspace_root);
+        Self::with_alias(workspace_root, &alias)
+    }
+
+    /// Create a new indexer with an explicit repo alias.
+    ///
+    /// WHY: the daemon registers each repo (main root + additional_paths) under a
+    /// deduplicated alias and must index that repo's files qualified with the very
+    /// same alias, so the alias is passed in rather than re-derived here.
+    pub fn with_alias(workspace_root: &str, alias: &str) -> Self {
         let comp_ignore = std::path::Path::new(workspace_root).join(".comp/ignore");
         let mut config = WalkerConfig {
             custom_ignore_file: Some(comp_ignore),
@@ -46,9 +74,16 @@ impl Indexer {
 
         Indexer {
             workspace_root: workspace_root.to_string(),
+            alias: alias.to_string(),
             walker,
             parser,
         }
+    }
+
+    /// Qualify a repo-relative path into the globally-unique DB key
+    /// "<alias>/<relative>".
+    fn qualify(&self, relative: &str) -> String {
+        format!("{}/{}", self.alias, relative)
     }
 
     /// Read additional workspace paths from `.comp/config.json`.
@@ -124,8 +159,17 @@ impl Indexer {
         previous_hashes: Option<&HashMap<String, String>>,
         db: &crate::graph::GraphDB,
     ) -> Result<(usize, usize, usize)> {
-        // 1. Walk filesystem
-        let walk_result = self.walker.walk(previous_hashes)?;
+        // 1. Walk filesystem.
+        //    previous_hashes is keyed by qualified path ("<alias>/<rel>") across
+        //    ALL repos; the walker compares against repo-relative paths, so narrow
+        //    and strip the map down to this repo's entries first.
+        let prefix = format!("{}/", self.alias);
+        let local_hashes: Option<HashMap<String, String>> = previous_hashes.map(|h| {
+            h.iter()
+                .filter_map(|(k, v)| k.strip_prefix(&prefix).map(|rel| (rel.to_string(), v.clone())))
+                .collect()
+        });
+        let walk_result = self.walker.walk(local_hashes.as_ref())?;
         let total_files = walk_result.files.len();
         let changed_count = walk_result.changed_files.len();
 
@@ -166,7 +210,7 @@ impl Indexer {
                 Ok((count, deps)) => {
                     symbols_count += count;
                     if !deps.is_empty() {
-                        deps_by_file.push((file_entry.path.clone(), deps));
+                        deps_by_file.push((self.qualify(&file_entry.path), deps));
                     }
                 }
                 Err(e) => {
@@ -186,9 +230,10 @@ impl Indexer {
             }
         }
 
-        // 3. Remove deleted file entries from the database
+        // 3. Remove deleted file entries from the database (qualify back to the
+        //    "<alias>/<rel>" key under which they were stored).
         for path in &walk_result.deleted_files {
-            if let Err(e) = db.delete_file(path) {
+            if let Err(e) = db.delete_file(&self.qualify(path)) {
                 // WHY: If deletion fails, entries persist in the database, leading to obsolete search results.
                 //      Log a warning to prompt retries during the next indexing run.
                 log::warn!("Failed to remove deleted file from index (stale entry may persist): {} — {}", path, e);
@@ -284,9 +329,11 @@ impl Indexer {
             (syms, content)
         };
 
-        // 3. Store file in DB (char_count drives the real-token baseline in run_pipeline)
+        // 3. Store file in DB under its qualified key "<alias>/<rel>"
+        //    (char_count drives the real-token baseline in run_pipeline)
         let char_count = content_str.len();
-        let file_id = db.upsert_file(&file_entry.path, &file_entry.hash, &file_entry.language, char_count)?;
+        let db_path = self.qualify(&file_entry.path);
+        let file_id = db.upsert_file(&db_path, &file_entry.hash, &file_entry.language, char_count)?;
 
         // 4. Store each symbol as a node in DB
         let mut symbol_map: HashMap<String, i64> = HashMap::new();
@@ -396,7 +443,7 @@ impl Indexer {
         let (_count, deps) = self.parse_and_extract(&file_entry, db).await?;
         if !deps.is_empty() {
             let global_index = db.get_global_symbol_index()?;
-            Self::resolve_edges_for_file(db, &file_entry.path, &deps, &global_index)?;
+            Self::resolve_edges_for_file(db, &self.qualify(&file_entry.path), &deps, &global_index)?;
         }
 
         Ok(())

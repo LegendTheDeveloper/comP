@@ -19,7 +19,19 @@ impl Schema {
     /// - nodes: Symbols extracted from code (functions, classes, types, etc.)
     /// - edges: Dependencies between symbols
     pub const MIGRATION_001_INIT: &str = r#"
-        -- Files table: tracks indexed source files
+        -- Repos table: one row per indexed repository root (multi-repo support).
+        -- alias is the short name used to qualify file paths ("<alias>/<relative>")
+        -- and to scope queries via the run_pipeline `repos` parameter.
+        CREATE TABLE IF NOT EXISTS repos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alias TEXT NOT NULL UNIQUE,
+            root_path TEXT NOT NULL UNIQUE
+        );
+
+        -- Files table: tracks indexed source files.
+        -- path stores the repo-qualified path "<alias>/<relative>", which is
+        -- globally unique across repos (so same relative path in two repos no
+        -- longer collides on the UNIQUE constraint).
         CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             path TEXT NOT NULL UNIQUE,

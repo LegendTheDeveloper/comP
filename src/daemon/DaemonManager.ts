@@ -302,12 +302,24 @@ export class DaemonManager {
     tokens_saved?: number;
     queries_count?: number;
     avg_tokens_per_query?: number;
+    repos?: Array<{ alias: string; root_path: string; files: number; nodes: number }>;
   }> {
     const result = await this.request("getStats", {});
     if (!result || typeof result !== "object") {
       throw new Error("Invalid stats response from daemon");
     }
     const stats = result as Record<string, unknown>;
+    const repos = Array.isArray(stats["repos"])
+      ? (stats["repos"] as unknown[]).map((r) => {
+          const repo = r as Record<string, unknown>;
+          return {
+            alias: String(repo["alias"] ?? ""),
+            root_path: String(repo["root_path"] ?? ""),
+            files: Number(repo["files"]) || 0,
+            nodes: Number(repo["nodes"]) || 0,
+          };
+        })
+      : undefined;
     return {
       total_files: Number(stats["total_files"]) || 0,
       total_nodes: Number(stats["total_nodes"]) || 0,
@@ -317,6 +329,7 @@ export class DaemonManager {
       tokens_saved: stats["tokens_saved"] !== undefined ? Number(stats["tokens_saved"]) : undefined,
       queries_count: stats["queries_count"] !== undefined ? Number(stats["queries_count"]) : undefined,
       avg_tokens_per_query: stats["avg_tokens_per_query"] !== undefined ? Number(stats["avg_tokens_per_query"]) : undefined,
+      repos,
     };
   }
 
