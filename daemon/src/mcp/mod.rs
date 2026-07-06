@@ -635,7 +635,7 @@ impl MCPServer {
         // whose alias is not in the set is dropped; unknown/legacy paths are kept
         // only when no filter was given.
         if let Some(ref set) = repo_filter {
-            candidates.retain(|(p, _)| {
+            candidates.retain(|(p, _, _)| {
                 repo_alias_of(&repos, p).map(|a| set.contains(&a)).unwrap_or(false)
             });
         }
