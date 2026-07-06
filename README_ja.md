@@ -362,7 +362,7 @@ npm run lint:md:fix
 ### 「一部ファイルが認識されない」
 
 - comP は 30+ 言語に対応。対応外のファイル形式は自動的にスキップされます
-- サポート予定ファイル形式（v1.0～）：Word、PowerPoint、Excel等の Office ドキュメント
+- Word / PowerPoint / Excel 等の Office ドキュメントと PDF は対応済み（v0.2〜v0.3 で追加）
 
 ---
 

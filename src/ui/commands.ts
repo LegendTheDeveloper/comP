@@ -126,9 +126,26 @@ export function registerCommands(
 
       if (!task) return;
 
-      vscode.window.showInformationMessage("Generating optimized context...");
-      // TODO: Call daemon run_pipeline tool
-      // TODO: Show results in output panel or new editor
+      const dm = getDaemonManager();
+      if (!dm?.isRunning()) {
+        vscode.window.showErrorMessage("comP daemon is not running. Start it from the comP sidebar first.");
+        return;
+      }
+      try {
+        const result = await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: "comP: Generating optimized context..." },
+          () => dm.request("run_pipeline", { task })
+        );
+        const doc = await vscode.workspace.openTextDocument({
+          content: JSON.stringify(result, null, 2),
+          language: "json",
+        });
+        await vscode.window.showTextDocument(doc, { preview: true });
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Context generation failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     })
   );
 
@@ -144,12 +161,29 @@ export function registerCommands(
 
       const document = editor.document;
       const position = editor.selection.active;
+      const wordRange = document.getWordRangeAtPosition(position);
+      if (!wordRange) {
+        vscode.window.showErrorMessage("No symbol at cursor position");
+        return;
+      }
+      const symbol = document.getText(wordRange);
 
-      vscode.window.showInformationMessage(
-        `Impact graph for: ${document.fileName}:${position.line}:${position.character}`
-      );
-      // TODO: Query daemon for impact graph at position
-      // TODO: Display results
+      const dm = getDaemonManager();
+      if (!dm?.isRunning()) {
+        vscode.window.showErrorMessage("comP daemon is not running. Start it from the comP sidebar first.");
+        return;
+      }
+      try {
+        // get_symbol returns Markdown with the symbol's dependencies and dependents.
+        const result = await dm.request("get_symbol", { name: symbol, compression_level: 2 });
+        const content = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+        const doc = await vscode.workspace.openTextDocument({ content, language: "markdown" });
+        await vscode.window.showTextDocument(doc, { preview: true });
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `Impact analysis failed: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     })
   );
 

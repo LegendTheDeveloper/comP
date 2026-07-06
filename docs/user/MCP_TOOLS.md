@@ -35,6 +35,16 @@ Response fields (v0.6+):
 - `budget_adjusted` (boolean) — `true` if compression level was raised to fit within `default_budget_tokens`
 - `compression_rules_applied` (boolean) — `true` if any per-extension rules from `compression_rules` were applied
 
+Response fields (v0.9.2+):
+
+- `related_files` (array) — files one dependency hop away from the pivot files (callers/callees in other files), ranked by connecting-edge count, up to 10 entries:
+
+  ```json
+  [{ "path": "src/auth/middleware.rs", "edge_count": 4 }]
+  ```
+
+- Token estimates per pivot file are based on the real indexed file size (`chars / 4`), no longer on symbol-count heuristics
+
 ---
 
 ### `get_context`
@@ -99,6 +109,10 @@ Return total file, node, and edge counts (index health check).
 ```json
 {}
 ```
+
+Response fields (v0.9.2+):
+
+- `daemon_version` (string) — version of the running daemon binary. Compare against the installed release to detect a stale daemon that kept running across an upgrade (on Windows the running exe stays locked, so rebuilds do not take effect until the daemon restarts).
 
 ---
 
@@ -174,5 +188,7 @@ Returns a Markdown table of changed files with language, symbol count, and wheth
 ```
 
 各項目（Outcome・Symbols・Files）は、データが存在する場合のみ表示されます。
+
+**v0.9.2+**: Symbols・Files は各エントリ **先頭 5 件まで** 表示し、超過分は `… (+N more)` と件数のみ示します（run_pipeline 自動記録は数十件のシンボルを含むことがあり、全列挙すると recall 自体がトークンを浪費するため）。
 
 **推奨**: 新しいセッション開始時や作業再開時に `session_recall` を呼び、前回の依頼と対応を確認してください。

@@ -207,6 +207,62 @@ impl GraphDB {
         Ok(result)
     }
 
+    /// Files connected to the given files by dependency edges (either direction),
+    /// ranked by the number of connecting edges, excluding the input files themselves.
+    ///
+    /// WHY: run_pipeline returns pivot files by relevance; the blast radius around
+    /// them (callers/callees in other files) is what `related_files` reports so an
+    /// agent sees which files a change is likely to touch without a second query.
+    pub fn get_related_files(&self, file_paths: &[String], limit: usize) -> Result<Vec<(String, usize)>> {
+        if file_paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let placeholders = vec!["?"; file_paths.len()].join(",");
+        let sql = format!(
+            "SELECT path, SUM(cnt) AS total FROM (
+                 SELECT f2.path AS path, COUNT(*) AS cnt
+                 FROM edges e
+                 JOIN nodes n1 ON e.from_id = n1.id
+                 JOIN nodes n2 ON e.to_id = n2.id
+                 JOIN files f1 ON n1.file_id = f1.id
+                 JOIN files f2 ON n2.file_id = f2.id
+                 WHERE f1.path IN ({ph}) AND f2.path NOT IN ({ph})
+                 GROUP BY f2.path
+                 UNION ALL
+                 SELECT f1.path AS path, COUNT(*) AS cnt
+                 FROM edges e
+                 JOIN nodes n1 ON e.from_id = n1.id
+                 JOIN nodes n2 ON e.to_id = n2.id
+                 JOIN files f1 ON n1.file_id = f1.id
+                 JOIN files f2 ON n2.file_id = f2.id
+                 WHERE f2.path IN ({ph}) AND f1.path NOT IN ({ph})
+                 GROUP BY f1.path
+             )
+             GROUP BY path
+             ORDER BY total DESC, path ASC
+             LIMIT ?",
+            ph = placeholders
+        );
+
+        // The IN-lists appear 4 times, then the LIMIT.
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::with_capacity(file_paths.len() * 4 + 1);
+        for _ in 0..4 {
+            for p in file_paths {
+                params.push(Box::new(p.clone()));
+            }
+        }
+        params.push(Box::new(limit as i64));
+
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(params.iter().map(|b| b.as_ref())),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize)),
+        )?;
+        let result = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(result)
+    }
+
     /// Record a tool call's token consumption in the shared metadata table.
     ///
     /// This is the single write path for all token statistics.  Both the MCP
@@ -353,6 +409,25 @@ impl GraphDB {
         for row in rows {
             let (file_id, count) = row?;
             map.insert(file_id, count);
+        }
+        Ok(map)
+    }
+
+    /// Per-file char counts, keyed by file id.
+    ///
+    /// WHY: run_pipeline token estimates use real file sizes (chars/4) instead of
+    /// symbol-count heuristics — a Markdown file with 3 headings and a 200-line
+    /// function count the same in symbols but differ 10x in tokens.
+    pub fn get_file_char_counts(&self) -> Result<HashMap<i64, i64>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT id, char_count FROM files")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (file_id, chars) = row?;
+            map.insert(file_id, chars);
         }
         Ok(map)
     }
@@ -768,8 +843,48 @@ mod tests {
 
     #[tokio::test]
     async fn test_graphdb_creation() {
-        // TODO: Use temp directory for testing
-        // let db = GraphDB::new("/tmp/test").await.unwrap();
-        // assert graph is initialized
+        let temp_dir = std::env::temp_dir().join("comP_test_graphdb_creation");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let db = GraphDB::new(temp_dir.to_str().unwrap()).await.unwrap();
+        let (files, nodes, edges) = db.get_stats().unwrap();
+        assert_eq!((files, nodes, edges), (0, 0, 0), "fresh DB must be empty");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_related_files() {
+        // a.rs and b.rs are pivots; c.rs is connected to a.rs by two edges
+        // (one in each direction) and d.rs is isolated. Expect only c.rs,
+        // with the edge count summed across directions.
+        let temp_dir = std::env::temp_dir().join("comP_test_get_related_files");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let db = GraphDB::new(temp_dir.to_str().unwrap()).await.unwrap();
+        let fa = db.upsert_file("a.rs", "h1", "rust", 10).unwrap();
+        let fb = db.upsert_file("b.rs", "h2", "rust", 10).unwrap();
+        let fc = db.upsert_file("c.rs", "h3", "rust", 10).unwrap();
+        let fd = db.upsert_file("d.rs", "h4", "rust", 10).unwrap();
+
+        let na = db.insert_node(fa, "alpha", "fn", 1, 0, None, true, None).unwrap();
+        let nb = db.insert_node(fb, "beta", "fn", 1, 0, None, true, None).unwrap();
+        let nc = db.insert_node(fc, "gamma", "fn", 1, 0, None, true, None).unwrap();
+        let _nd = db.insert_node(fd, "delta", "fn", 1, 0, None, true, None).unwrap();
+
+        db.insert_edge(na, nc, "calls").unwrap(); // pivot → related
+        db.insert_edge(nc, na, "calls").unwrap(); // related → pivot
+        db.insert_edge(na, nb, "calls").unwrap(); // pivot → pivot: must be excluded
+
+        let pivots = vec!["a.rs".to_string(), "b.rs".to_string()];
+        let related = db.get_related_files(&pivots, 10).unwrap();
+        assert_eq!(related, vec![("c.rs".to_string(), 2)]);
+
+        // Empty input short-circuits.
+        assert!(db.get_related_files(&[], 10).unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [Unreleased] - 0.9.2
+
+### Added
+
+- **`related_files` を実装**: `run_pipeline` レスポンスの `related_files`（長らく空配列の TODO だった）を実装。ピボットファイルから依存エッジ 1 ホップで繋がる他ファイルを、接続エッジ数順に最大 10 件返す（`{"path", "edge_count"}` 形式）。`GraphDB::get_related_files` を追加し、双方向エッジを集計（`daemon/src/graph/mod.rs`）
+- **デーモンのバージョン自己申告**: `getStats` レスポンスに `daemon_version` を追加。MCP `initialize` の `serverInfo.version` もハードコード "0.1.0" から `CARGO_PKG_VERSION` に修正。アップグレード後に旧バイナリが稼働し続けていることをクライアント側で検知可能に
+- **`comp.generateContext` コマンドを本実装**: タスク入力 → デーモン `run_pipeline` 呼び出し → 結果 JSON を新規エディタに表示（従来は入力を受けて何もしない殻実装だった）
+- **`comp.showImpactGraph` コマンドを本実装**: カーソル下のシンボルを `get_symbol` で照会し、依存・被依存情報の Markdown を新規エディタに表示（従来は位置情報のメッセージ表示のみ）
+
+### Changed
+
+- **`session_recall` の出力を要約化**: Symbols・Files の列挙を各エントリ先頭 5 件までにキャップし、超過分は `… (+N more)` 表記に変更。run_pipeline 自動記録エントリが数十件のシンボル・ファイルを含み、recall 出力自体がトークンを浪費していた問題を解消
+- **トークン推定を実ファイルサイズベースに刷新**: 従来の「シンボル数 × 50」ヒューリスティックから、インデックス済み `char_count / 4`（業界標準近似）ベースに変更。シンボル数が同じでも実サイズが 10 倍違うファイルを正しく区別できるように。未インデックス時のみシンボル数フォールバック。圧縮レベル係数（level 1: ×0.70、level 2: ×0.25）は据え置き
+
+### Fixed
+
+- **`session_recall` が Stop hook 記録を全件取りこぼすバグ**: `history-record.sh` が書く JSONL は `{"timestamp","request","outcome"}` 形式だが、`SessionCall` のデシリアライズが `query` フィールド必須・`symbols`/`files`/`tokens`/`stale` にデフォルトなしのため、フック書き込み行が全てパース失敗で黙って捨てられていた。`#[serde(alias = "request")]` と `#[serde(default)]` を追加して両形式を受理（`daemon/src/mcp/mod.rs`）。フック形式行の回帰テストを追加
+- **README_ja の Office 対応記述の矛盾を修正**: 「サポート予定（v1.0～）」とあった Office ドキュメント対応は v0.2〜v0.3 でリリース済みのため記述を実態に合わせた
+
+### Notes
+
+- Windows では実行中の `comp-daemon.exe` がロックされ `cargo build --release` が os error 5 で失敗する。ビルド前にデーモン停止が必要（今回 v0.8.6 の修正が反映されず旧バイナリが稼働し続けていた根本原因）
+- 残 TODO: `search/mod.rs` の tiktoken-rs による厳密トークン計測（依存追加が必要なため見送り）、`parser.rs` の AST 完全走査による import 抽出
+
+---
+
+## [0.9.1] - 2026-06-27
+
+### Added
+
+- **Markdown 圧縮対応**: Skeleton モード（level 2）で見出し・リスト・コードブロックを保持したまま Markdown を圧縮（`daemon/src/mcp/compress.rs`）
+- **AST 圧縮の言語拡大**: 既存の Rust/TypeScript/JavaScript/Python/Go/HTML に加え C、C++、Java に対応
+- **FAQ セクション追加**: README_ja に「LLM が直接ファイルを読み続ける」問題への 3 つの対処法を記載
+
+### Fixed
+
+- セットアップガイドのバッククォート整形崩れを修正（`src/mcp/AgentSetup.ts`、`copilot-instructions.md`）
+
+---
+
 ## [0.9.0] - 2026-06-27
 
 ### Added
