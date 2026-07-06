@@ -7,7 +7,7 @@
 // 4. Semantic search, impact analysis, token calculation
 
 use log::info;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 mod indexer;
 mod graph;
@@ -16,6 +16,24 @@ mod mcp;
 
 use graph::GraphDB;
 use search::SearchEngine;
+
+/// Live indexing progress, polled by `getStats` so the sidebar panel can show
+/// "Indexing... (<repo>)" instead of a static snapshot.
+///
+/// `active_jobs` is a counter rather than a bool so a repo added mid-startup
+/// (via "addRepo") doesn't have its background indexing task clear the flag
+/// out from under the still-running initial-workspace indexing task.
+#[derive(Default)]
+pub struct IndexingStatus {
+    pub active_jobs: u32,
+    pub current_repo: Option<String>,
+}
+
+impl IndexingStatus {
+    pub fn is_indexing(&self) -> bool {
+        self.active_jobs > 0
+    }
+}
 
 /// Application state shared across the MCP server.
 ///
@@ -31,6 +49,7 @@ pub struct AppState {
     pub search_engine: Arc<tokio::sync::Mutex<SearchEngine>>,
     pub session_id: String,
     pub workspace_root: String,
+    pub indexing_status: Arc<Mutex<IndexingStatus>>,
 }
 
 impl AppState {
@@ -64,7 +83,37 @@ impl AppState {
             search_engine: Arc::new(tokio::sync::Mutex::new(search_engine)),
             session_id,
             workspace_root: workspace_root.to_string(),
+            indexing_status: Arc::new(Mutex::new(IndexingStatus::default())),
         })
+    }
+
+    /// Mark the start of a background indexing job. Pairs with `end_indexing_job`.
+    /// A counter (not a bool) so a repo added mid-startup via "addRepo" doesn't
+    /// have its own background task clear `is_indexing` while the initial
+    /// workspace indexing task is still running.
+    pub fn begin_indexing_job(&self) {
+        if let Ok(mut status) = self.indexing_status.lock() {
+            status.active_jobs += 1;
+        }
+    }
+
+    /// Record which repo the current indexing pass is working on, for display
+    /// in the sidebar panel ("Indexing... (<repo>)").
+    pub fn set_current_repo(&self, repo_alias: &str) {
+        if let Ok(mut status) = self.indexing_status.lock() {
+            status.current_repo = Some(repo_alias.to_string());
+        }
+    }
+
+    /// Mark the end of a background indexing job. Clears `current_repo` only
+    /// once no other job is still running.
+    pub fn end_indexing_job(&self) {
+        if let Ok(mut status) = self.indexing_status.lock() {
+            status.active_jobs = status.active_jobs.saturating_sub(1);
+            if status.active_jobs == 0 {
+                status.current_repo = None;
+            }
+        }
     }
 }
 
@@ -121,6 +170,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let additional_paths = indexer::Indexer::read_additional_paths(&workspace_root);
         let repos = build_repo_list(&root_for_idx, &additional_paths);
         tokio::spawn(async move {
+            state_for_idx.begin_indexing_job();
+
             // Register every repo first so the MCP layer can resolve qualified
             // paths ("<alias>/<rel>") and scope queries by alias.
             for (alias, root) in &repos {
@@ -132,6 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("Starting initial workspace indexing ({} repo(s))...", repos.len());
             // WHY: Load hashes from previous session database to only re-index modified files.
             for (i, (alias, root)) in repos.iter().enumerate() {
+                state_for_idx.set_current_repo(alias);
                 if i == 0 {
                     info!("Indexing workspace root [{}]: {}", alias, root);
                 } else {
@@ -158,6 +210,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(e) => log::warn!("TF-IDF index build failed: {}", e),
                 }
             }
+
+            state_for_idx.end_indexing_job();
         });
     }
 

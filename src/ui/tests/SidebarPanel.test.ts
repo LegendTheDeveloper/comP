@@ -193,6 +193,92 @@ describe("SidebarPanel", () => {
     expect(callbacks.onStopRequest.calledOnce).to.be.true;
   });
 
+  it("handleWebviewMessage('addRepo') adds the repo picked via showOpenDialog", async () => {
+    const vscode = require("vscode");
+    const showOpenDialog = sinon
+      .stub(vscode.window, "showOpenDialog")
+      .resolves([{ fsPath: "/some/new/repo" }]);
+
+    const mockDaemon: any = {
+      isRunning: () => true,
+      getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),
+      addRepo: sinon.stub().resolves({ alias: "repo", root_path: "/some/new/repo" }),
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setDaemonManager(mockDaemon);
+
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "addRepo" });
+
+    expect(mockDaemon.addRepo.calledWith("/some/new/repo")).to.be.true;
+    showOpenDialog.restore();
+  });
+
+  it("handleWebviewMessage('addRepo') does nothing when the dialog is cancelled", async () => {
+    const vscode = require("vscode");
+    const showOpenDialog = sinon.stub(vscode.window, "showOpenDialog").resolves(undefined);
+
+    const mockDaemon: any = {
+      isRunning: () => true,
+      getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),
+      addRepo: sinon.stub().resolves({ alias: "repo", root_path: "/some/new/repo" }),
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setDaemonManager(mockDaemon);
+
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "addRepo" });
+
+    expect(mockDaemon.addRepo.called).to.be.false;
+    showOpenDialog.restore();
+  });
+
+  it("handleWebviewMessage('removeRepo') removes the repo after confirmation", async () => {
+    const vscode = require("vscode");
+    (vscode.window as any).showWarningMessage = sinon.stub().resolves("Remove");
+
+    const mockDaemon: any = {
+      isRunning: () => true,
+      getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),
+      removeRepo: sinon.stub().resolves({ alias: "Alpha", removed_files: 3 }),
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setDaemonManager(mockDaemon);
+
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "removeRepo", alias: "Alpha" });
+
+    expect(mockDaemon.removeRepo.calledWith("Alpha")).to.be.true;
+  });
+
+  it("handleWebviewMessage('removeRepo') skips removal when the confirmation is dismissed", async () => {
+    const vscode = require("vscode");
+    (vscode.window as any).showWarningMessage = sinon.stub().resolves(undefined);
+
+    const mockDaemon: any = {
+      isRunning: () => true,
+      getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),
+      removeRepo: sinon.stub().resolves({ alias: "Alpha", removed_files: 3 }),
+    };
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    panel.setDaemonManager(mockDaemon);
+
+    const handler = mockWebviewView.webview.onDidReceiveMessage.firstCall.args[0];
+    await handler({ command: "removeRepo", alias: "Alpha" });
+
+    expect(mockDaemon.removeRepo.called).to.be.false;
+  });
+
+  it("getHtml() includes the Add Repo button", () => {
+    const panel = SidebarPanel.createOrShow("/path", null, mockContext);
+    panel.resolveWebviewView(mockWebviewView, {} as any, {} as any);
+    expect(mockWebviewView.webview.html).to.include("addRepoBtn");
+  });
+
   it("dispose() clears the stats interval without throwing", () => {
     const mockDaemon: any = {
       getStats: sinon.stub().resolves({ total_files: 0, total_nodes: 0, total_edges: 0 }),

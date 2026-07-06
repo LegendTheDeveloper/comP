@@ -230,6 +230,17 @@ fn repo_alias_of(repos: &[(String, String)], qualified: &str) -> Option<String> 
         .map(|(alias, _)| alias.clone())
 }
 
+/// Compare two filesystem paths for equality, canonicalizing both first so
+/// differences in separators, case, or relative segments don't cause a false
+/// mismatch. Falls back to a raw string comparison if either fails to resolve
+/// (e.g. the path no longer exists).
+fn same_path(a: &str, b: &str) -> bool {
+    match (std::path::Path::new(a).canonicalize(), std::path::Path::new(b).canonicalize()) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
+}
+
 /// Validate that `path_str` resolves inside the main root or one of the
 /// registered repo roots. Prevents path-traversal from MCP callers while
 /// allowing absolute paths into any indexed repo.
@@ -342,6 +353,8 @@ impl MCPServer {
                 "forceReindex" => self.handle_force_reindex().await,
                 "indexFile" => self.handle_index_file(params).await,
                 "removeFile" => self.handle_remove_file(params).await,
+                "addRepo" => self.handle_add_repo(params).await,
+                "removeRepo" => self.handle_remove_repo(params).await,
                 "session_recall" => self.handle_session_recall(params).await,
                 "session_log" => self.handle_session_log(params).await,
                 "get_symbol" => self.handle_get_symbol(params).await,
@@ -1207,6 +1220,109 @@ impl MCPServer {
         }))
     }
 
+    /// Register a new repo root and index it in the background.
+    ///
+    /// Called by the sidebar panel's "+ Add" button. Registration (upsert_repo
+    /// + writing `.comp/config.json`) happens synchronously so the response
+    /// reflects a durable change immediately; the actual file walk/parse runs
+    /// in a background task (like initial workspace indexing) since it can
+    /// take much longer than the daemon's request timeout.
+    pub async fn handle_add_repo(&self, params: Value) -> Result<Value> {
+        let path_str = params["path"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'path' parameter"))?
+            .to_string();
+
+        if !std::path::Path::new(&path_str).is_dir() {
+            return Err(anyhow!("Path does not exist or is not a directory: {}", path_str));
+        }
+
+        let existing = self.state.graph_db.list_repos()?;
+        if existing.iter().any(|(_, _, root)| same_path(root, &path_str)) {
+            return Err(anyhow!("This path is already registered"));
+        }
+
+        let used: std::collections::HashSet<String> =
+            existing.iter().map(|(_, alias, _)| alias.clone()).collect();
+        let base = crate::indexer::derive_alias(&path_str);
+        let mut alias = base.clone();
+        let mut n = 2;
+        while used.contains(&alias) {
+            alias = format!("{}-{}", base, n);
+            n += 1;
+        }
+
+        self.state.graph_db.upsert_repo(&alias, &path_str)?;
+        crate::indexer::Indexer::add_additional_path(&self.state.workspace_root, &path_str)
+            .unwrap_or_else(|e| log::warn!("Failed to persist additional_path {}: {}", path_str, e));
+        info!("handle_add_repo: registered [{}]: {}", alias, path_str);
+
+        let state = Arc::clone(&self.state);
+        let alias_for_task = alias.clone();
+        let root_for_task = path_str.clone();
+        tokio::spawn(async move {
+            state.begin_indexing_job();
+            state.set_current_repo(&alias_for_task);
+
+            let hashes = state.graph_db.get_all_file_hashes().unwrap_or_default();
+            let mut idx = crate::indexer::Indexer::with_alias(&root_for_task, &alias_for_task);
+            match idx.index_workspace(Some(&hashes), &state.graph_db).await {
+                Ok((total, indexed, symbols)) => info!(
+                    "Repo [{}]: indexed {}/{} files, {} symbols",
+                    alias_for_task, indexed, total, symbols
+                ),
+                Err(e) => log::warn!("Failed to index new repo {} ({}): {}", alias_for_task, root_for_task, e),
+            }
+
+            if let Ok(all_symbols) = state.graph_db.get_all_symbols_for_search() {
+                let mut se = state.search_engine.lock().await;
+                if let Err(e) = se.build_index(&all_symbols) {
+                    log::warn!("TF-IDF index build failed after addRepo: {}", e);
+                }
+            }
+
+            state.end_indexing_job();
+        });
+
+        Ok(json!({ "status": "ok", "alias": alias, "root_path": path_str }))
+    }
+
+    /// Unregister a repo and delete every file/node/edge indexed under it.
+    ///
+    /// Called by the sidebar panel's per-repo remove button. Refuses to
+    /// remove the workspace root itself — there is no daemon without it.
+    pub async fn handle_remove_repo(&self, params: Value) -> Result<Value> {
+        let alias = params["alias"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing 'alias' parameter"))?
+            .to_string();
+
+        let existing = self.state.graph_db.list_repos()?;
+        let (_, _, root_path) = existing
+            .iter()
+            .find(|(_, a, _)| a == &alias)
+            .ok_or_else(|| anyhow!("Repo not found: {}", alias))?
+            .clone();
+
+        if same_path(&root_path, &self.state.workspace_root) {
+            return Err(anyhow!("Cannot remove the workspace root repo"));
+        }
+
+        let removed = self.state.graph_db.delete_repo(&alias)?;
+        crate::indexer::Indexer::remove_additional_path(&self.state.workspace_root, &root_path)
+            .unwrap_or_else(|e| log::warn!("Failed to update additional_paths after removing {}: {}", alias, e));
+        info!("handle_remove_repo: removed [{}] ({} files)", alias, removed);
+
+        if let Ok(all_symbols) = self.state.graph_db.get_all_symbols_for_search() {
+            let mut se = self.state.search_engine.lock().await;
+            if let Err(e) = se.build_index(&all_symbols) {
+                log::warn!("TF-IDF index build failed after removeRepo: {}", e);
+            }
+        }
+
+        Ok(json!({ "status": "ok", "alias": alias, "removed_files": removed }))
+    }
+
     /// Get index statistics (file count, node count, edge count)
     ///
     /// # Response:
@@ -1230,16 +1346,30 @@ impl MCPServer {
             .unwrap_or_else(|| "0%".to_string());
         let avg_tokens_per_query = sent.checked_div(queries).unwrap_or(0);
 
+        let workspace_root = self.state.workspace_root.clone();
         let repos: Vec<Value> = self.state.graph_db.get_repo_stats()
             .unwrap_or_else(|e| { log::warn!("get_repo_stats failed in get_stats: {}", e); Vec::new() })
             .into_iter()
-            .map(|(alias, root_path, files, nodes)| json!({
-                "alias": alias,
-                "root_path": root_path,
-                "files": files,
-                "nodes": nodes
-            }))
+            .map(|(alias, root_path, files, nodes)| {
+                let is_root = same_path(&root_path, &workspace_root);
+                json!({
+                    "alias": alias,
+                    "root_path": root_path,
+                    "files": files,
+                    "nodes": nodes,
+                    "is_root": is_root
+                })
+            })
             .collect();
+
+        let indexing = {
+            let status = self.state.indexing_status.lock()
+                .map_err(|e| anyhow!("indexing_status mutex poisoned: {}", e))?;
+            json!({
+                "is_indexing": status.is_indexing(),
+                "current_repo": status.current_repo
+            })
+        };
 
         info!("handle_get_stats: returning stats - files: {}, nodes: {}, edges: {}, repos: {}",
               file_count, node_count, edge_count, repos.len());
@@ -1253,7 +1383,8 @@ impl MCPServer {
             "queries_count": queries,
             "efficiency": efficiency,
             "avg_tokens_per_query": avg_tokens_per_query,
-            "repos": repos
+            "repos": repos,
+            "indexing": indexing
         }))
     }
 
@@ -2425,6 +2556,156 @@ mod tests {
         assert_eq!(alpha["files"].as_i64().unwrap(), 2);
         let beta = repos.iter().find(|r| r["alias"] == "Beta").expect("Beta present");
         assert_eq!(beta["files"].as_i64().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_handle_get_stats_includes_indexing_status_when_idle() {
+        let temp_dir = std::env::temp_dir().join("comP_test_indexing_status_idle");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.expect("AppState::new"));
+        let server = MCPServer::new(state);
+        let response = server.handle_get_stats().await.expect("handle_get_stats");
+
+        assert_eq!(response["indexing"]["is_indexing"], false);
+        assert!(response["indexing"]["current_repo"].is_null());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_handle_add_repo_registers_indexes_and_persists_config() {
+        let workspace_dir = std::env::temp_dir().join("comP_test_add_repo_workspace");
+        let new_repo_dir = std::env::temp_dir().join("comP_test_add_repo_target");
+        let _ = std::fs::remove_dir_all(&workspace_dir);
+        let _ = std::fs::remove_dir_all(&new_repo_dir);
+        std::fs::create_dir_all(&workspace_dir).unwrap();
+        std::fs::create_dir_all(&new_repo_dir).unwrap();
+        std::fs::write(new_repo_dir.join("main.rs"), "fn main() {}").unwrap();
+
+        let workspace_root = workspace_dir.to_str().unwrap().to_string();
+        let new_repo_path = new_repo_dir.to_str().unwrap().to_string();
+
+        let state = Arc::new(crate::AppState::new(&workspace_root).await.expect("AppState::new"));
+        let server = MCPServer::new(state.clone());
+
+        let response = server
+            .handle_add_repo(json!({ "path": new_repo_path }))
+            .await
+            .expect("handle_add_repo");
+        let alias = response["alias"].as_str().expect("alias in response").to_string();
+        assert_eq!(response["root_path"], new_repo_path);
+
+        // Registered synchronously, before background indexing even starts.
+        let repos = state.graph_db.list_repos().expect("list_repos");
+        assert!(repos.iter().any(|(_, a, r)| a == &alias && r == &new_repo_path));
+
+        // .comp/config.json's additional_paths was updated to survive a restart.
+        let config_content = std::fs::read_to_string(workspace_dir.join(".comp/config.json")).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+        let paths = config["additional_paths"].as_array().expect("additional_paths array");
+        assert!(paths.iter().any(|v| v.as_str() == Some(new_repo_path.as_str())));
+
+        // Background indexing should pick up the one file shortly.
+        let mut files_indexed = 0;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let stats = state.graph_db.get_repo_stats().expect("get_repo_stats");
+            files_indexed = stats.iter().find(|(a, ..)| a == &alias).map(|(_, _, f, _)| *f).unwrap_or(0);
+            if files_indexed > 0 {
+                break;
+            }
+        }
+        assert_eq!(files_indexed, 1, "expected the one file in the new repo to be indexed");
+
+        let _ = std::fs::remove_dir_all(&workspace_dir);
+        let _ = std::fs::remove_dir_all(&new_repo_dir);
+    }
+
+    #[tokio::test]
+    async fn test_handle_add_repo_rejects_nonexistent_path() {
+        let temp_dir = std::env::temp_dir().join("comP_test_add_repo_nonexistent");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.expect("AppState::new"));
+        let server = MCPServer::new(state);
+
+        let result = server
+            .handle_add_repo(json!({ "path": "C:\\this\\path\\does\\not\\exist\\at\\all" }))
+            .await;
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_handle_add_repo_rejects_duplicate_path() {
+        let workspace_dir = std::env::temp_dir().join("comP_test_add_repo_dup_workspace");
+        let new_repo_dir = std::env::temp_dir().join("comP_test_add_repo_dup_target");
+        let _ = std::fs::remove_dir_all(&workspace_dir);
+        let _ = std::fs::remove_dir_all(&new_repo_dir);
+        std::fs::create_dir_all(&workspace_dir).unwrap();
+        std::fs::create_dir_all(&new_repo_dir).unwrap();
+
+        let workspace_root = workspace_dir.to_str().unwrap().to_string();
+        let new_repo_path = new_repo_dir.to_str().unwrap().to_string();
+
+        let state = Arc::new(crate::AppState::new(&workspace_root).await.expect("AppState::new"));
+        let server = MCPServer::new(state);
+
+        server.handle_add_repo(json!({ "path": new_repo_path.clone() })).await.expect("first add succeeds");
+        let second = server.handle_add_repo(json!({ "path": new_repo_path })).await;
+        assert!(second.is_err(), "adding the same path twice should be rejected");
+
+        let _ = std::fs::remove_dir_all(&workspace_dir);
+        let _ = std::fs::remove_dir_all(&new_repo_dir);
+    }
+
+    #[tokio::test]
+    async fn test_handle_remove_repo_rejects_workspace_root() {
+        let temp_dir = std::env::temp_dir().join("comP_test_remove_repo_root");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let workspace_root = temp_dir.to_str().unwrap().to_string();
+        let state = Arc::new(crate::AppState::new(&workspace_root).await.expect("AppState::new"));
+        state.graph_db.upsert_repo("RootAlias", &workspace_root).expect("upsert_repo root");
+
+        let server = MCPServer::new(state);
+        let result = server.handle_remove_repo(json!({ "alias": "RootAlias" })).await;
+        assert!(result.is_err(), "removing the workspace root repo should be rejected");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_handle_remove_repo_deletes_files_and_config_entry() {
+        let temp_dir = std::env::temp_dir().join("comP_test_remove_repo_files");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let workspace_root = temp_dir.to_str().unwrap().to_string();
+        let state = Arc::new(crate::AppState::new(&workspace_root).await.expect("AppState::new"));
+        state.graph_db.upsert_repo("Gamma", "/tmp/Gamma").expect("upsert_repo Gamma");
+        state.graph_db.upsert_file("Gamma/a.rs", "hash1", "rust", 10).expect("upsert_file a.rs");
+        state.graph_db.upsert_file("Gamma/b.rs", "hash2", "rust", 10).expect("upsert_file b.rs");
+        crate::indexer::Indexer::add_additional_path(&workspace_root, "/tmp/Gamma").expect("add_additional_path");
+
+        let server = MCPServer::new(state.clone());
+        let response = server.handle_remove_repo(json!({ "alias": "Gamma" })).await.expect("handle_remove_repo");
+        assert_eq!(response["removed_files"].as_i64().unwrap(), 2);
+
+        let repos = state.graph_db.list_repos().expect("list_repos");
+        assert!(!repos.iter().any(|(_, a, _)| a == "Gamma"));
+
+        let config_content = std::fs::read_to_string(temp_dir.join(".comp/config.json")).unwrap();
+        let config: serde_json::Value = serde_json::from_str(&config_content).unwrap();
+        let paths = config["additional_paths"].as_array().expect("additional_paths array");
+        assert!(!paths.iter().any(|v| v.as_str() == Some("/tmp/Gamma")));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[tokio::test]

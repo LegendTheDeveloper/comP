@@ -242,6 +242,10 @@ export class DaemonManager {
       const METHOD_TIMEOUTS: Record<string, number> = {
         getStats: 5000,
         forceReindex: 120_000,
+        // removeRepo deletes files/nodes/edges and rebuilds the TF-IDF index
+        // synchronously before responding; addRepo only registers the repo
+        // synchronously and indexes it in a background task, so it stays fast.
+        removeRepo: 30_000,
       };
       const timeoutMs = METHOD_TIMEOUTS[method] ?? 3000;
       const timeout = setTimeout(() => {
@@ -302,7 +306,8 @@ export class DaemonManager {
     tokens_saved?: number;
     queries_count?: number;
     avg_tokens_per_query?: number;
-    repos?: Array<{ alias: string; root_path: string; files: number; nodes: number }>;
+    repos?: Array<{ alias: string; root_path: string; files: number; nodes: number; is_root: boolean }>;
+    indexing?: { is_indexing: boolean; current_repo: string | null };
   }> {
     const result = await this.request("getStats", {});
     if (!result || typeof result !== "object") {
@@ -317,9 +322,21 @@ export class DaemonManager {
             root_path: String(repo["root_path"] ?? ""),
             files: Number(repo["files"]) || 0,
             nodes: Number(repo["nodes"]) || 0,
+            is_root: Boolean(repo["is_root"]),
           };
         })
       : undefined;
+    const indexingRaw = stats["indexing"];
+    const indexing =
+      indexingRaw && typeof indexingRaw === "object"
+        ? {
+            is_indexing: Boolean((indexingRaw as Record<string, unknown>)["is_indexing"]),
+            current_repo:
+              typeof (indexingRaw as Record<string, unknown>)["current_repo"] === "string"
+                ? ((indexingRaw as Record<string, unknown>)["current_repo"] as string)
+                : null,
+          }
+        : undefined;
     return {
       total_files: Number(stats["total_files"]) || 0,
       total_nodes: Number(stats["total_nodes"]) || 0,
@@ -330,6 +347,41 @@ export class DaemonManager {
       queries_count: stats["queries_count"] !== undefined ? Number(stats["queries_count"]) : undefined,
       avg_tokens_per_query: stats["avg_tokens_per_query"] !== undefined ? Number(stats["avg_tokens_per_query"]) : undefined,
       repos,
+      indexing,
+    };
+  }
+
+  /**
+   * Register a new repo root and start indexing it in the background.
+   *
+   * Throws if the path doesn't exist or is already registered.
+   */
+  async addRepo(path: string): Promise<{ alias: string; root_path: string }> {
+    const result = await this.request("addRepo", { path });
+    if (!result || typeof result !== "object") {
+      throw new Error("Invalid addRepo response from daemon");
+    }
+    const res = result as Record<string, unknown>;
+    return {
+      alias: String(res["alias"] ?? ""),
+      root_path: String(res["root_path"] ?? ""),
+    };
+  }
+
+  /**
+   * Unregister a repo and delete its indexed files/nodes/edges.
+   *
+   * Throws if the alias is unknown or refers to the workspace root.
+   */
+  async removeRepo(alias: string): Promise<{ alias: string; removed_files: number }> {
+    const result = await this.request("removeRepo", { alias });
+    if (!result || typeof result !== "object") {
+      throw new Error("Invalid removeRepo response from daemon");
+    }
+    const res = result as Record<string, unknown>;
+    return {
+      alias: String(res["alias"] ?? ""),
+      removed_files: Number(res["removed_files"]) || 0,
     };
   }
 

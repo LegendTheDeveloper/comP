@@ -417,6 +417,105 @@ describe('DaemonManager', () => {
     });
   });
 
+  describe('getStats()', () => {
+    it('should parse the repos breakdown and indexing status', async () => {
+      const promise = daemonManager.getStats();
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit(
+        'data',
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: req.id,
+          result: {
+            total_files: 10,
+            total_nodes: 20,
+            total_edges: 5,
+            repos: [
+              { alias: 'Desktop', root_path: 'C:\\Desktop', files: 7, nodes: 14, is_root: true },
+              { alias: 'Core', root_path: 'C:\\Core', files: 3, nodes: 6, is_root: false },
+            ],
+            indexing: { is_indexing: true, current_repo: 'Core' },
+          },
+        }) + '\n'
+      );
+      const result = await promise;
+      expect(result.repos).to.have.length(2);
+      expect(result.repos![0]).to.deep.equal({
+        alias: 'Desktop',
+        root_path: 'C:\\Desktop',
+        files: 7,
+        nodes: 14,
+        is_root: true,
+      });
+      expect(result.indexing).to.deep.equal({ is_indexing: true, current_repo: 'Core' });
+    });
+
+    it('should default indexing to undefined when absent from the response', async () => {
+      const promise = daemonManager.getStats();
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit(
+        'data',
+        JSON.stringify({ jsonrpc: '2.0', id: req.id, result: { total_files: 1, total_nodes: 1, total_edges: 0 } }) + '\n'
+      );
+      const result = await promise;
+      expect(result.indexing).to.be.undefined;
+      expect(result.repos).to.be.undefined;
+    });
+  });
+
+  describe('addRepo()', () => {
+    it('should send the path and parse alias/root_path from the response', async () => {
+      const promise = daemonManager.addRepo('/some/new/repo');
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      expect(req.method).to.equal('addRepo');
+      expect(req.params).to.deep.equal({ path: '/some/new/repo' });
+      mockStdout.emit(
+        'data',
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: req.id,
+          result: { status: 'ok', alias: 'repo', root_path: '/some/new/repo' },
+        }) + '\n'
+      );
+      const result = await promise;
+      expect(result).to.deep.equal({ alias: 'repo', root_path: '/some/new/repo' });
+    });
+
+    it('should reject when the daemon returns an error (e.g. duplicate path)', async () => {
+      const promise = daemonManager.addRepo('/some/new/repo');
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      mockStdout.emit(
+        'data',
+        JSON.stringify({ jsonrpc: '2.0', id: req.id, error: { code: -1, message: 'already registered' } }) + '\n'
+      );
+      try {
+        await promise;
+        expect.fail('should have thrown');
+      } catch (e: any) {
+        expect(e.message).to.equal('already registered');
+      }
+    });
+  });
+
+  describe('removeRepo()', () => {
+    it('should send the alias and parse removed_files from the response', async () => {
+      const promise = daemonManager.removeRepo('Alpha');
+      const req = JSON.parse(mockProcess.stdin.write.firstCall.args[0]);
+      expect(req.method).to.equal('removeRepo');
+      expect(req.params).to.deep.equal({ alias: 'Alpha' });
+      mockStdout.emit(
+        'data',
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: req.id,
+          result: { status: 'ok', alias: 'Alpha', removed_files: 12 },
+        }) + '\n'
+      );
+      const result = await promise;
+      expect(result).to.deep.equal({ alias: 'Alpha', removed_files: 12 });
+    });
+  });
+
   describe('isRunning()', () => {
     it('should return true when isReady and process exist', () => {
       expect(daemonManager.isRunning()).to.be.true;

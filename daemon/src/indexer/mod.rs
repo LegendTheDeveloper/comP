@@ -105,6 +105,60 @@ impl Indexer {
             .unwrap_or_default()
     }
 
+    /// Append `new_path` to `.comp/config.json`'s `additional_paths`, preserving
+    /// every other key (`exclude`, `max_nodes`, `on_limit_exceeded`, ...). No-op
+    /// if `new_path` is already present. Creates the file (and its `.comp/`
+    /// directory) if it doesn't exist yet.
+    ///
+    /// WHY: repos added at runtime (via the "addRepo" daemon method) must
+    /// survive a daemon restart, which re-derives its repo list solely from
+    /// this file (see `main.rs build_repo_list` / `read_additional_paths`).
+    pub fn add_additional_path(workspace_root: &str, new_path: &str) -> Result<()> {
+        let comp_dir = std::path::Path::new(workspace_root).join(".comp");
+        std::fs::create_dir_all(&comp_dir)?;
+        let config_path = comp_dir.join("config.json");
+
+        let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+        let mut json: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}));
+        if !json.is_object() {
+            json = serde_json::json!({});
+        }
+
+        let entry = json
+            .as_object_mut()
+            .expect("json forced to object above")
+            .entry("additional_paths")
+            .or_insert_with(|| serde_json::json!([]));
+        if !entry.is_array() {
+            *entry = serde_json::json!([]);
+        }
+        let arr = entry.as_array_mut().expect("forced to array above");
+        if !arr.iter().any(|v| v.as_str() == Some(new_path)) {
+            arr.push(serde_json::Value::String(new_path.to_string()));
+        }
+
+        std::fs::write(&config_path, serde_json::to_string_pretty(&json)?)?;
+        Ok(())
+    }
+
+    /// Remove `target_path` from `.comp/config.json`'s `additional_paths`, if
+    /// present. Leaves every other key untouched. No-op if the config file
+    /// doesn't exist or has no `additional_paths` array.
+    pub fn remove_additional_path(workspace_root: &str, target_path: &str) -> Result<()> {
+        let config_path = std::path::Path::new(workspace_root).join(".comp/config.json");
+        let content = std::fs::read_to_string(&config_path).unwrap_or_default();
+        if content.is_empty() {
+            return Ok(());
+        }
+        let mut json: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
+        if let Some(arr) = json.get_mut("additional_paths").and_then(|v| v.as_array_mut()) {
+            arr.retain(|v| v.as_str() != Some(target_path));
+        }
+        std::fs::write(&config_path, serde_json::to_string_pretty(&json)?)?;
+        Ok(())
+    }
+
     /// Load user-defined exclude patterns from `.comp/config.json`.
     ///
     /// WHY: VS Code's `comp.exclude` setting is synced here by the extension.

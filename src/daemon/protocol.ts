@@ -45,6 +45,14 @@ export interface RepoStat {
   root_path: string;
   files: number;
   nodes: number;
+  is_root: boolean;
+}
+
+// Live indexing progress, polled via getStats so the sidebar panel can show
+// which repo is currently being walked/parsed.
+export interface IndexingInfo {
+  is_indexing: boolean;
+  current_repo: string | null;
 }
 
 export interface StatsResponse {
@@ -53,4 +61,25 @@ export interface StatsResponse {
   total_edges: number;
   indexed_time_ms: number;
   repos?: RepoStat[];
+  indexing?: IndexingInfo;
+}
+
+export interface AddRepoRequest {
+  path: string;
+}
+
+export interface AddRepoResponse {
+  status: "ok";
+  alias: string;
+  root_path: string;
+}
+
+export interface RemoveRepoRequest {
+  alias: string;
+}
+
+export interface RemoveRepoResponse {
+  status: "ok";
+  alias: string;
+  removed_files: number;
 }

@@ -474,6 +474,47 @@ impl GraphDB {
         Ok(removed)
     }
 
+    /// Remove a registered repo and every file/node/edge indexed under its
+    /// "<alias>/<rel>" prefix. Same manual edges -> nodes -> files cascade as
+    /// `delete_file` (foreign_keys pragma is not enabled), applied in bulk to
+    /// every file under the alias, followed by the `repos` row itself.
+    ///
+    /// Returns the number of files removed. Caller is responsible for deciding
+    /// whether `alias` is allowed to be removed (e.g. the workspace root
+    /// shouldn't be) and for rebuilding the search index afterward.
+    pub fn delete_repo(&self, alias: &str) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let pattern = format!("{}/%", alias);
+
+        let file_ids: Vec<i64> = {
+            let mut stmt = conn.prepare("SELECT id FROM files WHERE path LIKE ?")?;
+            let ids = stmt.query_map([&pattern], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            ids
+        };
+
+        for fid in &file_ids {
+            let node_ids: Vec<i64> = {
+                let mut stmt = conn.prepare("SELECT id FROM nodes WHERE file_id = ?")?;
+                let ids = stmt.query_map([fid], |row| row.get::<_, i64>(0))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                ids
+            };
+            for nid in &node_ids {
+                conn.execute(
+                    "DELETE FROM edges WHERE from_id = ? OR to_id = ?",
+                    rusqlite::params![nid, nid],
+                )?;
+            }
+            conn.execute("DELETE FROM nodes WHERE file_id = ?", [fid])?;
+        }
+
+        let removed = conn.execute("DELETE FROM files WHERE path LIKE ?", [&pattern])?;
+        conn.execute("DELETE FROM repos WHERE alias = ?", [alias])?;
+
+        Ok(removed)
+    }
+
     /// Load all (path → hash) entries from the DB for incremental indexing
     ///
     /// WHY: Passing these to index_workspace lets the indexer skip files whose

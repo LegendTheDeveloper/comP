@@ -173,6 +173,12 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         case "reindex":
           await vscode.commands.executeCommand("comp.forceReindex");
           break;
+        case "addRepo":
+          await this.handleAddRepo();
+          break;
+        case "removeRepo":
+          await this.handleRemoveRepo(String(message.alias ?? ""));
+          break;
         default:
           console.warn("[comP] Unknown message command:", message.command);
       }
@@ -236,6 +242,72 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     }
   }
 
+  /**
+   * Prompts for a folder via the native OS picker and registers it as a new
+   * repo. Indexing runs in the daemon's background; refreshStats() picks up
+   * progress on the next poll (or immediately, since we trigger one here).
+   */
+  private async handleAddRepo(): Promise<void> {
+    if (!this.daemonManager) {
+      this.addLog("✗ Daemon not running");
+      return;
+    }
+
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFolders: true,
+      canSelectFiles: false,
+      canSelectMany: false,
+      openLabel: "Add Repository",
+    });
+    if (!uris || uris.length === 0) {
+      return;
+    }
+    const repoPath = uris[0].fsPath;
+
+    try {
+      this.addLog(`Adding repo: ${repoPath}`);
+      const result = await this.daemonManager.addRepo(repoPath);
+      this.addLog(`✓ Repo added: ${result.alias} (indexing in background)`);
+      await this.refreshStats();
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.addLog(`✗ Failed to add repo: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Confirms with the user (deletion is not undoable short of re-adding and
+   * re-indexing) then removes a repo and its indexed files/nodes/edges.
+   */
+  private async handleRemoveRepo(alias: string): Promise<void> {
+    if (!alias) {
+      return;
+    }
+    if (!this.daemonManager) {
+      this.addLog("✗ Daemon not running");
+      return;
+    }
+
+    const confirmed = await vscode.window.showWarningMessage(
+      `Remove "${alias}" from the index? This deletes its indexed files, symbols, and dependencies.`,
+      { modal: true },
+      "Remove"
+    );
+    if (confirmed !== "Remove") {
+      return;
+    }
+
+    try {
+      this.addLog(`Removing repo: ${alias}`);
+      const result = await this.daemonManager.removeRepo(alias);
+      this.addLog(`✓ Repo removed: ${result.alias} (${result.removed_files} files)`);
+      await this.refreshStats();
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.addLog(`✗ Failed to remove repo: ${errorMsg}`);
+    }
+  }
+
   private async refreshStats(): Promise<void> {
     if (!this.view) {
       return;
@@ -293,6 +365,9 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
           queriesCount,
           lastAgentConnection: lastAgentConnectionStr,
           repos: stats.repos || [],
+          indexing: stats.indexing
+            ? { isIndexing: stats.indexing.is_indexing, currentRepo: stats.indexing.current_repo }
+            : undefined,
         },
       });
     } catch (error) {
@@ -384,6 +459,10 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     .status-indicator { display: flex; align-items: center; gap: 6px; font-size: 11px; }
     .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-errorForeground); flex-shrink: 0; }
     .status-dot.running { background: #4CAF50; }
+    .status-dot.indexing { background: var(--vscode-terminal-ansiYellow, #e2c08d); animation: comp-pulse 1.2s ease-in-out infinite; }
+    @keyframes comp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+    #indexingIndicator { margin-top: 4px; }
+    #indexingText { color: var(--vscode-terminal-ansiYellow, #e2c08d); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .stats-container { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
     .stat-item {
       padding: 10px 8px;
@@ -401,13 +480,15 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       border-radius: 4px;
       margin-bottom: 12px;
     }
-    .repos-section h3 { font-size: 11px; font-weight: 600; margin-bottom: 6px; }
+    .repos-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .repos-header h3 { font-size: 11px; font-weight: 600; }
+    .repos-header button { flex: 0; padding: 2px 8px; font-size: 10px; }
     .repos-content { max-height: 160px; overflow-y: auto; }
     .repo-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       padding: 4px 2px;
       font-size: 11px;
       border-bottom: 1px solid var(--vscode-editorWidget-border);
@@ -418,9 +499,22 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      flex: 1;
+      min-width: 0;
     }
     .repo-counts { flex-shrink: 0; color: var(--vscode-terminal-ansiBlue); font-weight: 600; }
     .repo-counts .repo-nodes { opacity: 0.6; font-weight: normal; margin-left: 4px; }
+    .repo-remove-btn {
+      flex: 0;
+      padding: 0 5px;
+      font-size: 11px;
+      line-height: 16px;
+      background: transparent;
+      color: var(--vscode-errorForeground);
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 3px;
+    }
+    .repo-remove-btn:hover { background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.15)); }
     .logs-section {
       padding: 10px;
       background: var(--vscode-input-background);
@@ -458,6 +552,10 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       <div class="status-dot" id="statusDot"></div>
       <span id="statusText">Daemon stopped</span>
     </div>
+    <div class="status-indicator" id="indexingIndicator" style="display:none;">
+      <div class="status-dot indexing"></div>
+      <span id="indexingText">Indexing...</span>
+    </div>
   </div>
   <div class="stats-container">
     <div class="stat-item"><div class="stat-label">Files</div><div class="stat-value" id="fileCount">--</div></div>
@@ -480,7 +578,10 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     </div>
   </div>
   <div class="repos-section" id="reposSection" style="display:none;">
-    <h3>Repositories</h3>
+    <div class="repos-header">
+      <h3>Repositories</h3>
+      <button id="addRepoBtn" onclick="addRepo()">+ Add</button>
+    </div>
     <div class="repos-content" id="reposContent"></div>
   </div>
   <div class="logs-section">
@@ -493,6 +594,8 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     function stopDaemon() { vscode.postMessage({ command: 'stopDaemon' }); }
     function clearLogs() { vscode.postMessage({ command: 'clearLogs' }); }
     function reindex() { vscode.postMessage({ command: 'reindex' }); }
+    function addRepo() { vscode.postMessage({ command: 'addRepo' }); }
+    function removeRepo(alias) { vscode.postMessage({ command: 'removeRepo', alias }); }
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (msg.type === 'statsUpdate') {
@@ -519,17 +622,33 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
             row.className = 'repo-row';
             const alias = document.createElement('span');
             alias.className = 'repo-alias';
-            alias.textContent = r.alias;
+            alias.textContent = r.alias + (r.is_root ? ' (root)' : '');
             alias.title = r.root_path || r.alias;
             const counts = document.createElement('span');
             counts.className = 'repo-counts';
             counts.innerHTML = r.files + ' files<span class="repo-nodes">' + r.nodes + ' nodes</span>';
             row.appendChild(alias);
             row.appendChild(counts);
+            if (!r.is_root) {
+              const removeBtn = document.createElement('button');
+              removeBtn.className = 'repo-remove-btn';
+              removeBtn.textContent = '×';
+              removeBtn.title = 'Remove ' + r.alias;
+              removeBtn.onclick = () => removeRepo(r.alias);
+              row.appendChild(removeBtn);
+            }
             reposContent.appendChild(row);
           });
         } else {
           reposSection.style.display = 'none';
+        }
+        const indexingIndicator = document.getElementById('indexingIndicator');
+        if (d.indexing && d.indexing.isIndexing) {
+          indexingIndicator.style.display = 'flex';
+          document.getElementById('indexingText').textContent =
+            'Indexing' + (d.indexing.currentRepo ? ': ' + d.indexing.currentRepo : '...');
+        } else {
+          indexingIndicator.style.display = 'none';
         }
         if (d.daemonRunning) updateStatus(true);
       } else if (msg.type === 'daemonStatus') {
@@ -560,6 +679,8 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       document.getElementById('startBtn').disabled = running;
       document.getElementById('stopBtn').disabled = !running;
       document.getElementById('reindexBtn').disabled = !running;
+      document.getElementById('addRepoBtn').disabled = !running;
+      if (!running) document.getElementById('indexingIndicator').style.display = 'none';
     }
     vscode.postMessage({ command: 'refresh' });
   </script>

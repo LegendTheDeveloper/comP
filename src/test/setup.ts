@@ -106,6 +106,7 @@ Module.prototype.require = function (id: string) {
         showQuickPick: () => Promise.resolve(undefined),
         showInputBox: () => Promise.resolve(undefined),
         showTextDocument: () => Promise.resolve(undefined),
+        showOpenDialog: () => Promise.resolve(undefined),
         activeTextEditor: undefined,
       },
       env: {
