@@ -404,25 +404,13 @@ impl Indexer {
             (syms, content)
         };
 
-        // 3. Store file in DB under its qualified key "<alias>/<rel>"
-        //    (char_count drives the real-token baseline in run_pipeline)
+        // 3+4. Store the file and all of its symbols in a single transaction
+        //      (one commit per file instead of one per statement). db_path is the
+        //      qualified key "<alias>/<rel>"; char_count drives the real-token
+        //      baseline in run_pipeline.
         let char_count = content_str.len();
         let db_path = format!("{}/{}", alias, file_entry.path);
-        let file_id = db.upsert_file(&db_path, &file_entry.hash, &file_entry.language, char_count)?;
-
-        // 4. Store each symbol as a node in DB
-        for symbol in &symbols {
-            db.insert_node(
-                file_id,
-                &symbol.name,
-                symbol.kind.as_str(),
-                symbol.line as i32,
-                symbol.column as i32,
-                symbol.scope.as_deref(),
-                symbol.is_exported,
-                symbol.signature.as_deref(),
-            )?;
-        }
+        db.store_file_symbols(&db_path, &file_entry.hash, &file_entry.language, char_count, &symbols)?;
 
         // 5. Extract raw dependencies from source code.
         // Edges are resolved in a second pass (see resolve_edges_for_file), once

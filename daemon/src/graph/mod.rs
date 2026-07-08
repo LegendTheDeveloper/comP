@@ -140,6 +140,59 @@ impl GraphDB {
         Ok(last_id)
     }
 
+    /// Store a file and all of its symbols in a single transaction.
+    ///
+    /// WHY: during indexing this replaces one `upsert_file` + N `insert_node`
+    /// calls (each its own autocommit → an fsync/WAL frame commit per statement)
+    /// with a single `BEGIN … COMMIT` and a reused prepared statement. Indexing
+    /// is write-bound once parsing is parallelised, so batching the writes per
+    /// file is the main throughput win. Uses `unchecked_transaction` because the
+    /// connection is reached through a shared `&self` behind the Mutex we already
+    /// hold — no concurrent transaction can exist on this connection.
+    ///
+    /// Returns the file ID.
+    pub fn store_file_symbols(
+        &self,
+        path: &str,
+        hash: &str,
+        language: &str,
+        char_count: usize,
+        symbols: &[crate::indexer::parser::Symbol],
+    ) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let tx = conn.unchecked_transaction()?;
+
+        tx.execute(
+            "INSERT OR REPLACE INTO files (path, hash, language, last_indexed, char_count)
+             VALUES (?, ?, ?, strftime('%s', 'now'), ?)",
+            rusqlite::params![path, hash, language, char_count as i64],
+        )?;
+        let file_id: i64 =
+            tx.query_row("SELECT id FROM files WHERE path = ?", [path], |row| row.get(0))?;
+
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO nodes (file_id, name, kind, line, col, scope, is_exported, signature)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            )?;
+            for s in symbols {
+                stmt.execute(rusqlite::params![
+                    file_id,
+                    s.name,
+                    s.kind.as_str(),
+                    s.line as i32,
+                    s.column as i32,
+                    s.scope.as_deref(),
+                    if s.is_exported { 1 } else { 0 },
+                    s.signature.as_deref(),
+                ])?;
+            }
+        }
+
+        tx.commit()?;
+        Ok(file_id)
+    }
+
     /// Insert a dependency edge between nodes
     pub fn insert_edge(&self, from_id: i64, to_id: i64, kind: &str) -> Result<()> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
