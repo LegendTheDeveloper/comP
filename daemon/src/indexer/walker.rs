@@ -249,6 +249,7 @@ impl FileWalker {
                 "sh" | "bash" => "bash",
                 "sql" => "sql",
                 "html" | "htm" => "html",
+                "xaml" | "axaml" => "xaml",
                 "css" | "scss" | "less" => "css",
                 "json" => "json",
                 "jsonl" => "jsonl",

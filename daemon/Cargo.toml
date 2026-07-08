@@ -34,6 +34,9 @@ tree-sitter-html = "0.23"
 tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
 tree-sitter-java = "0.23"
+# Pin: 0.23.5 was regenerated at grammar ABI 15, which the tree-sitter 0.23 runtime
+# (max ABI 14) rejects at load. 0.23.1 is generated at ABI 14.
+tree-sitter-c-sharp = "=0.23.1"
 lopdf = "0.42"
 parquet2 = "0.17.2"
 

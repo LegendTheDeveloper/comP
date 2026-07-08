@@ -82,7 +82,12 @@ impl CodeParser {
             "javascript" | "js" | "jsx" => tree_sitter_javascript::LANGUAGE.into(),
             "python" => tree_sitter_python::LANGUAGE.into(),
             "go" => tree_sitter_go::LANGUAGE.into(),
-            "html" | "htm" => tree_sitter_html::LANGUAGE.into(),
+            "csharp" => tree_sitter_c_sharp::LANGUAGE.into(),
+            "c" => tree_sitter_c::LANGUAGE.into(),
+            "cpp" => tree_sitter_cpp::LANGUAGE.into(),
+            "java" => tree_sitter_java::LANGUAGE.into(),
+            // XAML is XML-shaped; reuse the HTML grammar to extract element/tag symbols.
+            "html" | "htm" | "xaml" => tree_sitter_html::LANGUAGE.into(),
             _ => return Ok(Vec::new()), // Fallback for unsupported languages
         };
 
@@ -163,9 +168,40 @@ impl CodeParser {
             ("go", "function_declaration") => (SymbolKind::Function, node.child_by_field_name("name")),
             ("go", "method_declaration") => (SymbolKind::Method, node.child_by_field_name("name")),
             ("go", "type_spec") => (SymbolKind::Type, node.child_by_field_name("name")),
-            
-            // HTML
-            ("html" | "htm", "element") => {
+
+            // C#
+            ("csharp", "class_declaration")     => (SymbolKind::Class,     node.child_by_field_name("name")),
+            ("csharp", "record_declaration")    => (SymbolKind::Class,     node.child_by_field_name("name")),
+            ("csharp", "interface_declaration") => (SymbolKind::Interface, node.child_by_field_name("name")),
+            ("csharp", "struct_declaration")    => (SymbolKind::Struct,    node.child_by_field_name("name")),
+            ("csharp", "enum_declaration")      => (SymbolKind::Enum,      node.child_by_field_name("name")),
+            ("csharp", "enum_member_declaration") => (SymbolKind::Constant, node.child_by_field_name("name")),
+            ("csharp", "method_declaration")      => (SymbolKind::Method,   node.child_by_field_name("name")),
+            ("csharp", "constructor_declaration") => (SymbolKind::Method,   node.child_by_field_name("name")),
+            ("csharp", "property_declaration")    => (SymbolKind::Property, node.child_by_field_name("name")),
+            ("csharp", "event_declaration")       => (SymbolKind::Property, node.child_by_field_name("name")),
+            ("csharp", "delegate_declaration")    => (SymbolKind::Type,     node.child_by_field_name("name")),
+            ("csharp", "namespace_declaration")             => (SymbolKind::Namespace, node.child_by_field_name("name")),
+            ("csharp", "file_scoped_namespace_declaration") => (SymbolKind::Namespace, node.child_by_field_name("name")),
+
+            // Java
+            ("java", "class_declaration")       => (SymbolKind::Class,     node.child_by_field_name("name")),
+            ("java", "interface_declaration")   => (SymbolKind::Interface, node.child_by_field_name("name")),
+            ("java", "enum_declaration")        => (SymbolKind::Enum,      node.child_by_field_name("name")),
+            ("java", "record_declaration")      => (SymbolKind::Class,     node.child_by_field_name("name")),
+            ("java", "method_declaration")      => (SymbolKind::Method,    node.child_by_field_name("name")),
+            ("java", "constructor_declaration") => (SymbolKind::Method,    node.child_by_field_name("name")),
+
+            // C / C++
+            ("cpp", "class_specifier")        => (SymbolKind::Class,     node.child_by_field_name("name")),
+            ("c" | "cpp", "struct_specifier") => (SymbolKind::Struct,    node.child_by_field_name("name")),
+            ("c" | "cpp", "enum_specifier")   => (SymbolKind::Enum,      node.child_by_field_name("name")),
+            ("cpp", "namespace_definition")   => (SymbolKind::Namespace, node.child_by_field_name("name")),
+            // function_definition has no `name` field — the identifier is nested in the declarator chain.
+            ("c" | "cpp", "function_definition") => (SymbolKind::Function, Self::c_declarator_identifier(node)),
+
+            // HTML / XAML
+            ("html" | "htm" | "xaml", "element") => {
                 let start_tag = node.child(0);
                 if let Some(start) = start_tag {
                     if start.kind() == "start_tag" {
@@ -187,6 +223,21 @@ impl CodeParser {
             self.create_symbol(node, name_node, symbol_kind, source_code, scope)
         } else {
             None
+        }
+    }
+
+    /// For C/C++ `function_definition`, the function name is not a direct `name`
+    /// field — it sits at the bottom of a `declarator` chain (e.g.
+    /// `pointer_declarator` → `function_declarator` → `identifier`). Descend the
+    /// `declarator` field until we reach the innermost identifier-like node.
+    fn c_declarator_identifier(node: Node) -> Option<Node> {
+        let mut current = node.child_by_field_name("declarator")?;
+        loop {
+            match current.kind() {
+                "identifier" | "field_identifier" | "qualified_identifier"
+                | "destructor_name" | "operator_name" => return Some(current),
+                _ => current = current.child_by_field_name("declarator")?,
+            }
         }
     }
 
@@ -222,13 +273,31 @@ impl CodeParser {
             parent = p.parent();
         }
 
-        // 2. Check children for "visibility_modifier" (Rust)
+        // 2. Check children for visibility markers:
+        //    - "visibility_modifier" (Rust)
+        //    - "modifier" node whose text is "public" (C#)
+        //    - "modifiers" node containing "public" (Java)
         if !is_exported {
             let mut walk = node.walk();
             for child in node.children(&mut walk) {
-                if child.kind() == "visibility_modifier" {
-                    is_exported = true;
-                    break;
+                match child.kind() {
+                    "visibility_modifier" => {
+                        is_exported = true;
+                        break;
+                    }
+                    "modifier" => {
+                        if child.utf8_text(source_code.as_bytes()).map(|t| t == "public").unwrap_or(false) {
+                            is_exported = true;
+                            break;
+                        }
+                    }
+                    "modifiers" => {
+                        if child.utf8_text(source_code.as_bytes()).map(|t| t.contains("public")).unwrap_or(false) {
+                            is_exported = true;
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -296,6 +365,23 @@ mod tests {
         assert!(!symbols.is_empty(), "Should extract greet function");
         assert_eq!(symbols[0].name, "greet");
         assert!(symbols[0].is_exported, "Should be marked as exported");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_parse_csharp() -> Result<()> {
+        let mut parser = CodeParser::new()?;
+        let code = "namespace GameLauncher;\n\npublic class MainWindow\n{\n    public void Show() { }\n}\n";
+
+        let symbols = parser.parse_file("csharp", code).await?;
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"MainWindow"), "Should extract MainWindow class, got {names:?}");
+        assert!(names.contains(&"Show"), "Should extract Show method, got {names:?}");
+
+        let cls = symbols.iter().find(|s| s.name == "MainWindow").unwrap();
+        assert_eq!(cls.kind.as_str(), "class");
+        assert!(cls.is_exported, "public class should be marked exported");
 
         Ok(())
     }
