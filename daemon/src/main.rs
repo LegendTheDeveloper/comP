@@ -181,6 +181,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             info!("Starting initial workspace indexing ({} repo(s))...", repos.len());
+            let index_start = std::time::Instant::now();
+            let mut grand_files = 0usize;
+            let mut grand_symbols = 0usize;
             // WHY: Load hashes from previous session database to only re-index modified files.
             for (i, (alias, root)) in repos.iter().enumerate() {
                 state_for_idx.set_current_repo(alias);
@@ -189,18 +192,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     info!("Indexing additional path [{}]: {}", alias, root);
                 }
+                let repo_start = std::time::Instant::now();
                 // Reload hashes each pass so files already indexed (by this or an
                 // earlier repo pass) are skipped incrementally.
                 let hashes = state_for_idx.graph_db.get_all_file_hashes().unwrap_or_default();
                 let mut idx = indexer::Indexer::with_alias(root, alias);
                 match idx.index_workspace(Some(&hashes), &state_for_idx.graph_db).await {
-                    Ok((total, indexed, symbols)) => info!(
-                        "Repo [{}]: indexed {}/{} files, {} symbols",
-                        alias, indexed, total, symbols
-                    ),
+                    Ok((total, indexed, symbols)) => {
+                        grand_files += indexed;
+                        grand_symbols += symbols;
+                        info!(
+                            "✓ Repo [{}] finished: indexed {}/{} files, {} symbols in {:.1}s",
+                            alias,
+                            indexed,
+                            total,
+                            symbols,
+                            repo_start.elapsed().as_secs_f32()
+                        );
+                    }
                     Err(e) => log::warn!("Failed to index repo {} ({}): {}", alias, root, e),
                 }
             }
+            info!(
+                "✓ Initial indexing finished: {} repo(s), {} changed files, {} symbols in {:.1}s",
+                repos.len(),
+                grand_files,
+                grand_symbols,
+                index_start.elapsed().as_secs_f32()
+            );
 
             // Rebuild TF-IDF index after all indexing (main + additional) is complete
             if let Ok(all_symbols) = state_for_idx.graph_db.get_all_symbols_for_search() {

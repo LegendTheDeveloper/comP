@@ -7,6 +7,7 @@
 // - Integration: walk -> parse -> extract -> store
 
 use anyhow::Result;
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -257,20 +258,36 @@ impl Indexer {
 
         // 2. Pass 1 — parse, extract symbols, store nodes. Defer edges so callee
         //    names can be resolved across files once every node exists.
+        //
+        //    Parsing (tree-sitter, CPU-bound) is the indexing bottleneck, so run
+        //    it across all cores with rayon. Each worker gets its own CodeParser
+        //    (map_init, one per thread); DB writes go through GraphDB's internal
+        //    Mutex<Connection>, which serialises them — the single-writer model is
+        //    preserved while parsing overlaps. Result order is irrelevant here
+        //    (edges are resolved globally in pass 2).
         let mut symbols_count = 0;
         let mut deps_by_file: Vec<(String, Vec<dependency::Dependency>)> = Vec::new();
-        for file_entry in walk_result.changed_files {
-            match self.parse_and_extract(&file_entry, db).await {
-                Ok((count, deps)) => {
-                    symbols_count += count;
-                    if !deps.is_empty() {
-                        deps_by_file.push((self.qualify(&file_entry.path), deps));
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Error parsing {}: {}", file_entry.path, e);
-                    // Continue with next file on error
-                }
+        let ws_root = self.workspace_root.clone();
+        let alias = self.alias.clone();
+        let outcomes: Vec<(usize, Option<(String, Vec<dependency::Dependency>)>)> = walk_result
+            .changed_files
+            .par_iter()
+            .map_init(
+                || CodeParser::new().expect("failed to create tree-sitter parser"),
+                |parser, file_entry| {
+                    Self::index_one_file(parser, &ws_root, &alias, file_entry, db).unwrap_or_else(
+                        |e| {
+                            eprintln!("Error parsing {}: {}", file_entry.path, e);
+                            (0, None)
+                        },
+                    )
+                },
+            )
+            .collect();
+        for (count, dep) in outcomes {
+            symbols_count += count;
+            if let Some(d) = dep {
+                deps_by_file.push(d);
             }
         }
 
@@ -319,31 +336,35 @@ impl Indexer {
         Ok((total_files, changed_count, symbols_count))
     }
 
-    /// Parse a single file and extract symbols, storing them in GraphDB
+    /// Parse a single file, extract symbols, and store them in GraphDB.
     ///
-    /// # Process:
+    /// Synchronous and free of `&mut self` (takes an explicit `parser`) so it can
+    /// be driven from a rayon parallel iterator — each worker owns its parser while
+    /// `db` (`Send + Sync`, internal `Mutex<Connection>`) is shared and serialises
+    /// writes.
+    ///
+    /// # Process
     /// 1. Read file content from disk
     /// 2. Parse based on language (tree-sitter or document parser)
     /// 3. Store file entry in DB (upsert_file)
-    /// 4. For each symbol, store as node in DB (insert_node)
-    /// 5. Extract dependencies and store as edges (insert_edge)
-    ///
-    /// # Arguments
-    /// - file_entry: File metadata (path, hash, language)
-    /// - db: GraphDB instance for storing results
+    /// 4. Store each symbol as a node in DB (insert_node)
+    /// 5. Extract raw dependencies (edges resolved in a later global pass)
     ///
     /// # Returns
-    /// - Number of symbols extracted and stored
-    async fn parse_and_extract(
-        &mut self,
+    /// `(symbol_count, Some((qualified_path, raw_deps)))` — the deps tuple is
+    /// `None` when the file yielded no dependencies (or was skipped).
+    fn index_one_file(
+        parser: &mut CodeParser,
+        workspace_root: &str,
+        alias: &str,
         file_entry: &FileEntry,
         db: &crate::graph::GraphDB,
-    ) -> Result<(usize, Vec<dependency::Dependency>)> {
+    ) -> Result<(usize, Option<(String, Vec<dependency::Dependency>)>)> {
         use std::fs;
 
         // 1. Read file content based on type
-        let full_path = Path::new(&self.workspace_root).join(&file_entry.path);
-        
+        let full_path = Path::new(workspace_root).join(&file_entry.path);
+
         let is_binary = matches!(
             file_entry.language.as_str(),
             "parquet" | "docx" | "pptx" | "xlsx" | "pdf"
@@ -366,7 +387,7 @@ impl Indexer {
                 Ok(c) => c,
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
                     log::debug!("Skipping non-UTF-8 file: {} ({})", file_entry.path, e);
-                    return Ok((0, Vec::new()));
+                    return Ok((0, None));
                 }
                 Err(e) => return Err(e.into()),
             };
@@ -377,7 +398,7 @@ impl Indexer {
                 "markdown" | "md" => DocumentParser::parse_markdown(&content)?,
                 _ => {
                     // Tree-sitter parsing for code
-                    self.parser.parse_file(&file_entry.language, &content).await?
+                    parser.parse_file(&file_entry.language, &content)?
                 }
             };
             (syms, content)
@@ -386,13 +407,12 @@ impl Indexer {
         // 3. Store file in DB under its qualified key "<alias>/<rel>"
         //    (char_count drives the real-token baseline in run_pipeline)
         let char_count = content_str.len();
-        let db_path = self.qualify(&file_entry.path);
+        let db_path = format!("{}/{}", alias, file_entry.path);
         let file_id = db.upsert_file(&db_path, &file_entry.hash, &file_entry.language, char_count)?;
 
         // 4. Store each symbol as a node in DB
-        let mut symbol_map: HashMap<String, i64> = HashMap::new();
         for symbol in &symbols {
-            let node_id = db.insert_node(
+            db.insert_node(
                 file_id,
                 &symbol.name,
                 symbol.kind.as_str(),
@@ -402,13 +422,11 @@ impl Indexer {
                 symbol.is_exported,
                 symbol.signature.as_deref(),
             )?;
-            symbol_map.insert(symbol.name.clone(), node_id);
         }
 
         // 5. Extract raw dependencies from source code.
         // Edges are resolved in a second pass (see resolve_edges_for_file), once
         // all nodes exist, so callee names can be linked across files.
-        let _ = &symbol_map;
         let raw_deps = if is_binary {
             Vec::new()
         } else {
@@ -416,10 +434,28 @@ impl Indexer {
                 &file_entry.language,
                 &content_str,
                 &file_entry.path,
-            ).unwrap_or_default()
+            )
+            .unwrap_or_default()
         };
 
-        Ok((symbols.len(), raw_deps))
+        let deps = if raw_deps.is_empty() {
+            None
+        } else {
+            Some((db_path, raw_deps))
+        };
+        Ok((symbols.len(), deps))
+    }
+
+    /// Incremental single-file entry point (used by `index_file` and tests).
+    /// Thin wrapper over [`Self::index_one_file`] that returns just the dep list.
+    async fn parse_and_extract(
+        &mut self,
+        file_entry: &FileEntry,
+        db: &crate::graph::GraphDB,
+    ) -> Result<(usize, Vec<dependency::Dependency>)> {
+        let (count, deps) =
+            Self::index_one_file(&mut self.parser, &self.workspace_root, &self.alias, file_entry, db)?;
+        Ok((count, deps.map(|(_, d)| d).unwrap_or_default()))
     }
 
     /// Resolve and store edges for a single file using the global symbol index.

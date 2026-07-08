@@ -74,8 +74,11 @@ impl CodeParser {
         Ok(CodeParser { parser })
     }
 
-    /// Parse a source file and extract symbols with scope tracking
-    pub async fn parse_file(&mut self, language: &str, source_code: &str) -> Result<Vec<Symbol>> {
+    /// Parse a source file and extract symbols with scope tracking.
+    ///
+    /// Synchronous (CPU-bound tree-sitter work, no I/O await) so it can be
+    /// driven from a rayon parallel iterator during indexing.
+    pub fn parse_file(&mut self, language: &str, source_code: &str) -> Result<Vec<Symbol>> {
         let lang: tree_sitter::Language = match language {
             "rust" => tree_sitter_rust::LANGUAGE.into(),
             "typescript" | "tsx" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
@@ -348,7 +351,7 @@ mod tests {
         let mut parser = CodeParser::new()?;
         let code = "fn main() { println!(\"hello\"); }";
 
-        let symbols = parser.parse_file("rust", code).await?;
+        let symbols = parser.parse_file("rust", code)?;
         assert!(!symbols.is_empty(), "Should extract main function");
         assert_eq!(symbols[0].name, "main");
         assert_eq!(symbols[0].kind.as_str(), "function");
@@ -361,7 +364,7 @@ mod tests {
         let mut parser = CodeParser::new()?;
         let code = "export function greet(name: string) { return `Hello, ${name}`; }";
 
-        let symbols = parser.parse_file("typescript", code).await?;
+        let symbols = parser.parse_file("typescript", code)?;
         assert!(!symbols.is_empty(), "Should extract greet function");
         assert_eq!(symbols[0].name, "greet");
         assert!(symbols[0].is_exported, "Should be marked as exported");
@@ -374,7 +377,7 @@ mod tests {
         let mut parser = CodeParser::new()?;
         let code = "namespace GameLauncher;\n\npublic class MainWindow\n{\n    public void Show() { }\n}\n";
 
-        let symbols = parser.parse_file("csharp", code).await?;
+        let symbols = parser.parse_file("csharp", code)?;
         let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"MainWindow"), "Should extract MainWindow class, got {names:?}");
         assert!(names.contains(&"Show"), "Should extract Show method, got {names:?}");
@@ -391,7 +394,7 @@ mod tests {
         let mut parser = CodeParser::new()?;
         let code = "<div><h1>Hello</h1></div>";
 
-        let symbols = parser.parse_file("html", code).await?;
+        let symbols = parser.parse_file("html", code)?;
         assert!(!symbols.is_empty(), "Should extract html elements");
         assert_eq!(symbols[0].name, "div");
         assert_eq!(symbols[1].name, "h1");

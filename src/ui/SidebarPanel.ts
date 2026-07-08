@@ -50,6 +50,9 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   private maxLogs = 100;
   private version = "0.1.0";
   private lifecycleCallbacks: DaemonLifecycleCallbacks | null = null;
+  // Track indexing state across polls so we can emit per-repo / finished log lines.
+  private prevIndexing = false;
+  private prevCurrentRepo: string | null = null;
 
   private constructor(context: vscode.ExtensionContext) {
     // Load version from package.json
@@ -352,6 +355,25 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         // ignore file read errors
       }
 
+      const isIndexing: boolean = stats.indexing?.is_indexing ?? false;
+      const currentRepo: string | null = stats.indexing?.current_repo ?? null;
+      // Emit per-repo / finished log lines into the sidebar Logs panel as the
+      // daemon advances through repos (state polled every 5s).
+      if (currentRepo && currentRepo !== this.prevCurrentRepo) {
+        if (this.prevCurrentRepo) {
+          this.addLog(`✓ Indexed ${this.prevCurrentRepo}`);
+        }
+        this.addLog(`⟳ Indexing ${currentRepo}…`);
+      }
+      if (this.prevIndexing && !isIndexing) {
+        if (this.prevCurrentRepo) {
+          this.addLog(`✓ Indexed ${this.prevCurrentRepo}`);
+        }
+        this.addLog("✓ Indexing finished");
+      }
+      this.prevIndexing = isIndexing;
+      this.prevCurrentRepo = isIndexing ? currentRepo : null;
+
       this.view.webview.postMessage({
         type: "statsUpdate",
         data: {
@@ -365,9 +387,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
           queriesCount,
           lastAgentConnection: lastAgentConnectionStr,
           repos: stats.repos || [],
-          indexing: stats.indexing
-            ? { isIndexing: stats.indexing.is_indexing, currentRepo: stats.indexing.current_repo }
-            : undefined,
+          indexing: stats.indexing ? { isIndexing, currentRepo } : undefined,
         },
       });
     } catch (error) {
@@ -494,6 +514,27 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       border-bottom: 1px solid var(--vscode-editorWidget-border);
     }
     .repo-row:last-child { border-bottom: none; }
+    .repo-row.indexing {
+      background: var(--vscode-list-activeSelectionBackground, rgba(226,192,141,0.14));
+      border-left: 2px solid var(--vscode-terminal-ansiYellow, #e2c08d);
+      padding-left: 4px;
+      border-radius: 3px;
+    }
+    .repo-row.indexing .repo-alias { color: var(--vscode-terminal-ansiYellow, #e2c08d); font-weight: 600; }
+    .repo-spinner {
+      width: 10px; height: 10px; flex-shrink: 0;
+      border: 2px solid var(--vscode-terminal-ansiYellow, #e2c08d);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: comp-spin 0.8s linear infinite;
+    }
+    @keyframes comp-spin { to { transform: rotate(360deg); } }
+    .fork-badge {
+      font-weight: normal;
+      font-size: 11px;
+      color: var(--vscode-terminal-ansiBlue, #00a8ff);
+      opacity: 0.85;
+    }
     .repo-alias {
       opacity: 0.9;
       overflow: hidden;
@@ -539,7 +580,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
   </style>
 </head>
 <body>
-  <h2>comP <span style="font-weight:normal;opacity:0.6;font-size:11px;">v${this.version}</span></h2>
+  <h2>comP <span class="fork-badge">v${this.version} · Legend Fork</span></h2>
   <div class="control-panel">
     <div class="button-group">
       <button id="startBtn" onclick="startDaemon()">▶ Start</button>
@@ -617,9 +658,18 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         if (d.repos && d.repos.length > 0) {
           reposSection.style.display = 'block';
           reposContent.innerHTML = '';
+          const activeRepo = (d.indexing && d.indexing.isIndexing) ? d.indexing.currentRepo : null;
           d.repos.forEach(r => {
             const row = document.createElement('div');
             row.className = 'repo-row';
+            const isActive = activeRepo && r.alias === activeRepo;
+            if (isActive) {
+              row.classList.add('indexing');
+              const spinner = document.createElement('span');
+              spinner.className = 'repo-spinner';
+              spinner.title = 'Indexing…';
+              row.appendChild(spinner);
+            }
             const alias = document.createElement('span');
             alias.className = 'repo-alias';
             alias.textContent = r.alias + (r.is_root ? ' (root)' : '');
