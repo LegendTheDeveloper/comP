@@ -194,8 +194,11 @@ pub struct Evidence {
     /// Best (quality x softened keyword_weight) among symbol/filename hits.
     /// Max, not sum: many junk substring hits must not beat one exact match.
     pub sym_best: f32,
-    /// Distinct keywords that produced a symbol/filename hit (diversity bonus).
+    /// Distinct keywords that produced a symbol/filename hit (for reporting).
     pub sym_keywords: HashSet<String>,
+    /// Subset of sym_keywords rare enough (weight >= BONUS_KW_WEIGHT) to
+    /// count toward the diversity bonus: brand-word pairs earn nothing.
+    pub bonus_keywords: HashSet<String>,
     /// True when the file NAME (stem) matched a task keyword.
     pub filename_hit: bool,
     /// Raw TF-IDF cosine (or the fixed 0.3 fallback score); max over hits.
@@ -216,10 +219,11 @@ impl Evidence {
         if weighted > self.sym_best {
             self.sym_best = weighted;
         }
+        self.sym_keywords.insert(keyword.to_lowercase());
         // Only rare-enough keywords count toward the diversity bonus:
         // matching two brand words (launcher+player) is not extra coverage.
         if kw_weight >= BONUS_KW_WEIGHT {
-            self.sym_keywords.insert(keyword.to_lowercase());
+            self.bonus_keywords.insert(keyword.to_lowercase());
         }
     }
 
@@ -248,8 +252,10 @@ impl Evidence {
     /// Symbol component with the distinct-keyword bonus, capped at 1.0.
     /// The bonus rewards multi-keyword coverage: a file matching "survey" AND
     /// "feedback" should outrank one exact-matching a single generic keyword.
+    /// Only rare-enough keywords count (bonus_keywords), so files matching
+    /// launcher+player brand pairs earn no bonus.
     pub fn symbol_component(&self) -> f32 {
-        let bonus = 0.15 * (self.sym_keywords.len().saturating_sub(1)) as f32;
+        let bonus = 0.15 * (self.bonus_keywords.len().saturating_sub(1)) as f32;
         (self.sym_best + bonus).min(1.0)
     }
 }
@@ -878,17 +884,21 @@ mod tests {
     #[test]
     fn test_bonus_only_counts_rare_keywords() {
         let mut ev = Evidence::default();
-        // Two distinct but very common keywords: no diversity bonus.
+        // Two distinct but very common keywords: reported in reasons, but
+        // no diversity bonus (bonus_keywords stays empty).
         ev.add_symbol_hit("launcher", 0.85, 0.2);
         ev.add_symbol_hit("player", 0.85, 0.3);
-        assert!(ev.sym_keywords.is_empty());
+        assert_eq!(ev.sym_keywords.len(), 2, "reporting keeps all matched keywords");
+        assert!(ev.bonus_keywords.is_empty(), "common keywords earn no bonus");
         assert_eq!(ev.symbol_component(), ev.sym_best);
-        // Reasons still acknowledge the symbol channel matched.
-        assert_eq!(match_reasons(&ev, false), vec!["symbol"]);
-        // A rare keyword does count.
+        // Reasons still show what matched (needed to diagnose brand noise).
+        assert_eq!(match_reasons(&ev, false), vec!["symbol:launcher+player"]);
+        // A rare keyword does count toward the bonus.
         let mut rare = Evidence::default();
         rare.add_symbol_hit("survey", 0.85, 0.8);
-        assert_eq!(rare.sym_keywords.len(), 1);
+        rare.add_symbol_hit("feedback", 0.85, 0.8);
+        assert_eq!(rare.bonus_keywords.len(), 2);
+        assert!(rare.symbol_component() > rare.sym_best);
     }
 
     #[test]
