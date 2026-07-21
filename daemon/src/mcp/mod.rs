@@ -390,6 +390,7 @@ impl MCPServer {
                 "list_indexed_files" => self.handle_list_indexed_files().await,
                 "get_token_usage" => self.handle_get_token_usage().await,
                 "getStats" => self.handle_get_stats().await,
+                "getSearchHistory" => self.handle_get_search_history(params).await,
                 "forceReindex" => self.handle_force_reindex().await,
                 "indexFile" => self.handle_index_file(params).await,
                 "removeFile" => self.handle_remove_file(params).await,
@@ -473,6 +474,7 @@ impl MCPServer {
     /// 6. Calculate savings percentage
     /// 7. Estimate API cost based on model
     pub async fn handle_run_pipeline(&self, params: Value) -> Result<Value> {
+        let started = std::time::Instant::now();
         let task = params["task"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'task' parameter"))?;
@@ -940,6 +942,43 @@ impl MCPServer {
             .map(|(path, edge_count)| json!({ "path": path, "edge_count": edge_count }))
             .collect();
 
+        // Record this search in the shared DB for the sidebar "Recent
+        // Searches" panel and future scoring tuning. Best-effort: an insert
+        // failure must never fail the request.
+        {
+            let top_pivots: Vec<Value> = pivot_files
+                .iter()
+                .take(8)
+                .map(|p| {
+                    json!({
+                        "path": p["path"],
+                        "score": p["score"],
+                        "reasons": p["match_reasons"],
+                    })
+                })
+                .collect();
+            let entry = crate::graph::SearchHistoryEntry {
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+                tool: "run_pipeline".to_string(),
+                query: task.to_string(),
+                keywords: serde_json::to_string(&keywords).ok(),
+                confidence: Some(confidence.to_string()),
+                weak_results: Some(weak_results),
+                pivot_count: Some(pivot_files.len() as i64),
+                dropped_low_relevance: Some(dropped_low_relevance as i64),
+                total_tokens: Some(total_tokens as i64),
+                duration_ms: Some(started.elapsed().as_millis() as i64),
+                top_pivots: serde_json::to_string(&top_pivots).ok(),
+                ..Default::default()
+            };
+            if let Err(e) = self.state.graph_db.insert_search_history(&entry) {
+                log::warn!("insert_search_history failed in run_pipeline: {}", e);
+            }
+        }
+
         Ok(json!({
             "task": task,
             "pivot_files": pivot_files,
@@ -1184,6 +1223,7 @@ impl MCPServer {
     /// 3. Optionally filter by symbol kind
     /// 4. Return results ranked by relevance score
     pub async fn handle_get_context(&self, params: Value) -> Result<Value> {
+        let started = std::time::Instant::now();
         let query = params["query"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'query' parameter"))?;
@@ -1242,12 +1282,74 @@ impl MCPServer {
             log::warn!("record_tool_call failed in get_context: {}", e);
         }
 
+        // Record in search history (sidebar "Recent Searches"). Best-effort.
+        {
+            let top_pivots: Vec<Value> = results
+                .iter()
+                .take(8)
+                .map(|r| json!({ "path": r["file"], "symbol": r["symbol"] }))
+                .collect();
+            let entry = crate::graph::SearchHistoryEntry {
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+                tool: "get_context".to_string(),
+                query: query.to_string(),
+                pivot_count: Some(count as i64),
+                total_tokens: Some(estimated_tokens as i64),
+                duration_ms: Some(started.elapsed().as_millis() as i64),
+                top_pivots: serde_json::to_string(&top_pivots).ok(),
+                ..Default::default()
+            };
+            if let Err(e) = self.state.graph_db.insert_search_history(&entry) {
+                log::warn!("insert_search_history failed in get_context: {}", e);
+            }
+        }
+
         Ok(json!({
             "query": query,
             "results": results,
             "count": count,
             "limit": limit
         }))
+    }
+
+    /// Sidebar "Recent Searches": newest recorded searches, most recent first.
+    ///
+    /// # Request: `{ "limit": 50 }` (optional, capped at 200)
+    /// # Response: `{ "searches": [{ timestamp, tool, query, keywords,
+    ///   confidence, weak_results, pivot_count, dropped_low_relevance,
+    ///   total_tokens, duration_ms, top_pivots }] }`
+    pub async fn handle_get_search_history(&self, params: Value) -> Result<Value> {
+        let limit = params["limit"].as_u64().unwrap_or(50).min(200) as usize;
+        let rows = self.state.graph_db.get_search_history(limit)?;
+        let searches: Vec<Value> = rows
+            .into_iter()
+            .map(|e| {
+                json!({
+                    "id": e.id,
+                    "timestamp": e.timestamp,
+                    "tool": e.tool,
+                    "query": e.query,
+                    "keywords": e
+                        .keywords
+                        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                        .unwrap_or(Value::Null),
+                    "confidence": e.confidence,
+                    "weak_results": e.weak_results,
+                    "pivot_count": e.pivot_count,
+                    "dropped_low_relevance": e.dropped_low_relevance,
+                    "total_tokens": e.total_tokens,
+                    "duration_ms": e.duration_ms,
+                    "top_pivots": e
+                        .top_pivots
+                        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                        .unwrap_or(Value::Null),
+                })
+            })
+            .collect();
+        Ok(json!({ "searches": searches }))
     }
 
     /// Tool 3: get_impact_graph
@@ -3710,5 +3812,32 @@ mod tests {
         assert_eq!(diff_entry.unwrap()["git_diff"].as_bool(), Some(true));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_search_history_records_run_pipeline() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        server.handle_run_pipeline(json!({
+            "task": "search history smoke task",
+            "max_tokens": 4000
+        })).await.unwrap();
+
+        let result = server
+            .handle_get_search_history(json!({ "limit": 5 }))
+            .await
+            .unwrap();
+        let searches = result["searches"].as_array().unwrap();
+        assert!(!searches.is_empty(), "history must contain the recorded search");
+        let latest = &searches[0];
+        assert_eq!(latest["tool"].as_str(), Some("run_pipeline"));
+        assert_eq!(latest["query"].as_str(), Some("search history smoke task"));
+        assert!(latest["timestamp"].as_i64().unwrap() > 0);
+        assert!(latest["confidence"].is_string());
+        assert!(latest["weak_results"].is_boolean());
+        assert!(latest["pivot_count"].is_number());
+        assert!(latest["duration_ms"].is_number());
+        assert!(latest["top_pivots"].is_array() || latest["top_pivots"].is_null());
     }
 }

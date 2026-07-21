@@ -98,6 +98,28 @@ impl Schema {
             )?;
         }
 
+        // Migration 003: search_history table. Records every run_pipeline /
+        // get_context call with its outcome diagnostics so search quality can
+        // be reviewed later (sidebar "Recent Searches" + future tuning).
+        // Shared DB = single source of truth for both daemon processes.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS search_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER NOT NULL,           -- unix seconds
+                tool TEXT NOT NULL,                   -- 'run_pipeline' | 'get_context'
+                query TEXT NOT NULL,                  -- task / query string
+                keywords TEXT,                        -- JSON array (post-stopword)
+                confidence TEXT,                      -- high/medium/low (run_pipeline)
+                weak_results INTEGER,                 -- 0/1 (run_pipeline)
+                pivot_count INTEGER,                  -- pivots / results returned
+                dropped_low_relevance INTEGER,        -- cutoff drops (run_pipeline)
+                total_tokens INTEGER,
+                duration_ms INTEGER,
+                top_pivots TEXT                       -- JSON [{path, score, reasons}]
+            );
+            CREATE INDEX IF NOT EXISTS idx_search_history_ts ON search_history(timestamp DESC);"
+        )?;
+
         // Initialize metadata keys used by token tracking
         for key in &["tokens_sent", "tokens_saved", "queries_count", "version"] {
             let value = if *key == "version" { "2" } else { "0" };

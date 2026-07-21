@@ -386,6 +386,53 @@ export class DaemonManager {
   }
 
   /**
+   * Recent searches recorded by the daemon (run_pipeline / get_context calls
+   * with their outcome diagnostics). Newest first. Non-critical telemetry:
+   * returns [] on any malformed response.
+   */
+  async getSearchHistory(limit = 30): Promise<
+    Array<{
+      timestamp: number;
+      tool: string;
+      query: string;
+      confidence: string | null;
+      weak_results: boolean | null;
+      pivot_count: number | null;
+      dropped_low_relevance: number | null;
+      total_tokens: number | null;
+      duration_ms: number | null;
+      top_pivots: Array<{ path?: string; score?: number; reasons?: string[]; symbol?: string }>;
+    }>
+  > {
+    const result = await this.request("getSearchHistory", { limit });
+    if (!result || typeof result !== "object") {
+      return [];
+    }
+    const rows = (result as Record<string, unknown>)["searches"];
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+    return rows.map((r) => {
+      const e = r as Record<string, unknown>;
+      return {
+        timestamp: Number(e["timestamp"]) || 0,
+        tool: String(e["tool"] ?? ""),
+        query: String(e["query"] ?? ""),
+        confidence: typeof e["confidence"] === "string" ? (e["confidence"] as string) : null,
+        weak_results: typeof e["weak_results"] === "boolean" ? (e["weak_results"] as boolean) : null,
+        pivot_count: typeof e["pivot_count"] === "number" ? (e["pivot_count"] as number) : null,
+        dropped_low_relevance:
+          typeof e["dropped_low_relevance"] === "number" ? (e["dropped_low_relevance"] as number) : null,
+        total_tokens: typeof e["total_tokens"] === "number" ? (e["total_tokens"] as number) : null,
+        duration_ms: typeof e["duration_ms"] === "number" ? (e["duration_ms"] as number) : null,
+        top_pivots: Array.isArray(e["top_pivots"])
+          ? (e["top_pivots"] as Array<{ path?: string; score?: number; reasons?: string[]; symbol?: string }>)
+          : [],
+      };
+    });
+  }
+
+  /**
    * Get symbols in a file for CodeLens display
    *
    * Returns array of symbols with dependent counts

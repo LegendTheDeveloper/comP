@@ -21,6 +21,29 @@ pub use schema::Schema;
 /// Cross-file symbol lookup: `name -> [(node_id, file_id, is_exported)]`.
 pub type GlobalSymbolIndex = HashMap<String, Vec<(i64, i64, bool)>>;
 
+/// Retention cap for the search_history table (newest rows win).
+const MAX_SEARCH_HISTORY_ROWS: i64 = 500;
+
+/// One recorded search (a run_pipeline or get_context call) with its outcome
+/// diagnostics. Persisted so search quality can be reviewed later (sidebar
+/// "Recent Searches" panel, future scoring tuning). `keywords` and
+/// `top_pivots` hold JSON strings; `id` is ignored on insert.
+#[derive(Debug, Clone, Default)]
+pub struct SearchHistoryEntry {
+    pub id: i64,
+    pub timestamp: i64,
+    pub tool: String,
+    pub query: String,
+    pub keywords: Option<String>,
+    pub confidence: Option<String>,
+    pub weak_results: Option<bool>,
+    pub pivot_count: Option<i64>,
+    pub dropped_low_relevance: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub top_pivots: Option<String>,
+}
+
 /// Graph database interface for storing code structure
 pub struct GraphDB {
     // WHY: Use Mutex<Connection> to obtain Send+Sync.
@@ -376,6 +399,65 @@ impl GraphDB {
             |row| row.get::<_, i64>(0),
         ).unwrap_or(0) as u64;
         Ok((tokens_sent, tokens_saved, queries_count))
+    }
+
+    /// Insert a recorded search (run_pipeline / get_context call) and prune
+    /// the table to the newest MAX_SEARCH_HISTORY_ROWS rows. Best-effort
+    /// telemetry: callers log-and-continue on error, never fail the request.
+    pub fn insert_search_history(&self, e: &SearchHistoryEntry) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute(
+            "INSERT INTO search_history
+             (timestamp, tool, query, keywords, confidence, weak_results,
+              pivot_count, dropped_low_relevance, total_tokens, duration_ms, top_pivots)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rusqlite::params![
+                e.timestamp,
+                e.tool,
+                e.query,
+                e.keywords,
+                e.confidence,
+                e.weak_results.map(|b| b as i64),
+                e.pivot_count,
+                e.dropped_low_relevance,
+                e.total_tokens,
+                e.duration_ms,
+                e.top_pivots,
+            ],
+        )?;
+        conn.execute(
+            "DELETE FROM search_history WHERE id NOT IN (
+                SELECT id FROM search_history ORDER BY id DESC LIMIT ?)",
+            rusqlite::params![MAX_SEARCH_HISTORY_ROWS],
+        )?;
+        Ok(())
+    }
+
+    /// Newest recorded searches, most recent first.
+    pub fn get_search_history(&self, limit: usize) -> Result<Vec<SearchHistoryEntry>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT id, timestamp, tool, query, keywords, confidence, weak_results,
+                    pivot_count, dropped_low_relevance, total_tokens, duration_ms, top_pivots
+             FROM search_history ORDER BY id DESC LIMIT ?",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
+            Ok(SearchHistoryEntry {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                tool: row.get(2)?,
+                query: row.get(3)?,
+                keywords: row.get(4)?,
+                confidence: row.get(5)?,
+                weak_results: row.get::<_, Option<i64>>(6)?.map(|v| v != 0),
+                pivot_count: row.get(7)?,
+                dropped_low_relevance: row.get(8)?,
+                total_tokens: row.get(9)?,
+                duration_ms: row.get(10)?,
+                top_pivots: row.get(11)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     /// Get total statistics about the index
@@ -924,6 +1006,45 @@ mod tests {
         let db = GraphDB::new(temp_dir.to_str().unwrap()).await.unwrap();
         let (files, nodes, edges) = db.get_stats().unwrap();
         assert_eq!((files, nodes, edges), (0, 0, 0), "fresh DB must be empty");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_history_insert_get_prune() {
+        let temp_dir = std::env::temp_dir().join("comP_test_search_history");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let db = GraphDB::new(temp_dir.to_str().unwrap()).await.unwrap();
+        for i in 0..3 {
+            db.insert_search_history(&SearchHistoryEntry {
+                timestamp: 1000 + i,
+                tool: "run_pipeline".to_string(),
+                query: format!("query {}", i),
+                keywords: Some("[\"survey\"]".to_string()),
+                confidence: Some("high".to_string()),
+                weak_results: Some(false),
+                pivot_count: Some(5),
+                dropped_low_relevance: Some(2),
+                total_tokens: Some(4000),
+                duration_ms: Some(120),
+                top_pivots: Some("[{\"path\":\"a.rs\",\"score\":0.8}]".to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+        }
+
+        // Newest first, limit respected
+        let rows = db.get_search_history(2).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].query, "query 2");
+        assert_eq!(rows[0].weak_results, Some(false));
+        assert_eq!(rows[0].confidence.as_deref(), Some("high"));
+        assert_eq!(rows[1].query, "query 1");
+
+        // All three still there under the retention cap
+        assert_eq!(db.get_search_history(100).unwrap().len(), 3);
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

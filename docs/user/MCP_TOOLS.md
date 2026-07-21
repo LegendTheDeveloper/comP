@@ -61,6 +61,8 @@ Response fields (v0.9.4+, unified relevance scoring):
 
 Note: git-diff files are score-boosted and never dropped by the cutoff, but no longer jump unconditionally ahead of strong matches.
 
+Search history (v0.9.5+): every `run_pipeline` / `get_context` call is recorded in the shared index DB (`search_history` table, newest 500 kept) with its query, filtered keywords, confidence, weak_results, pivot/dropped counts, tokens, duration, and top-8 pivots with scores. Retrieve via the `getSearchHistory` JSON-RPC method (`{ "limit": 50 }`, capped at 200); the VS Code sidebar shows it as the "Recent Searches" panel. Intended for reviewing search quality and tuning the relevance scoring.
+
 ---
 
 ### `get_context`

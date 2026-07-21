@@ -374,6 +374,15 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       this.prevIndexing = isIndexing;
       this.prevCurrentRepo = isIndexing ? currentRepo : null;
 
+      // Recent searches recorded by the daemon. Non-critical: an error here
+      // must not break the stats refresh.
+      let recentSearches: Awaited<ReturnType<DaemonManager["getSearchHistory"]>> = [];
+      try {
+        recentSearches = await this.daemonManager.getSearchHistory(30);
+      } catch (e) {
+        console.debug("[comP] getSearchHistory failed", e);
+      }
+
       this.view.webview.postMessage({
         type: "statsUpdate",
         data: {
@@ -388,6 +397,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
           lastAgentConnection: lastAgentConnectionStr,
           repos: stats.repos || [],
           indexing: stats.indexing ? { isIndexing, currentRepo } : undefined,
+          recentSearches,
         },
       });
     } catch (error) {
@@ -556,6 +566,71 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
       border-radius: 3px;
     }
     .repo-remove-btn:hover { background: var(--vscode-inputValidation-errorBackground, rgba(255,0,0,0.15)); }
+    .searches-section {
+      padding: 10px;
+      background: var(--vscode-input-background);
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 4px;
+      margin-bottom: 12px;
+    }
+    .searches-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .searches-header h3 { font-size: 11px; font-weight: 600; }
+    .searches-hint { font-size: 10px; opacity: 0.6; }
+    .searches-content { max-height: 240px; overflow-y: auto; }
+    .search-entry { border-bottom: 1px solid var(--vscode-editorWidget-border); }
+    .search-entry:last-child { border-bottom: none; }
+    .search-entry summary {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 2px;
+      font-size: 11px;
+      cursor: pointer;
+      list-style: none;
+    }
+    .search-entry summary::-webkit-details-marker { display: none; }
+    .search-entry summary:hover { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.04)); }
+    .conf-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .conf-high { background: var(--vscode-terminal-ansiGreen, #4caf50); }
+    .conf-medium { background: var(--vscode-terminal-ansiYellow, #e2c08d); }
+    .conf-low { background: var(--vscode-errorForeground, #f44747); }
+    .conf-none { background: var(--vscode-descriptionForeground, #888); opacity: 0.5; }
+    .search-query {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      opacity: 0.9;
+    }
+    .search-time { flex-shrink: 0; font-size: 10px; opacity: 0.55; }
+    .search-weak-badge {
+      flex-shrink: 0;
+      font-size: 9px;
+      padding: 0 4px;
+      border-radius: 3px;
+      color: var(--vscode-errorForeground);
+      border: 1px solid var(--vscode-errorForeground);
+      opacity: 0.85;
+    }
+    .search-details { padding: 2px 4px 6px 15px; font-size: 10px; }
+    .search-meta { opacity: 0.65; margin-bottom: 3px; }
+    .search-pivot {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 1px 0;
+      font-family: var(--vscode-editor-font-family, monospace);
+    }
+    .search-pivot-path {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      opacity: 0.85;
+    }
+    .search-pivot-score { flex-shrink: 0; color: var(--vscode-terminal-ansiBlue); }
     .logs-section {
       padding: 10px;
       background: var(--vscode-input-background);
@@ -625,6 +700,13 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
     </div>
     <div class="repos-content" id="reposContent"></div>
   </div>
+  <div class="searches-section" id="searchesSection" style="display:none;">
+    <div class="searches-header">
+      <h3>Recent Searches</h3>
+      <span class="searches-hint" id="searchesCount"></span>
+    </div>
+    <div class="searches-content" id="searchesContent"></div>
+  </div>
   <div class="logs-section">
     <div class="logs-header"><h3>Logs</h3><button onclick="clearLogs()">Clear</button></div>
     <div class="logs-content" id="logsContent"><div class="log-entry">Initializing...</div></div>
@@ -692,6 +774,7 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         } else {
           reposSection.style.display = 'none';
         }
+        renderRecentSearches(d.recentSearches || []);
         const indexingIndicator = document.getElementById('indexingIndicator');
         if (d.indexing && d.indexing.isIndexing) {
           indexingIndicator.style.display = 'flex';
@@ -723,6 +806,94 @@ export class SidebarPanel implements vscode.WebviewViewProvider {
         el.appendChild(div);
       }
     });
+    function formatAgo(unixSeconds) {
+      if (!unixSeconds) return '';
+      const s = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
+      if (s < 60) return s + 's ago';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
+    function renderRecentSearches(searches) {
+      const section = document.getElementById('searchesSection');
+      const content = document.getElementById('searchesContent');
+      if (!searches.length) {
+        section.style.display = 'none';
+        return;
+      }
+      section.style.display = 'block';
+      document.getElementById('searchesCount').textContent = searches.length + ' recorded';
+      // Keep expanded entries expanded across the 5s stats refresh.
+      const openIds = new Set();
+      content.querySelectorAll('details[open]').forEach(el => openIds.add(el.dataset.sid));
+      const wasAtTop = content.scrollTop === 0;
+      content.innerHTML = '';
+      searches.forEach(s => {
+        const details = document.createElement('details');
+        details.className = 'search-entry';
+        details.dataset.sid = s.timestamp + '|' + s.tool + '|' + s.query;
+        if (openIds.has(details.dataset.sid)) details.open = true;
+
+        const summary = document.createElement('summary');
+        const dot = document.createElement('span');
+        dot.className = 'conf-dot conf-' + (s.confidence || 'none');
+        dot.title = s.confidence ? 'Confidence: ' + s.confidence : s.tool;
+        const q = document.createElement('span');
+        q.className = 'search-query';
+        q.textContent = s.query;
+        q.title = s.query;
+        summary.appendChild(dot);
+        summary.appendChild(q);
+        if (s.weak_results) {
+          const weak = document.createElement('span');
+          weak.className = 'search-weak-badge';
+          weak.textContent = 'weak';
+          weak.title = 'No confident matches: the agent was told to fall back to its own search';
+          summary.appendChild(weak);
+        }
+        const time = document.createElement('span');
+        time.className = 'search-time';
+        time.textContent = formatAgo(s.timestamp);
+        summary.appendChild(time);
+        details.appendChild(summary);
+
+        const body = document.createElement('div');
+        body.className = 'search-details';
+        const meta = document.createElement('div');
+        meta.className = 'search-meta';
+        const parts = [s.tool];
+        if (s.pivot_count != null) parts.push(s.pivot_count + ' pivots');
+        if (s.dropped_low_relevance) parts.push(s.dropped_low_relevance + ' dropped');
+        if (s.total_tokens != null) {
+          parts.push((s.total_tokens > 1000 ? (s.total_tokens / 1000).toFixed(1) + 'K' : s.total_tokens) + ' tokens');
+        }
+        if (s.duration_ms != null) parts.push(s.duration_ms + ' ms');
+        meta.textContent = parts.join(' · ');
+        body.appendChild(meta);
+        (s.top_pivots || []).forEach(p => {
+          const row = document.createElement('div');
+          row.className = 'search-pivot';
+          const path = document.createElement('span');
+          path.className = 'search-pivot-path';
+          const fullPath = p.path || p.symbol || '';
+          const segs = fullPath.split('/');
+          path.textContent = segs.length > 2 ? '…/' + segs.slice(-2).join('/') : fullPath;
+          path.title = fullPath + (p.reasons && p.reasons.length ? '  ::  ' + p.reasons.join(', ') : '');
+          row.appendChild(path);
+          if (typeof p.score === 'number') {
+            const score = document.createElement('span');
+            score.className = 'search-pivot-score';
+            score.textContent = p.score.toFixed(2);
+            score.title = 'Relevance score (per-query scale)';
+            row.appendChild(score);
+          }
+          body.appendChild(row);
+        });
+        details.appendChild(body);
+        content.appendChild(details);
+      });
+      if (wasAtTop) content.scrollTop = 0;
+    }
     function updateStatus(running) {
       document.getElementById('statusDot').classList.toggle('running', running);
       document.getElementById('statusText').textContent = running ? 'Daemon running' : 'Daemon stopped';
