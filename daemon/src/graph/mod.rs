@@ -42,6 +42,9 @@ pub struct SearchHistoryEntry {
     pub total_tokens: Option<i64>,
     pub duration_ms: Option<i64>,
     pub top_pivots: Option<String>,
+    /// JSON: per-keyword diagnostics {keywords: [{kw, df, weight, quality}],
+    /// uncovered: [...]}. The raw material for scoring tuning.
+    pub kw_info: Option<String>,
 }
 
 /// Graph database interface for storing code structure
@@ -409,8 +412,8 @@ impl GraphDB {
         conn.execute(
             "INSERT INTO search_history
              (timestamp, tool, query, keywords, confidence, weak_results,
-              pivot_count, dropped_low_relevance, total_tokens, duration_ms, top_pivots)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+              pivot_count, dropped_low_relevance, total_tokens, duration_ms, top_pivots, kw_info)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rusqlite::params![
                 e.timestamp,
                 e.tool,
@@ -423,6 +426,7 @@ impl GraphDB {
                 e.total_tokens,
                 e.duration_ms,
                 e.top_pivots,
+                e.kw_info,
             ],
         )?;
         conn.execute(
@@ -438,7 +442,7 @@ impl GraphDB {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
         let mut stmt = conn.prepare(
             "SELECT id, timestamp, tool, query, keywords, confidence, weak_results,
-                    pivot_count, dropped_low_relevance, total_tokens, duration_ms, top_pivots
+                    pivot_count, dropped_low_relevance, total_tokens, duration_ms, top_pivots, kw_info
              FROM search_history ORDER BY id DESC LIMIT ?",
         )?;
         let rows = stmt.query_map(rusqlite::params![limit as i64], |row| {
@@ -455,6 +459,7 @@ impl GraphDB {
                 total_tokens: row.get(9)?,
                 duration_ms: row.get(10)?,
                 top_pivots: row.get(11)?,
+                kw_info: row.get(12)?,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)

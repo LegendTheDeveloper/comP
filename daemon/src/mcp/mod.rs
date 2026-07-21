@@ -509,6 +509,13 @@ impl MCPServer {
             .collect();
         let keywords = relevance::filter_keywords(&raw_keywords);
 
+        // Relevance config is loaded early: its noise keywords (plus the
+        // tokens of the repo aliases themselves, e.g. game/launcher/cloud)
+        // are skipped in the LIKE and filename channels below.
+        let rel_cfg = Self::load_relevance_config(&self.state.workspace_root, &params);
+        let repo_aliases: Vec<String> = repos.iter().map(|(alias, _)| alias.clone()).collect();
+        let noise = relevance::derive_noise_keywords(&repo_aliases, &rel_cfg.noise_keywords);
+
         // Total node count for IDF-style keyword weighting: rare keywords
         // ("survey") outweigh corpus-common ones ("user", "dashboard").
         let (_, total_nodes, _) = self.state.graph_db.get_stats().unwrap_or((0, 0, 0));
@@ -522,7 +529,7 @@ impl MCPServer {
             .filter(|(_, _, lang)| {
                 matches!(
                     lang.as_str(),
-                    "markdown" | "docx" | "pptx" | "xlsx" | "pdf"
+                    "markdown" | "docx" | "pptx" | "xlsx" | "pdf" | "sql"
                 )
             })
             .map(|(_, path, _)| path.clone())
@@ -555,6 +562,10 @@ impl MCPServer {
         let mut signals = relevance::RawSignals::default();
         let mut recorded_symbols = Vec::new();
         let mut recorded_files = Vec::new();
+        // Per-keyword outcome (rarity + best match quality) for the actually
+        // searched keywords; drives coverage-based confidence and telemetry.
+        let mut kw_stats: std::collections::HashMap<String, relevance::KeywordCoverage> =
+            std::collections::HashMap::new();
 
         if keywords.is_empty() {
             // Degenerate task (no word >= 3 chars): fall back to the raw string.
@@ -570,8 +581,11 @@ impl MCPServer {
         } else {
             // Pre-compute per-keyword document frequency and rarity weight,
             // shared by the symbol LIKE stage and the filename stage.
+            // Noise keywords (repo-alias tokens + config) are excluded here:
+            // they still reach TF-IDF/BM25 but prove nothing lexically.
             let kw_weights: Vec<(&str, i64, f32)> = keywords
                 .iter()
+                .filter(|kw| !noise.contains(&kw.to_lowercase()))
                 .map(|kw| {
                     let df = self.state.graph_db.count_symbol_name_matches(kw).unwrap_or(0);
                     (*kw, df, relevance::keyword_weight(df, total_nodes))
@@ -581,6 +595,32 @@ impl MCPServer {
                 total_nodes > 0
                     && (df as f64) / (total_nodes as f64) > relevance::COMMON_KEYWORD_DF_SHARE
             };
+
+            // Seed coverage for every keyword that will actually be searched.
+            for (kw, df, kw_weight) in &kw_weights {
+                if is_common(*df) {
+                    continue;
+                }
+                kw_stats.insert(
+                    kw.to_lowercase(),
+                    relevance::KeywordCoverage {
+                        keyword: kw.to_lowercase(),
+                        df: *df,
+                        weight: *kw_weight,
+                        best_quality: 0.0,
+                    },
+                );
+            }
+            let note_kw_quality =
+                |stats: &mut std::collections::HashMap<String, relevance::KeywordCoverage>,
+                 kw: &str,
+                 quality: f32| {
+                    if let Some(c) = stats.get_mut(&kw.to_lowercase()) {
+                        if quality > c.best_quality {
+                            c.best_quality = quality;
+                        }
+                    }
+                };
 
             for (kw, df, kw_weight) in &kw_weights {
                 // Very common keywords produce arbitrary LIKE rows; skip LIKE
@@ -603,6 +643,8 @@ impl MCPServer {
                     if lexically_excluded(&file) {
                         continue;
                     }
+                    // Coverage counts CODE evidence only (doc/data excluded).
+                    note_kw_quality(&mut kw_stats, kw, quality);
                     evidence.entry(file).or_default().add_symbol_hit(kw, quality, *kw_weight);
                     code_hits += 1;
                     if code_hits >= 8 {
@@ -631,6 +673,7 @@ impl MCPServer {
                     if quality >= 0.7 {
                         signals.note_symbol(quality, *kw_weight);
                         recorded_files.push(path.clone());
+                        note_kw_quality(&mut kw_stats, kw, quality);
                         evidence
                             .entry(path.clone())
                             .or_default()
@@ -768,6 +811,10 @@ impl MCPServer {
             // If not indexed, skip: no content to serve.
         }
 
+        // Drop generated .Designer.cs twins whose base migration file is also
+        // a candidate: they duplicate content and eat budget.
+        let mut candidates = relevance::drop_designer_twins(candidates);
+
         // Restrict to the requested repos (run_pipeline `repos` scoping). A path
         // whose alias is not in the set is dropped; unknown/legacy paths are kept
         // only when no filter was given.
@@ -781,9 +828,13 @@ impl MCPServer {
         //    Running the cutoff BEFORE level selection means noise files no
         //    longer inflate the total estimate and force skeleton compression
         //    on everything: survivors usually fit at level 0/1.
-        let rel_cfg = Self::load_relevance_config(&self.state.workspace_root, &params);
         let (mut candidates, dropped_low_relevance) = relevance::apply_cutoff(candidates, &rel_cfg);
+        let coverage: Vec<relevance::KeywordCoverage> = kw_stats.values().cloned().collect();
         let (confidence, weak_results) = relevance::assess_confidence(&signals);
+        // Coverage pass: exact matches on generic words must not report
+        // "high" when the keywords that NAME the feature found nothing.
+        let (confidence, weak_results, uncovered_keywords, weak_reason) =
+            relevance::apply_keyword_coverage(confidence, weak_results, &coverage);
         let effective_max = if weak_results {
             // Weak evidence: return a short honest list instead of 20 noise files.
             rel_cfg.max_pivots.min(relevance::WEAK_MAX_PIVOTS)
@@ -957,6 +1008,29 @@ impl MCPServer {
                     })
                 })
                 .collect();
+            // Per-keyword diagnostics: rarity (df/weight) and best match
+            // quality, plus which defining keywords stayed uncovered. This is
+            // the data future scoring tuning reads.
+            let mut kw_info_entries: Vec<Value> = coverage
+                .iter()
+                .map(|c| {
+                    json!({
+                        "kw": c.keyword,
+                        "df": c.df,
+                        "weight": ((c.weight as f64) * 1000.0).round() / 1000.0,
+                        "quality": ((c.best_quality as f64) * 1000.0).round() / 1000.0,
+                    })
+                })
+                .collect();
+            kw_info_entries.sort_by(|a, b| {
+                b["weight"].as_f64().unwrap_or(0.0)
+                    .partial_cmp(&a["weight"].as_f64().unwrap_or(0.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let kw_info = json!({
+                "keywords": kw_info_entries,
+                "uncovered": uncovered_keywords,
+            });
             let entry = crate::graph::SearchHistoryEntry {
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -972,6 +1046,7 @@ impl MCPServer {
                 total_tokens: Some(total_tokens as i64),
                 duration_ms: Some(started.elapsed().as_millis() as i64),
                 top_pivots: serde_json::to_string(&top_pivots).ok(),
+                kw_info: serde_json::to_string(&kw_info).ok(),
                 ..Default::default()
             };
             if let Err(e) = self.state.graph_db.insert_search_history(&entry) {
@@ -995,6 +1070,11 @@ impl MCPServer {
             // its own search instead of trusting these pivots.
             "confidence": confidence,
             "weak_results": weak_results,
+            // Defining (rarest) task keywords that found no code evidence.
+            // Non-empty on greenfield tasks: the feature likely does not
+            // exist yet and the pivots are integration points at best.
+            "uncovered_keywords": uncovered_keywords,
+            "weak_reason": weak_reason,
             "dropped_low_relevance": dropped_low_relevance,
             "savings": savings,
             "full_workspace_tokens": full_workspace_tokens,
@@ -1344,6 +1424,10 @@ impl MCPServer {
                     "duration_ms": e.duration_ms,
                     "top_pivots": e
                         .top_pivots
+                        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+                        .unwrap_or(Value::Null),
+                    "kw_info": e
+                        .kw_info
                         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
                         .unwrap_or(Value::Null),
                 })
@@ -1787,7 +1871,7 @@ impl MCPServer {
             "tools": [
                 {
                     "name": "run_pipeline",
-                    "description": "ALWAYS call this tool FIRST at the start of every task, before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files; this tool replaces all of that. Returns pivot files ranked by a unified relevance score: each pivot carries `score` (normalized per query, comparable only within one response, higher is better) and `match_reasons` (which engines matched it). Weakly-relevant candidates are dropped instead of returned (`dropped_low_relevance` counts them). If the response has `weak_results: true`, the index found nothing confident for this task: fall back to your own search instead of trusting the pivots. MULTI-REPO: this index spans ALL registered repos (the workspace root plus every additional_paths entry); results are searched across every repo by default, and each returned path is repo-qualified as '<repo>/<relative>'. Use the `repos` parameter to scope to specific repos. Files modified in the current branch (git diff HEAD) of any repo get a score boost, are never dropped by the relevance cutoff, and are marked with `git_diff: true`. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
+                    "description": "ALWAYS call this tool FIRST at the start of every task, before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files; this tool replaces all of that. Returns pivot files ranked by a unified relevance score: each pivot carries `score` (normalized per query, comparable only within one response, higher is better) and `match_reasons` (which engines matched it). Weakly-relevant candidates are dropped instead of returned (`dropped_low_relevance` counts them). If the response has `weak_results: true`, the index found nothing confident for this task: fall back to your own search instead of trusting the pivots (`weak_reason` explains why). `uncovered_keywords` lists the defining task keywords that matched nothing in code: when your feature's name is listed there, that feature likely does not exist yet and the pivots are nearby integration points, not feature code. MULTI-REPO: this index spans ALL registered repos (the workspace root plus every additional_paths entry); results are searched across every repo by default, and each returned path is repo-qualified as '<repo>/<relative>'. Use the `repos` parameter to scope to specific repos. Files modified in the current branch (git diff HEAD) of any repo get a score boost, are never dropped by the relevance cutoff, and are marked with `git_diff: true`. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -2718,6 +2802,8 @@ mod tests {
         // Relevance-scoring additions (additive response fields)
         assert!(response["confidence"].is_string());
         assert!(response["weak_results"].is_boolean());
+        assert!(response["uncovered_keywords"].is_array());
+        assert!(response["weak_reason"].is_string() || response["weak_reason"].is_null());
         assert!(response["dropped_low_relevance"].is_number());
         for entry in response["pivot_files"].as_array().unwrap() {
             assert!(entry["score"].is_number(), "every pivot must carry a score");
@@ -3684,6 +3770,15 @@ mod tests {
             result["pivot_files"].as_array().unwrap().len() <= 5,
             "weak results must return at most 5 pivots"
         );
+        // Gibberish keywords are maximally rare and uncovered: the coverage
+        // pass must name them and explain the weakness.
+        let uncovered = result["uncovered_keywords"].as_array().unwrap();
+        assert!(!uncovered.is_empty(), "gibberish keywords must be uncovered");
+        assert!(
+            result["weak_reason"].as_str().unwrap_or("").contains("zzqx"),
+            "weak_reason must name the uncovered keywords, got: {:?}",
+            result["weak_reason"]
+        );
     }
 
     #[tokio::test]
@@ -3839,5 +3934,9 @@ mod tests {
         assert!(latest["pivot_count"].is_number());
         assert!(latest["duration_ms"].is_number());
         assert!(latest["top_pivots"].is_array() || latest["top_pivots"].is_null());
+        // Per-keyword diagnostics recorded for tuning
+        assert!(latest["kw_info"].is_object(), "kw_info must be recorded");
+        assert!(latest["kw_info"]["keywords"].is_array());
+        assert!(latest["kw_info"]["uncovered"].is_array());
     }
 }

@@ -63,6 +63,15 @@ Note: git-diff files are score-boosted and never dropped by the cutoff, but no l
 
 Search history (v0.9.5+): every `run_pipeline` / `get_context` call is recorded in the shared index DB (`search_history` table, newest 500 kept) with its query, filtered keywords, confidence, weak_results, pivot/dropped counts, tokens, duration, and top-8 pivots with scores. Retrieve via the `getSearchHistory` JSON-RPC method (`{ "limit": 50 }`, capped at 200); the VS Code sidebar shows it as the "Recent Searches" panel. Intended for reviewing search quality and tuning the relevance scoring.
 
+Keyword coverage and workspace noise (v0.9.6+):
+
+- Noise keywords: the tokens of the registered repo aliases (e.g. game, launcher, cloud for GameLauncherCloud-*) plus the optional `noise_keywords` config array are skipped in the symbol-LIKE and filename channels; they still count in TF-IDF and BM25. Matching the product's own name proves nothing.
+- `uncovered_keywords` (response): defining (rarest) task keywords that found no code evidence. If the feature's name is listed, the feature likely does not exist yet (greenfield) and the pivots are integration points.
+- `weak_reason` (response): set when all defining keywords are uncovered; confidence drops to "low" and `weak_results` triggers. A single uncovered rarest keyword caps confidence at "medium".
+- Generated `X.Designer.cs` twins are dropped from pivots when their base `X.cs` is also a candidate.
+- `.sql` files now participate in the BM25 doc channel (schema files, RLS policies).
+- `search_history.kw_info` records per-keyword df/weight/best-quality plus the uncovered list for offline tuning.
+
 ---
 
 ### `get_context`

@@ -41,6 +41,15 @@ pub const WEAK_MAX_PIVOTS: usize = 5;
 /// skipped for LIKE search (their top rows are arbitrary); they still
 /// participate in TF-IDF and BM25, whose own IDF handles common terms.
 pub const COMMON_KEYWORD_DF_SHARE: f64 = 0.10;
+/// Keywords at or above this rarity weight are "defining" for the task:
+/// confidence degrades when they produce no code evidence.
+pub const DEFINING_KW_WEIGHT: f32 = 0.5;
+/// A keyword counts as covered when some symbol/filename hit reached this
+/// match quality (substring 0.4 counts; zero-hit keywords do not).
+pub const COVERED_QUALITY: f32 = 0.4;
+/// Only keywords at or above this rarity weight count toward the
+/// distinct-keyword bonus: a launcher+player brand-word pair is not coverage.
+pub const BONUS_KW_WEIGHT: f32 = 0.4;
 
 // ---------------------------------------------------------------------------
 // Stopwords
@@ -86,6 +95,23 @@ pub fn filter_keywords<'a>(keywords: &[&'a str]) -> Vec<&'a str> {
     } else {
         filtered
     }
+}
+
+/// Workspace-specific noise keywords: the tokens that make up the registered
+/// repo aliases (GameLauncherCloud-Backend -> game, launcher, cloud, backend)
+/// are ambient in that workspace by definition. Matching them proves nothing,
+/// so they are skipped in the LIKE and filename channels (TF-IDF and BM25
+/// keep them; their own IDF copes). Merged with the `noise_keywords` config.
+pub fn derive_noise_keywords(aliases: &[String], configured: &[String]) -> HashSet<String> {
+    let mut noise: HashSet<String> = configured.iter().map(|s| s.to_lowercase()).collect();
+    for alias in aliases {
+        for token in split_symbol_tokens(alias) {
+            if token.len() >= 3 {
+                noise.insert(token);
+            }
+        }
+    }
+    noise
 }
 
 // ---------------------------------------------------------------------------
@@ -190,7 +216,11 @@ impl Evidence {
         if weighted > self.sym_best {
             self.sym_best = weighted;
         }
-        self.sym_keywords.insert(keyword.to_lowercase());
+        // Only rare-enough keywords count toward the diversity bonus:
+        // matching two brand words (launcher+player) is not extra coverage.
+        if kw_weight >= BONUS_KW_WEIGHT {
+            self.sym_keywords.insert(keyword.to_lowercase());
+        }
     }
 
     /// Filename (stem) match: same math as a symbol hit, plus a marker so
@@ -281,6 +311,90 @@ pub fn assess_confidence(sig: &RawSignals) -> (&'static str, bool) {
     (if high { "high" } else { "medium" }, false)
 }
 
+/// Per-keyword search outcome: corpus rarity plus the best symbol/filename
+/// match quality any file achieved for it.
+#[derive(Debug, Clone)]
+pub struct KeywordCoverage {
+    pub keyword: String,
+    pub df: i64,
+    pub weight: f32,
+    pub best_quality: f32,
+}
+
+/// Degrade confidence when the DEFINING (rarest) task keywords found nothing.
+///
+/// WHY: exact matches on generic words ("progress", "question") can push raw
+/// signals to "high" even though the keyword that names the feature
+/// ("achievements") matched nothing anywhere. That is exactly the greenfield
+/// case where the agent must be told the feature does not exist yet.
+///
+/// Rules, applied on top of assess_confidence's verdict:
+/// - defining keywords = coverage entries with weight >= DEFINING_KW_WEIGHT
+/// - a keyword is uncovered when best_quality < COVERED_QUALITY
+/// - ALL defining uncovered -> confidence "low", weak_results, weak_reason
+/// - the single rarest defining keyword uncovered -> cap confidence at "medium"
+///
+/// Returns (confidence, weak_results, uncovered_keywords, weak_reason).
+pub fn apply_keyword_coverage(
+    confidence: &'static str,
+    weak_results: bool,
+    coverage: &[KeywordCoverage],
+) -> (&'static str, bool, Vec<String>, Option<String>) {
+    let defining: Vec<&KeywordCoverage> = coverage
+        .iter()
+        .filter(|c| c.weight >= DEFINING_KW_WEIGHT)
+        .collect();
+    let uncovered: Vec<String> = defining
+        .iter()
+        .filter(|c| c.best_quality < COVERED_QUALITY)
+        .map(|c| c.keyword.clone())
+        .collect();
+    if defining.is_empty() || uncovered.is_empty() {
+        return (confidence, weak_results, uncovered, None);
+    }
+    if uncovered.len() == defining.len() {
+        let reason = format!(
+            "defining keywords found no code evidence: {}",
+            uncovered.join(", ")
+        );
+        return ("low", true, uncovered, Some(reason));
+    }
+    let rarest_uncovered = defining
+        .iter()
+        .max_by(|a, b| {
+            a.weight
+                .partial_cmp(&b.weight)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|c| c.best_quality < COVERED_QUALITY)
+        .unwrap_or(false);
+    let conf = if rarest_uncovered && confidence == "high" {
+        "medium"
+    } else {
+        confidence
+    };
+    (conf, weak_results, uncovered, None)
+}
+
+/// Drop generated twin files (`X.Designer.cs`) when their base `X.cs` is also
+/// a candidate: the Designer twin duplicates the migration snapshot and eats
+/// budget. Git-diff files are exempt (actively edited).
+pub fn drop_designer_twins(candidates: Vec<Candidate>) -> Vec<Candidate> {
+    let paths: HashSet<String> = candidates.iter().map(|c| c.path.clone()).collect();
+    candidates
+        .into_iter()
+        .filter(|c| {
+            if c.git_diff {
+                return true;
+            }
+            match c.path.strip_suffix(".Designer.cs") {
+                Some(base) => !paths.contains(&format!("{}.cs", base)),
+                None => true,
+            }
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Candidate, combination, cutoff
 // ---------------------------------------------------------------------------
@@ -324,7 +438,12 @@ pub fn match_reasons(ev: &Evidence, git_diff: bool) -> Vec<String> {
     if ev.sym_best > 0.0 {
         let mut kws: Vec<&str> = ev.sym_keywords.iter().map(|s| s.as_str()).collect();
         kws.sort();
-        reasons.push(format!("symbol:{}", kws.join("+")));
+        if kws.is_empty() {
+            // Hits existed but only on below-bonus-threshold (common) keywords.
+            reasons.push("symbol".to_string());
+        } else {
+            reasons.push(format!("symbol:{}", kws.join("+")));
+        }
     }
     if ev.filename_hit {
         reasons.push("filename".to_string());
@@ -374,8 +493,10 @@ pub fn apply_cutoff(mut candidates: Vec<Candidate>, cfg: &RelevanceConfig) -> (V
 // ---------------------------------------------------------------------------
 
 /// Doc languages get a stricter cap: docs were the observed budget hogs.
+/// `sql` counts as a doc: it has no symbol grammar, so its relevance channel
+/// is BM25 over the raw text (schema files, RLS policies).
 pub fn is_doc_language(lang: &str) -> bool {
-    matches!(lang, "markdown" | "docx" | "pptx" | "xlsx" | "pdf")
+    matches!(lang, "markdown" | "docx" | "pptx" | "xlsx" | "pdf" | "sql")
 }
 
 /// Structured-data languages (i18n bundles, configs, manifests). Their
@@ -413,8 +534,11 @@ pub struct RelevanceConfig {
     pub max_pivots: usize,
     /// Max share of the token budget one pivot may consume.
     pub max_file_budget_share: f32,
-    /// Additional absolute token cap for doc files (markdown/office/pdf).
+    /// Additional absolute token cap for doc files (markdown/office/pdf/sql).
     pub doc_token_cap: usize,
+    /// Extra workspace-specific noise keywords (config-only), merged with the
+    /// tokens derived from repo aliases; skipped in LIKE/filename channels.
+    pub noise_keywords: Vec<String>,
 }
 
 impl Default for RelevanceConfig {
@@ -425,6 +549,7 @@ impl Default for RelevanceConfig {
             max_pivots: 20,
             max_file_budget_share: 0.25,
             doc_token_cap: 1500,
+            noise_keywords: Vec::new(),
         }
     }
 }
@@ -448,6 +573,12 @@ impl RelevanceConfig {
         }
         if let Some(v) = config["doc_token_cap"].as_u64() {
             cfg.doc_token_cap = v as usize;
+        }
+        if let Some(arr) = config["noise_keywords"].as_array() {
+            cfg.noise_keywords = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_lowercase()))
+                .collect();
         }
         if let Some(v) = params["min_score_ratio"].as_f64() {
             cfg.min_score_ratio = v as f32;
@@ -728,6 +859,110 @@ mod tests {
         ev.add_bm25(2.0);
         let reasons = match_reasons(&ev, true);
         assert_eq!(reasons, vec!["symbol:feedback+survey", "bm25", "git_diff"]);
+    }
+
+    #[test]
+    fn test_derive_noise_keywords_from_aliases() {
+        let aliases = vec![
+            "GameLauncherCloud-Backend".to_string(),
+            "GameLauncherCore".to_string(),
+        ];
+        let configured = vec!["Custom".to_string()];
+        let noise = derive_noise_keywords(&aliases, &configured);
+        for kw in ["game", "launcher", "cloud", "backend", "core", "custom"] {
+            assert!(noise.contains(kw), "noise must contain {}", kw);
+        }
+        assert!(!noise.contains("survey"));
+    }
+
+    #[test]
+    fn test_bonus_only_counts_rare_keywords() {
+        let mut ev = Evidence::default();
+        // Two distinct but very common keywords: no diversity bonus.
+        ev.add_symbol_hit("launcher", 0.85, 0.2);
+        ev.add_symbol_hit("player", 0.85, 0.3);
+        assert!(ev.sym_keywords.is_empty());
+        assert_eq!(ev.symbol_component(), ev.sym_best);
+        // Reasons still acknowledge the symbol channel matched.
+        assert_eq!(match_reasons(&ev, false), vec!["symbol"]);
+        // A rare keyword does count.
+        let mut rare = Evidence::default();
+        rare.add_symbol_hit("survey", 0.85, 0.8);
+        assert_eq!(rare.sym_keywords.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_keyword_coverage_all_uncovered() {
+        let coverage = vec![
+            KeywordCoverage { keyword: "achievements".into(), df: 0, weight: 0.9, best_quality: 0.0 },
+            KeywordCoverage { keyword: "trophies".into(), df: 2, weight: 0.8, best_quality: 0.0 },
+        ];
+        let (conf, weak, uncovered, reason) = apply_keyword_coverage("high", false, &coverage);
+        assert_eq!(conf, "low");
+        assert!(weak);
+        assert_eq!(uncovered.len(), 2);
+        let reason = reason.expect("weak_reason must be set");
+        assert!(reason.contains("achievements"), "{}", reason);
+    }
+
+    #[test]
+    fn test_apply_keyword_coverage_rarest_uncovered_caps_at_medium() {
+        let coverage = vec![
+            KeywordCoverage { keyword: "achievements".into(), df: 0, weight: 0.9, best_quality: 0.0 },
+            KeywordCoverage { keyword: "unlock".into(), df: 50, weight: 0.6, best_quality: 1.0 },
+        ];
+        let (conf, weak, uncovered, reason) = apply_keyword_coverage("high", false, &coverage);
+        assert_eq!(conf, "medium");
+        assert!(!weak);
+        assert_eq!(uncovered, vec!["achievements".to_string()]);
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn test_apply_keyword_coverage_covered_stays_high() {
+        let coverage = vec![
+            KeywordCoverage { keyword: "license".into(), df: 100, weight: 0.7, best_quality: 1.0 },
+            KeywordCoverage { keyword: "entitlement".into(), df: 40, weight: 0.8, best_quality: 0.85 },
+            // A common keyword with no hits must not degrade anything.
+            KeywordCoverage { keyword: "backend".into(), df: 9000, weight: 0.3, best_quality: 0.0 },
+        ];
+        let (conf, weak, uncovered, reason) = apply_keyword_coverage("high", false, &coverage);
+        assert_eq!(conf, "high");
+        assert!(!weak);
+        assert!(uncovered.is_empty());
+        assert!(reason.is_none());
+    }
+
+    #[test]
+    fn test_drop_designer_twins() {
+        let cands = vec![
+            cand("Backend/Migrations/AddThing.cs", 0.5, false),
+            cand("Backend/Migrations/AddThing.Designer.cs", 0.5, false),
+            // Lone Designer without its base stays.
+            cand("Backend/Migrations/Orphan.Designer.cs", 0.4, false),
+            // Git-diff Designer is exempt even with the base present.
+            cand("Backend/Migrations/Edited.cs", 0.4, false),
+            cand("Backend/Migrations/Edited.Designer.cs", 0.4, true),
+        ];
+        let kept = drop_designer_twins(cands);
+        let paths: Vec<&str> = kept.iter().map(|c| c.path.as_str()).collect();
+        assert!(paths.contains(&"Backend/Migrations/AddThing.cs"));
+        assert!(!paths.contains(&"Backend/Migrations/AddThing.Designer.cs"));
+        assert!(paths.contains(&"Backend/Migrations/Orphan.Designer.cs"));
+        assert!(paths.contains(&"Backend/Migrations/Edited.Designer.cs"));
+    }
+
+    #[test]
+    fn test_config_noise_keywords_parse() {
+        let config = json!({ "noise_keywords": ["Foo", "bar"] });
+        let cfg = RelevanceConfig::from_sources(&config, &Value::Null);
+        assert_eq!(cfg.noise_keywords, vec!["foo".to_string(), "bar".to_string()]);
+    }
+
+    #[test]
+    fn test_sql_is_doc_not_data() {
+        assert!(is_doc_language("sql"));
+        assert!(!is_data_language("sql"));
     }
 
     #[test]

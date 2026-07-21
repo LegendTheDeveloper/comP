@@ -115,10 +115,22 @@ impl Schema {
                 dropped_low_relevance INTEGER,        -- cutoff drops (run_pipeline)
                 total_tokens INTEGER,
                 duration_ms INTEGER,
-                top_pivots TEXT                       -- JSON [{path, score, reasons}]
+                top_pivots TEXT,                      -- JSON [{path, score, reasons}]
+                kw_info TEXT                          -- JSON {keywords:[{kw,df,weight,quality}], uncovered:[...]}
             );
             CREATE INDEX IF NOT EXISTS idx_search_history_ts ON search_history(timestamp DESC);"
         )?;
+
+        // Migration 004: kw_info column for search_history tables created by
+        // v0.9.5 (before the column existed). Same manual guard as char_count.
+        let has_kw_info: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('search_history') WHERE name='kw_info'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).map_err(|e| anyhow::anyhow!("Migration guard query failed: {}", e))? > 0;
+        if !has_kw_info {
+            conn.execute_batch("ALTER TABLE search_history ADD COLUMN kw_info TEXT;")?;
+        }
 
         // Initialize metadata keys used by token tracking
         for key in &["tokens_sent", "tokens_saved", "queries_count", "version"] {
