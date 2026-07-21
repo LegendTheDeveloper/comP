@@ -10,6 +10,7 @@
 // Protocol: JSON-RPC 2.0 over stdio
 
 mod compress;
+mod relevance;
 
 use anyhow::{Result, anyhow};
 use log::info;
@@ -55,6 +56,20 @@ pub struct SessionMemory {
 
 fn get_session_memory_path(root: &str) -> std::path::PathBuf {
     std::path::Path::new(root).join(".comp").join("session-memory.json")
+}
+
+/// A candidate that survived budget packing, with its effective compression
+/// level after per-file cap escalation (see pack_within_budget).
+struct PackedFile {
+    cand: relevance::Candidate,
+    /// Level used for the token estimate: the global level, possibly escalated
+    /// per-file to fit the cap.
+    level: i64,
+    /// Estimated tokens (equal to the cap when truncated).
+    tokens: usize,
+    /// True when even level-2 compression exceeds this file's cap; the file is
+    /// included (it passed relevance) but hard-capped.
+    truncated: bool,
 }
 
 /// Render a backtick-quoted, comma-separated list capped at `cap` items,
@@ -426,7 +441,7 @@ impl MCPServer {
     /// {
     ///   "task": "add user authentication to login endpoint",
     ///   "max_tokens": 8000,
-    ///   "include_tests": true
+    ///   "max_pivots": 10
     /// }
     /// ```
     ///
@@ -434,12 +449,16 @@ impl MCPServer {
     /// ```json
     /// {
     ///   "pivot_files": [
-    ///     { "path": "src/auth/authenticate.ts", "symbols": 5, "tokens": 500 }
+    ///     { "path": "src/auth/authenticate.ts", "symbols": 5, "tokens": 500,
+    ///       "score": 0.62, "match_reasons": ["symbol:authentication", "tfidf"] }
     ///   ],
     ///   "related_files": [
-    ///     { "path": "src/types/user.ts", "symbols": 3, "tokens": 200 }
+    ///     { "path": "src/types/user.ts", "edge_count": 3 }
     ///   ],
     ///   "total_tokens": 700,
+    ///   "confidence": "high",
+    ///   "weak_results": false,
+    ///   "dropped_low_relevance": 7,
     ///   "savings": "62%",
     ///   "estimated_cost": "$0.02"
     /// }
@@ -476,34 +495,22 @@ impl MCPServer {
         let explicit_compression: Option<i64> = params.get("compression_level")
             .and_then(|v| v.as_i64());
 
-        // 1. Split task into words and query symbol name LIKE for each keyword -> pivot candidates
+        // 1. Split task into words, drop stopwords, and gather PER-FILE engine
+        //    evidence (symbol LIKE match quality, TF-IDF cosine, BM25) instead
+        //    of a flat unscored hit list. Raw scores survive to the packing
+        //    stage where they are combined into one relevance score per file.
         // WHY: A LIKE query on the entire task string (e.g. "fix auth bug") would return 0 hits.
         //      We search each word individually and merge with OR to match related files.
-        let keywords: Vec<&str> = task
+        let raw_keywords: Vec<&str> = task
             .split(|c: char| !c.is_alphanumeric() && c != '_')
             .filter(|w| w.len() >= 3)
             .collect();
+        let keywords = relevance::filter_keywords(&raw_keywords);
 
-        let mut all_hits: Vec<(String, String, String, i32)> = if keywords.is_empty() {
-            self.state.graph_db.search_symbols_by_name(task, 10)?
-        } else {
-            let mut merged = Vec::new();
-            for kw in &keywords {
-                merged.extend(self.state.graph_db.search_symbols_by_name(kw, 5)?);
-            }
-            merged
-        };
-        // Augment LIKE hits with TF-IDF semantic results (may find files not matched by exact LIKE)
-        {
-            let se = self.state.search_engine.lock().await;
-            for hit in se.search(task, 20).unwrap_or_default() {
-                all_hits.push((hit.file_path, hit.symbol_name, hit.kind, hit.line as i32));
-            }
-        }
+        // Total node count for IDF-style keyword weighting: rare keywords
+        // ("survey") outweigh corpus-common ones ("user", "dashboard").
+        let (_, total_nodes, _) = self.state.graph_db.get_stats().unwrap_or((0, 0, 0));
 
-        // Sort files by first occurrence before applying limits
-        all_hits.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
-        let hits = all_hits;
         let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
         let char_counts = self.state.graph_db.get_file_char_counts()?;
         let files_list = self.state.graph_db.list_files()?;
@@ -519,7 +526,7 @@ impl MCPServer {
             .map(|(_, path, _)| path.clone())
             .collect();
         let indexed_doc_count = doc_paths.len();
-        // WHY: Save language per path before consuming files_list — needed for content compression.
+        // WHY: Save language per path before consuming files_list: needed for content compression.
         let mut path_to_lang: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let path_to_id: std::collections::HashMap<String, i64> = files_list
             .into_iter()
@@ -528,11 +535,142 @@ impl MCPServer {
                 (path, id)
             })
             .collect();
+        // Doc files get relevance only through the BM25 channel: their headings
+        // are indexed as symbols, so counting those as symbol/TF-IDF evidence
+        // would double-dip and let big docs outrank real code matches.
+        // Data files (json/yaml/xml) are excluded from those channels too:
+        // their "symbols" are data keys (an i18n bundle exact-matches almost
+        // any UI word); they can still earn filename evidence.
+        let lexically_excluded = |p: &str| -> bool {
+            path_to_lang
+                .get(p)
+                .map(|l| relevance::is_doc_language(l) || relevance::is_data_language(l))
+                .unwrap_or(false)
+        };
 
-        // 2. Collect candidates in relevance order (deduped by file path).
-        //    Content compression is deferred until after level selection so we
-        //    only read each file once at the chosen level.
-        let mut seen = std::collections::HashSet::new();
+        let mut evidence: std::collections::HashMap<String, relevance::Evidence> =
+            std::collections::HashMap::new();
+        let mut signals = relevance::RawSignals::default();
+        let mut recorded_symbols = Vec::new();
+        let mut recorded_files = Vec::new();
+
+        if keywords.is_empty() {
+            // Degenerate task (no word >= 3 chars): fall back to the raw string.
+            for (file, name, _kind, _line) in self.state.graph_db.search_symbols_by_name(task, 10)? {
+                let quality = relevance::symbol_match_quality(&name, task);
+                signals.note_symbol(quality, 1.0);
+                recorded_symbols.push(name.clone());
+                recorded_files.push(file.clone());
+                if !lexically_excluded(&file) {
+                    evidence.entry(file).or_default().add_symbol_hit(task, quality, 1.0);
+                }
+            }
+        } else {
+            // Pre-compute per-keyword document frequency and rarity weight,
+            // shared by the symbol LIKE stage and the filename stage.
+            let kw_weights: Vec<(&str, i64, f32)> = keywords
+                .iter()
+                .map(|kw| {
+                    let df = self.state.graph_db.count_symbol_name_matches(kw).unwrap_or(0);
+                    (*kw, df, relevance::keyword_weight(df, total_nodes))
+                })
+                .collect();
+            let is_common = |df: i64| -> bool {
+                total_nodes > 0
+                    && (df as f64) / (total_nodes as f64) > relevance::COMMON_KEYWORD_DF_SHARE
+            };
+
+            for (kw, df, kw_weight) in &kw_weights {
+                // Very common keywords produce arbitrary LIKE rows; skip LIKE
+                // for them. They still participate in TF-IDF and BM25, whose
+                // own IDF handles common terms.
+                if is_common(*df) {
+                    continue;
+                }
+                // Over-fetch, then keep the first 8 CODE hits: doc headings are
+                // indexed as symbols and would otherwise consume the whole
+                // LIMIT before any code symbol surfaces.
+                let mut code_hits = 0usize;
+                for (file, name, _kind, _line) in
+                    self.state.graph_db.search_symbols_by_name(kw, 25)?
+                {
+                    let quality = relevance::symbol_match_quality(&name, kw);
+                    signals.note_symbol(quality, *kw_weight);
+                    recorded_symbols.push(name.clone());
+                    recorded_files.push(file.clone());
+                    if lexically_excluded(&file) {
+                        continue;
+                    }
+                    evidence.entry(file).or_default().add_symbol_hit(kw, quality, *kw_weight);
+                    code_hits += 1;
+                    if code_hits >= 8 {
+                        break;
+                    }
+                }
+            }
+
+            // Filename evidence: a non-doc file whose NAME (stem) matches a
+            // task keyword is a strong candidate even when no indexed symbol
+            // matched (e.g. onboarding-survey.component.ts for "survey").
+            // Only exact/token/prefix quality counts; substring is too noisy.
+            for (path, lang) in &path_to_lang {
+                if relevance::is_doc_language(lang) {
+                    continue;
+                }
+                let stem = std::path::Path::new(path)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                for (kw, df, kw_weight) in &kw_weights {
+                    if is_common(*df) {
+                        continue;
+                    }
+                    let quality = relevance::symbol_match_quality(stem, kw);
+                    if quality >= 0.7 {
+                        signals.note_symbol(quality, *kw_weight);
+                        recorded_files.push(path.clone());
+                        evidence
+                            .entry(path.clone())
+                            .or_default()
+                            .add_filename_hit(kw, quality, *kw_weight);
+                    }
+                }
+            }
+        }
+
+        // TF-IDF semantic results (may find files not matched by exact LIKE).
+        // Raw cosine scores are kept and max-normalized during combination.
+        // Doc/data files still count toward raw signals (the index DID find
+        // them) but get no per-file evidence: BM25 is the doc channel. Like
+        // the LIKE stage, over-fetch and keep the first 20 CODE hits so
+        // doc/i18n files cannot consume the whole cut before any code file.
+        {
+            let se = self.state.search_engine.lock().await;
+            let mut code_hits = 0usize;
+            let tfidf_hits = se.search(task, 100).unwrap_or_default();
+            log::debug!(
+                "tfidf: {} hits for task; top: {:?}",
+                tfidf_hits.len(),
+                tfidf_hits
+                    .iter()
+                    .take(8)
+                    .map(|h| (h.file_path.as_str(), h.score, h.is_fallback))
+                    .collect::<Vec<_>>()
+            );
+            for hit in tfidf_hits {
+                signals.note_tfidf(hit.score, hit.is_fallback);
+                recorded_symbols.push(hit.symbol_name.clone());
+                recorded_files.push(hit.file_path.clone());
+                if lexically_excluded(&hit.file_path) {
+                    continue;
+                }
+                evidence.entry(hit.file_path).or_default().add_tfidf(hit.score);
+                code_hits += 1;
+                if code_hits >= 20 {
+                    break;
+                }
+            }
+        }
         // Uncompressed token estimate: real file size (chars/4) when indexed;
         // symbol-count heuristic (~50 tokens/symbol) only as fallback.
         let base_tokens_for = |path: &str, sym: usize| -> usize {
@@ -543,23 +681,6 @@ impl MCPServer {
                 .filter(|c| *c > 0)
                 .unwrap_or_else(|| sym.saturating_mul(50))
         };
-        // (path, sym_count, base_tokens)
-        let mut candidates: Vec<(String, usize, usize)> = Vec::new();
-        let mut recorded_symbols = Vec::new();
-        let mut recorded_files = Vec::new();
-        for (file, name, _kind, _line) in hits {
-            recorded_symbols.push(name.clone());
-            recorded_files.push(file.clone());
-            if seen.insert(file.clone()) {
-                let sym = path_to_id
-                    .get(&file)
-                    .and_then(|id| symbol_counts.get(id))
-                    .copied()
-                    .unwrap_or(0) as usize;
-                let base = base_tokens_for(&file, sym);
-                candidates.push((file, sym, base));
-            }
-        }
 
         // BM25 full-text search (complements search for Markdown and Office files)
         // WHY: Symbol LIKE queries only match headings, missing body content keywords.
@@ -578,69 +699,98 @@ impl MCPServer {
                 20,
             );
             bm25_hit_count = bm25_hits.len();
-            for (path, _score) in bm25_hits {
+            for (path, score) in bm25_hits {
+                signals.note_bm25(score);
                 recorded_files.push(path.clone());
-                if seen.insert(path.clone()) {
-                    let sym = path_to_id
-                        .get(&path)
-                        .and_then(|id| symbol_counts.get(id))
-                        .copied()
-                        .unwrap_or(0) as usize;
-                    let base = base_tokens_for(&path, sym);
-                    candidates.push((path, sym, base));
-                }
+                evidence.entry(path).or_default().add_bm25(score);
             }
         }
 
-        // Git diff boost: move currently-modified files to the front of candidates.
-        // Files in `git diff HEAD` are the ones the agent is actively working on, so they
-        // should rank above purely relevance-matched files regardless of TF-IDF score.
-        // Any error (git unavailable, not a repo, no commits, detached HEAD without parent)
-        // silently degrades to no boost — the rest of the pipeline is unaffected.
+        // 2. Build scored candidates from the accumulated evidence. TF-IDF and
+        //    BM25 raw scores are max-normalized over this query's result set
+        //    (the standard fix for BM25's unbounded scale vs cosine's [0, 1]).
+        let max_tfidf_raw = evidence.values().map(|e| e.tfidf_raw).fold(0.0f32, f32::max);
+        let max_bm25_raw = evidence.values().map(|e| e.bm25_raw).fold(0.0f64, f64::max);
+
+        // Git diff: files in `git diff HEAD` are the ones the agent is actively
+        // working on. They get an additive score boost and are exempt from the
+        // relevance cutoff, but no longer jump ahead of strong matches
+        // unconditionally (the old partition-to-front behavior).
+        // Any error (git unavailable, not a repo, no commits, detached HEAD
+        // without parent) silently degrades to no boost.
         let git_diff_files = get_git_diff_files_multi(&repos);
-        let git_diff_boosted_count: usize;
-        if git_diff_files.is_empty() {
-            git_diff_boosted_count = 0;
-        } else {
-            // Partition existing candidates into diff-hit and others.
-            // partition() preserves relative order within each group.
-            let (mut diff_cands, other_cands): (Vec<_>, Vec<_>) = candidates
-                .into_iter()
-                .partition(|(path, _, _)| git_diff_files.contains(path));
 
-            // Insert git-diff files that were not matched by LIKE/TF-IDF/BM25 but are indexed.
-            // Sort for deterministic ordering (HashSet iteration is non-deterministic).
-            let mut unmatched: Vec<&String> = git_diff_files
-                .iter()
-                .filter(|p| !seen.contains(*p))
-                .collect();
-            unmatched.sort();
-            for diff_path in unmatched {
-                if let Some(&file_id) = path_to_id.get(diff_path) {
-                    let sym = symbol_counts.get(&file_id).copied().unwrap_or(0) as usize;
-                    let base = base_tokens_for(diff_path, sym);
-                    diff_cands.push((diff_path.clone(), sym, base));
-                    recorded_files.push(diff_path.clone());
-                }
-                // If not indexed, skip — no content to serve.
+        let mut candidates: Vec<relevance::Candidate> = Vec::new();
+        for (file, ev) in &evidence {
+            let sym = path_to_id
+                .get(file)
+                .and_then(|id| symbol_counts.get(id))
+                .copied()
+                .unwrap_or(0) as usize;
+            let base = base_tokens_for(file, sym);
+            let git_diff = git_diff_files.contains(file);
+            candidates.push(relevance::Candidate {
+                path: file.clone(),
+                sym_count: sym,
+                base_tokens: base,
+                score: relevance::combine_score(ev, max_tfidf_raw, max_bm25_raw, git_diff),
+                reasons: relevance::match_reasons(ev, git_diff),
+                git_diff,
+            });
+        }
+
+        // Git-diff files with no engine evidence still enter (boost-only score)
+        // as long as they are indexed. Sort for deterministic ordering
+        // (HashSet iteration is non-deterministic).
+        let mut git_diff_boosted_count = candidates.iter().filter(|c| c.git_diff).count();
+        let mut unmatched: Vec<&String> = git_diff_files
+            .iter()
+            .filter(|p| !evidence.contains_key(*p))
+            .collect();
+        unmatched.sort();
+        for diff_path in unmatched {
+            if let Some(&file_id) = path_to_id.get(diff_path) {
+                let sym = symbol_counts.get(&file_id).copied().unwrap_or(0) as usize;
+                let base = base_tokens_for(diff_path, sym);
+                candidates.push(relevance::Candidate {
+                    path: diff_path.clone(),
+                    sym_count: sym,
+                    base_tokens: base,
+                    score: relevance::GIT_DIFF_BOOST,
+                    reasons: vec!["git_diff".to_string()],
+                    git_diff: true,
+                });
+                recorded_files.push(diff_path.clone());
+                git_diff_boosted_count += 1;
             }
-
-            git_diff_boosted_count = diff_cands.len();
-            // Reassemble: diff-boosted files first, then relevance-ranked remainder.
-            candidates = diff_cands;
-            candidates.extend(other_cands);
+            // If not indexed, skip: no content to serve.
         }
 
         // Restrict to the requested repos (run_pipeline `repos` scoping). A path
         // whose alias is not in the set is dropped; unknown/legacy paths are kept
         // only when no filter was given.
         if let Some(ref set) = repo_filter {
-            candidates.retain(|(p, _, _)| {
-                repo_alias_of(&repos, p).map(|a| set.contains(&a)).unwrap_or(false)
+            candidates.retain(|c| {
+                repo_alias_of(&repos, &c.path).map(|a| set.contains(&a)).unwrap_or(false)
             });
         }
 
-        // 3. Choose compression level and pack within budget.
+        // 3. Sort by unified score, drop the weak tail, and cap pivot count.
+        //    Running the cutoff BEFORE level selection means noise files no
+        //    longer inflate the total estimate and force skeleton compression
+        //    on everything: survivors usually fit at level 0/1.
+        let rel_cfg = Self::load_relevance_config(&self.state.workspace_root, &params);
+        let (mut candidates, dropped_low_relevance) = relevance::apply_cutoff(candidates, &rel_cfg);
+        let (confidence, weak_results) = relevance::assess_confidence(&signals);
+        let effective_max = if weak_results {
+            // Weak evidence: return a short honest list instead of 20 noise files.
+            rel_cfg.max_pivots.min(relevance::WEAK_MAX_PIVOTS)
+        } else {
+            rel_cfg.max_pivots
+        };
+        candidates.truncate(effective_max);
+
+        // 4. Choose compression level and pack within budget.
         //
         //    Fixed mode  (explicit_compression = Some(n)):
         //      Use level n without adjustment; greedy-pack files at that level.
@@ -648,46 +798,74 @@ impl MCPServer {
         //    Auto mode   (explicit_compression = None):
         //      Try levels 0 → 1 → 2 until total estimate fits budget.
         //      If level 2 still overflows, stay at 2 and greedy-truncate.
+        //
+        //    Packing also enforces a per-file token cap (a share of the budget,
+        //    stricter for doc files) by escalating that file's compression
+        //    level, then hard-truncating as a last resort. A single huge doc
+        //    can no longer eat most of the budget.
         let (final_level, budget_adjusted) = match explicit_compression {
             Some(level) => (level, false),
             None => Self::choose_compression_level(&candidates, budget),
         };
-        let packed = Self::pack_within_budget(&candidates, budget, final_level);
+        let packed =
+            Self::pack_within_budget(&candidates, budget, final_level, &rel_cfg, &path_to_lang);
 
-        // 4. Build pivot_files JSON, compressing content at the chosen level.
+        // 5. Build pivot_files JSON, compressing content at the chosen level.
         //    Per-extension rules from .comp/config.json may override level per file.
         let ws = self.state.workspace_root.clone();
         let compression_rules = Self::load_compression_rules(&ws);
         let mut pivot_files: Vec<Value> = Vec::new();
         let mut pivot_paths: Vec<String> = Vec::new();
         let mut compression_rules_applied = false;
-        for (file, sym, base) in &packed {
-            let file_level = match Self::apply_compression_rule(file, &compression_rules) {
-                Some(rule_level) if rule_level != final_level => {
-                    compression_rules_applied = true;
-                    rule_level
-                }
-                _ => final_level,
-            };
-            let tokens = Self::estimate_tokens(*base, file_level);
+        for pf in &packed {
+            // Explicit per-file rules win over both the global level and the
+            // per-file cap escalation (user-configured, including truncation).
+            let (file_level, tokens, truncated) =
+                match Self::apply_compression_rule(&pf.cand.path, &compression_rules) {
+                    Some(rule_level) if rule_level != final_level => {
+                        compression_rules_applied = true;
+                        (rule_level, Self::estimate_tokens(pf.cand.base_tokens, rule_level), false)
+                    }
+                    _ => (pf.level, pf.tokens, pf.truncated),
+                };
             let mut entry = json!({
-                "path": file,
-                "symbols": sym,
-                "tokens": tokens
+                "path": pf.cand.path,
+                "symbols": pf.cand.sym_count,
+                "tokens": tokens,
+                // Score is max-normalized PER QUERY: comparable within this
+                // response, never across calls.
+                "score": ((pf.cand.score as f64) * 1000.0).round() / 1000.0,
+                "match_reasons": pf.cand.reasons,
             });
-            if git_diff_files.contains(file) {
+            if pf.cand.git_diff {
                 entry["git_diff"] = Value::Bool(true);
             }
+            if truncated {
+                entry["truncated"] = Value::Bool(true);
+            }
             if include_content {
-                let full_path = qualified_to_abs(&repos, file, &ws);
-                let lang = path_to_lang.get(file).map(|s| s.as_str()).unwrap_or("");
+                let full_path = qualified_to_abs(&repos, &pf.cand.path, &ws);
+                let lang = path_to_lang.get(&pf.cand.path).map(|s| s.as_str()).unwrap_or("");
                 let file_compression = compress::CompressionLevel::from_i64(file_level);
                 if let Ok(raw) = std::fs::read_to_string(&full_path) {
-                    entry["content"] = Value::String(compress::compress(&raw, lang, file_compression));
+                    let mut content = compress::compress(&raw, lang, file_compression);
+                    if truncated {
+                        // ~4 chars per token, cut at a char boundary (UTF-8 safe).
+                        let max_chars = tokens.saturating_mul(4);
+                        if content.len() > max_chars {
+                            let mut cut = max_chars;
+                            while cut > 0 && !content.is_char_boundary(cut) {
+                                cut -= 1;
+                            }
+                            content.truncate(cut);
+                            content.push_str("\n...[truncated by comP: per-file cap]");
+                        }
+                    }
+                    entry["content"] = Value::String(content);
                 }
             }
             pivot_files.push(entry);
-            pivot_paths.push(file.clone());
+            pivot_paths.push(pf.cand.path.clone());
         }
 
         let total_tokens: usize = pivot_files
@@ -772,6 +950,13 @@ impl MCPServer {
             "compression_rules_applied": compression_rules_applied,
             "budget_exceeded_by_rules": budget_exceeded_by_rules,
             "budget_adjusted": budget_adjusted,
+            // Result-strength signals (from RAW engine evidence, not the
+            // per-query-normalized scores). When weak_results is true the
+            // index found nothing confident: the agent should fall back to
+            // its own search instead of trusting these pivots.
+            "confidence": confidence,
+            "weak_results": weak_results,
+            "dropped_low_relevance": dropped_low_relevance,
             "savings": savings,
             "full_workspace_tokens": full_workspace_tokens,
             "estimated_cost": cost,
@@ -791,6 +976,17 @@ impl MCPServer {
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let json: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
         json["default_budget_tokens"].as_u64().unwrap_or(8000) as usize
+    }
+
+    /// Read relevance/cutoff tunables from `.comp/config.json`, then apply
+    /// run_pipeline param overrides (param > config > default). Keys:
+    /// `min_score_abs` (config-only), `min_score_ratio`, `max_pivots`,
+    /// `max_file_budget_share`, `doc_token_cap`.
+    fn load_relevance_config(root: &str, params: &Value) -> relevance::RelevanceConfig {
+        let path = std::path::Path::new(root).join(".comp/config.json");
+        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let config: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
+        relevance::RelevanceConfig::from_sources(&config, params)
     }
 
     /// Read `compression_rules` from `.comp/config.json`.
@@ -898,11 +1094,11 @@ impl MCPServer {
     /// Choose the lowest compression level whose total token estimate fits within budget.
     ///
     /// Returns (level, budget_adjusted).
-    /// If even level 2 overflows, returns (2, true) — greedy truncation handles the rest.
-    fn choose_compression_level(candidates: &[(String, usize, usize)], budget: usize) -> (i64, bool) {
+    /// If even level 2 overflows, returns (2, true); greedy truncation handles the rest.
+    fn choose_compression_level(candidates: &[relevance::Candidate], budget: usize) -> (i64, bool) {
         for level in [0i64, 1, 2] {
             let total: usize = candidates.iter()
-                .map(|(_, _, base)| Self::estimate_tokens(*base, level))
+                .map(|c| Self::estimate_tokens(c.base_tokens, level))
                 .sum();
             if total <= budget {
                 return (level, level > 0);
@@ -911,22 +1107,47 @@ impl MCPServer {
         (2, true)
     }
 
-    /// Greedily pack candidates within budget at the given compression level.
+    /// Greedily pack candidates within budget at the given compression level,
+    /// enforcing a per-file token cap (share of budget; stricter for docs).
     ///
-    /// Iterates in relevance order (highest first). A file that exceeds the remaining
-    /// budget is skipped rather than stopping the loop, so smaller subsequent files
-    /// can still fill remaining space.
+    /// Iterates in relevance order (highest score first). A file whose estimate
+    /// exceeds its cap gets its own compression level escalated (level+1, then 2);
+    /// if the level-2 estimate is STILL over the cap the file is included anyway
+    /// (it passed relevance) but hard-capped and flagged `truncated`. A file that
+    /// exceeds the remaining budget is skipped rather than stopping the loop, so
+    /// smaller subsequent files can still fill remaining space.
     fn pack_within_budget(
-        candidates: &[(String, usize, usize)],
+        candidates: &[relevance::Candidate],
         budget: usize,
         level: i64,
-    ) -> Vec<(String, usize, usize)> {
+        cfg: &relevance::RelevanceConfig,
+        path_to_lang: &std::collections::HashMap<String, String>,
+    ) -> Vec<PackedFile> {
         let mut remaining = budget;
         let mut packed = Vec::new();
-        for (path, sym, base) in candidates {
-            let tokens = Self::estimate_tokens(*base, level);
+        for cand in candidates {
+            let tight_cap = path_to_lang
+                .get(&cand.path)
+                .map(|l| relevance::is_doc_language(l) || relevance::is_data_language(l))
+                .unwrap_or(false);
+            let cap = relevance::file_cap(budget, cfg, tight_cap);
+            let mut file_level = level;
+            let mut tokens = Self::estimate_tokens(cand.base_tokens, file_level);
+            while tokens > cap && file_level < 2 {
+                file_level += 1;
+                tokens = Self::estimate_tokens(cand.base_tokens, file_level);
+            }
+            let truncated = tokens > cap;
+            if truncated {
+                tokens = cap;
+            }
             if tokens <= remaining {
-                packed.push((path.clone(), *sym, *base));
+                packed.push(PackedFile {
+                    cand: cand.clone(),
+                    level: file_level,
+                    tokens,
+                    truncated,
+                });
                 remaining = remaining.saturating_sub(tokens);
             }
         }
@@ -1464,7 +1685,7 @@ impl MCPServer {
             "tools": [
                 {
                     "name": "run_pipeline",
-                    "description": "ALWAYS call this tool FIRST at the start of every task — before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files — this tool replaces all of that. Returns pivot files and related symbols ranked by relevance. MULTI-REPO: this index spans ALL registered repos (the workspace root plus every additional_paths entry); results are searched across every repo by default, and each returned path is repo-qualified as '<repo>/<relative>'. Use the `repos` parameter to scope to specific repos. Files modified in the current branch (git diff HEAD) of any repo are ranked first and marked with `git_diff: true`. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
+                    "description": "ALWAYS call this tool FIRST at the start of every task, before reading files, running grep/find/Bash searches, or exploring the codebase manually. Covers coding tasks (bug fix, feature, refactor) and documentation tasks (writing/editing Markdown). Do NOT use Read, Bash, or get_context to locate relevant files; this tool replaces all of that. Returns pivot files ranked by a unified relevance score: each pivot carries `score` (normalized per query, comparable only within one response, higher is better) and `match_reasons` (which engines matched it). Weakly-relevant candidates are dropped instead of returned (`dropped_low_relevance` counts them). If the response has `weak_results: true`, the index found nothing confident for this task: fall back to your own search instead of trusting the pivots. MULTI-REPO: this index spans ALL registered repos (the workspace root plus every additional_paths entry); results are searched across every repo by default, and each returned path is repo-qualified as '<repo>/<relative>'. Use the `repos` parameter to scope to specific repos. Files modified in the current branch (git diff HEAD) of any repo get a score boost, are never dropped by the relevance cutoff, and are marked with `git_diff: true`. IMPORTANT: The 'task' parameter MUST be in English. Translate queries from other languages (e.g. Japanese) to English before calling.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -1481,9 +1702,21 @@ impl MCPServer {
                                 "type": "integer",
                                 "description": "Token budget for returned context. Default: 8000"
                             },
-                            "include_tests": {
-                                "type": "boolean",
-                                "description": "Include test files in results. Default: false"
+                            "min_score_ratio": {
+                                "type": "number",
+                                "description": "Drop pivots scoring below this fraction of the top score (0-1). Default: 0.30. Raise for stricter filtering, lower to see more marginal matches."
+                            },
+                            "max_pivots": {
+                                "type": "integer",
+                                "description": "Maximum number of pivot files returned. Default: 20 (capped at 5 when weak_results is true)."
+                            },
+                            "max_file_budget_share": {
+                                "type": "number",
+                                "description": "Max share of the token budget a single pivot may consume (0.05-1). Default: 0.25. Oversized files get extra per-file compression, then hard truncation (marked truncated: true)."
+                            },
+                            "doc_token_cap": {
+                                "type": "integer",
+                                "description": "Additional absolute token cap for doc pivots (markdown/office/pdf). Default: 1500."
                             },
                             "include_content": {
                                 "type": "boolean",
@@ -2380,6 +2613,14 @@ mod tests {
         assert!(response["coverage"]["indexed_doc_files"].is_number());
         assert!(response["coverage"]["bm25_hits"].is_number());
         assert!(response["coverage"]["pivot_file_types"].is_object());
+        // Relevance-scoring additions (additive response fields)
+        assert!(response["confidence"].is_string());
+        assert!(response["weak_results"].is_boolean());
+        assert!(response["dropped_low_relevance"].is_number());
+        for entry in response["pivot_files"].as_array().unwrap() {
+            assert!(entry["score"].is_number(), "every pivot must carry a score");
+            assert!(entry["match_reasons"].is_array(), "every pivot must carry match_reasons");
+        }
     }
 
     #[tokio::test]
@@ -3296,6 +3537,177 @@ mod tests {
             0,
             "git_diff_boosted must be 0 when not in a git repo"
         );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_scores_sorted_desc() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        let result = server.handle_run_pipeline(json!({
+            "task": "compression level budget",
+            "max_tokens": 8000
+        })).await.unwrap();
+
+        let scores: Vec<f64> = result["pivot_files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["score"].as_f64().expect("pivot score must be numeric"))
+            .collect();
+        for pair in scores.windows(2) {
+            assert!(
+                pair[0] >= pair[1],
+                "pivot scores must be non-increasing: {:?}",
+                scores
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_weak_results_on_gibberish() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        let result = server.handle_run_pipeline(json!({
+            "task": "zzqx wvvq xykkjq",
+            "max_tokens": 8000
+        })).await.unwrap();
+
+        assert_eq!(result["weak_results"].as_bool(), Some(true));
+        assert_eq!(result["confidence"].as_str(), Some("low"));
+        assert!(
+            result["pivot_files"].as_array().unwrap().len() <= 5,
+            "weak results must return at most 5 pivots"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_max_pivots_param() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        let result = server.handle_run_pipeline(json!({
+            "task": "compression budget tokens",
+            "max_pivots": 3
+        })).await.unwrap();
+
+        assert!(result["pivot_files"].as_array().unwrap().len() <= 3);
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_per_file_cap() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        let budget = 2000u64;
+        let result = server.handle_run_pipeline(json!({
+            "task": "compression level budget",
+            "max_tokens": budget
+        })).await.unwrap();
+
+        // Explicit compression_rules can legitimately exceed the cap; only
+        // assert the default path.
+        if result["compression_rules_applied"].as_bool() != Some(true) {
+            let cap = (budget as f64 * 0.25) as u64; // default max_file_budget_share
+            for entry in result["pivot_files"].as_array().unwrap() {
+                assert!(
+                    entry["tokens"].as_u64().unwrap() <= cap,
+                    "pivot {} exceeds the per-file cap of {}",
+                    entry["path"],
+                    cap
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tools_list_has_relevance_params() {
+        let state = Arc::new(crate::AppState::new(".").await.expect("Failed to create AppState"));
+        let server = MCPServer::new(state);
+
+        let tools = server.handle_tools_list().await.unwrap();
+        let list = tools["tools"].as_array().unwrap();
+        let rp = list
+            .iter()
+            .find(|t| t["name"] == "run_pipeline")
+            .expect("run_pipeline tool must exist");
+        let props = rp["inputSchema"]["properties"].as_object().unwrap();
+        for key in ["min_score_ratio", "max_pivots", "max_file_budget_share", "doc_token_cap"] {
+            assert!(props.contains_key(key), "schema must document {}", key);
+        }
+        assert!(
+            !props.contains_key("include_tests"),
+            "the dead include_tests param must be gone from the schema"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_run_pipeline_git_diff_exempt_from_cutoff() {
+        let temp_dir = std::env::temp_dir().join("comP_test_diff_exempt");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(&temp_dir)
+                .env("GIT_AUTHOR_NAME", "test")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "test")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .unwrap()
+        };
+
+        run(&["init"]);
+        run(&["config", "user.email", "t@t"]);
+        run(&["config", "user.name", "test"]);
+        std::fs::write(temp_dir.join("boosted.rs"), "fn boosted() {}").unwrap();
+        run(&["add", "boosted.rs"]);
+        run(&["commit", "-m", "init"]);
+        // Modify the file so it appears in git diff HEAD
+        std::fs::write(temp_dir.join("boosted.rs"), "fn boosted() { let x = 1; }").unwrap();
+
+        std::env::set_var("COMP_WORKSPACE_ROOT", temp_dir.to_str().unwrap());
+        let state = Arc::new(crate::AppState::new(temp_dir.to_str().unwrap()).await.unwrap());
+        let server = MCPServer::new(state);
+
+        // Register the temp repo and index the modified file so the qualified
+        // diff path ("<alias>/boosted.rs") resolves against the DB.
+        let alias = temp_dir.file_name().unwrap().to_str().unwrap().to_string();
+        server
+            .state
+            .graph_db
+            .upsert_repo(&alias, temp_dir.to_str().unwrap())
+            .unwrap();
+        let qualified = format!("{}/boosted.rs", alias);
+        server
+            .state
+            .graph_db
+            .upsert_file(&qualified, "testhash", "rust", 30)
+            .unwrap();
+
+        // Aggressive cutoff: only the git-diff exemption can keep a
+        // no-evidence file in the pivots.
+        let result = server.handle_run_pipeline(json!({
+            "task": "completely unrelated topic",
+            "min_score_ratio": 0.9,
+            "max_tokens": 8000
+        })).await.unwrap();
+
+        let pivots = result["pivot_files"].as_array().unwrap();
+        let diff_entry = pivots
+            .iter()
+            .find(|e| e["path"].as_str() == Some(qualified.as_str()));
+        assert!(
+            diff_entry.is_some(),
+            "git-diff file must survive an aggressive relevance cutoff, got: {:?}",
+            pivots
+        );
+        assert_eq!(diff_entry.unwrap()["git_diff"].as_bool(), Some(true));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

@@ -489,6 +489,10 @@ impl GraphDB {
     ///
     /// WHY: Since SearchEngine's TF-IDF is not yet built, we temporarily return context
     /// by searching symbol names using a LIKE pattern.
+    ///
+    /// Ordering: exact name matches first, then shorter names (closer to the query)
+    /// before longer ones. Without this, LIMIT returns arbitrary DB rows and the
+    /// exact-match symbol may not even be included.
     pub fn search_symbols_by_name(
         &self,
         query: &str,
@@ -500,10 +504,11 @@ impl GraphDB {
         let mut stmt = conn.prepare(
             "SELECT files.path, nodes.name, nodes.kind, nodes.line
              FROM nodes JOIN files ON nodes.file_id = files.id
-             WHERE LOWER(nodes.name) LIKE LOWER(?)
-             LIMIT ?"
+             WHERE LOWER(nodes.name) LIKE LOWER(?1)
+             ORDER BY (LOWER(nodes.name) = LOWER(?2)) DESC, LENGTH(nodes.name) ASC
+             LIMIT ?3"
         )?;
-        let rows = stmt.query_map(rusqlite::params![pattern, limit as i64], |row| {
+        let rows = stmt.query_map(rusqlite::params![pattern, query, limit as i64], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -512,6 +517,22 @@ impl GraphDB {
             ))
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Count how many symbol nodes match `%keyword%` (case-insensitive).
+    ///
+    /// WHY: run_pipeline weights keywords by corpus rarity (IDF-style). A keyword
+    /// that matches a large share of all nodes (e.g. "user") carries little signal,
+    /// while a rare one (e.g. "survey") is highly discriminative.
+    pub fn count_symbol_name_matches(&self, keyword: &str) -> Result<i64> {
+        let pattern = format!("%{}%", keyword);
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE LOWER(name) LIKE LOWER(?)",
+            rusqlite::params![pattern],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     /// Build symbol_id -> (name, file_path) map for impact analysis

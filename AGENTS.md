@@ -19,7 +19,11 @@ Only use Read when you need exact raw content to edit a specific line.
   Examples:
   - `run_pipeline({ "task": "fix JWT validation bug" })`
   - `run_pipeline({ "task": "add user authentication", "max_tokens": 12000 })`
-  - `run_pipeline({ "task": "sidebar panel webview", "include_tests": true })`
+  - `run_pipeline({ "task": "sidebar panel webview", "max_pivots": 10 })`
+
+  Each pivot carries a `score` (relevance, normalized per query) and
+  `match_reasons`. If the response has `weak_results: true`, the index found
+  nothing confident: fall back to your own search.
 
 ## Other MCP tools (use only when run_pipeline is insufficient)
 
@@ -37,5 +41,8 @@ Only use Read when you need exact raw content to edit a specific line.
 
 ## Parameters
 
-- `max_tokens` — increase result budget (default: 8000)
-- `include_tests: true` — include test files in results
+- `max_tokens`: increase result budget (default: 8000)
+- `min_score_ratio`: relevance cutoff as a fraction of the top score (default: 0.30)
+- `max_pivots`: cap on returned pivot files (default: 20)
+- `max_file_budget_share`: max budget share per pivot (default: 0.25)
+- `doc_token_cap`: absolute token cap for doc pivots (default: 1500)

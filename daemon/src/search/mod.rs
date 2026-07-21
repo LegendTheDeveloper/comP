@@ -28,22 +28,30 @@ pub struct SearchResult {
     pub kind: String,
     /// Line number in file
     pub line: u32,
+    /// True when this hit came from the substring fallback path (fixed 0.3 score)
+    /// rather than real TF-IDF cosine similarity. Consumers use this to judge
+    /// whether the semantic engine actually found anything.
+    pub is_fallback: bool,
 }
 
-/// Helper: Tokenize text (camelCase, snake_case, SCREAMING_CASE)
+/// Helper: Tokenize text (camelCase, snake_case, SCREAMING_CASE, sentences)
 ///
 /// # Examples
 /// - "getAuthToken" → ["get", "auth", "token"]
 /// - "snake_case" → ["snake", "case"]
 /// - "HTTPServer" → ["http", "server"]
+/// - "fix JWT validation bug" → ["fix", "jwt", "validation", "bug"]
 fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
 
     let chars: Vec<char> = text.chars().collect();
     for (i, &ch) in chars.iter().enumerate() {
-        if ch == '_' || ch == '-' {
-            // Separator: flush current token
+        if !ch.is_alphanumeric() {
+            // Any non-alphanumeric char is a separator: '_', '-', whitespace,
+            // punctuation. WHY: queries are natural-language sentences; before
+            // this, spaces were glued into tokens ("add in") and multi-word
+            // queries matched nothing in the symbol-token matrix.
             if !current.is_empty() {
                 tokens.push(current.to_lowercase());
                 current.clear();
@@ -206,7 +214,11 @@ impl SearchEngine {
         let mut scores: Vec<(String, f32)> = Vec::new();
 
         for (file_path, symbols) in &self.documents {
-            // Calculate document TF-IDF vector
+            // Calculate document TF-IDF vector.
+            // WHY assign, not +=: the TF-IDF weight already encodes the term's
+            // frequency in this file. Adding it once per symbol occurrence
+            // double-counted frequency and quadratically inflated the magnitude
+            // of symbol-dense files, making cosine favor tiny files.
             let mut doc_vector: HashMap<String, f32> = HashMap::new();
 
             for (symbol_name, _kind, _line) in symbols {
@@ -214,7 +226,7 @@ impl SearchEngine {
                 for token in tokens {
                     if let Some(tfidf_row) = self.tfidf_matrix.get(&token) {
                         if let Some(&weight) = tfidf_row.get(file_path) {
-                            *doc_vector.entry(token).or_insert(0.0) += weight;
+                            doc_vector.entry(token).or_insert(weight);
                         }
                     }
                 }
@@ -254,6 +266,7 @@ impl SearchEngine {
                         score: *score,
                         kind: kind.clone(),
                         line: *line,
+                        is_fallback: false,
                     });
                 }
             }
@@ -274,6 +287,7 @@ impl SearchEngine {
                             score: 0.3,
                             kind: kind.clone(),
                             line: *line,
+                            is_fallback: true,
                         });
                         if results.len() >= limit {
                             break 'outer;
@@ -483,6 +497,14 @@ mod tests {
         let tokens = tokenize("HTTPServer_v2");
         assert!(!tokens.is_empty());
         assert!(tokens[0].contains("http")); // Should tokenize properly
+    }
+
+    #[test]
+    fn test_tokenize_sentence_with_punctuation() {
+        assert_eq!(
+            tokenize("fix JWT validation bug (auth middleware)"),
+            vec!["fix", "jwt", "validation", "bug", "auth", "middleware"]
+        );
     }
 
     #[test]

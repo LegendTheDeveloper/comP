@@ -2,7 +2,7 @@
   "name": "comp-vscode",
   "displayName": "comP - Code Context Engine (Legend Fork)",
   "description": "Local-first code indexing engine for AI agents with MCP support. Open-source alternative to Vexp.",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "publisher": "legend",
   "license": "MIT",
   "icon": "resources/comp-icon.png",

@@ -20,10 +20,13 @@ graph, and returns ranked context files.
 
 Parameters:
 
-- `task` (string, required) — natural language description of the task
-- `max_tokens` (number, optional, default 8000) — result budget
-- `include_tests` (boolean, optional) — include test files in results
-- `include_content` (boolean, optional) — if true, each pivot_file entry includes a `content` field with the file contents
+- `task` (string, required): natural language description of the task
+- `max_tokens` (number, optional, default 8000): result budget
+- `min_score_ratio` (number, optional, default 0.30): drop pivots scoring below this fraction of the top score
+- `max_pivots` (integer, optional, default 20): maximum pivot files returned (capped at 5 when `weak_results` is true)
+- `max_file_budget_share` (number, optional, default 0.25): max share of the budget one pivot may consume; oversized files get extra compression, then hard truncation (`truncated: true`)
+- `doc_token_cap` (integer, optional, default 1500): additional absolute token cap for doc pivots (markdown/office/pdf)
+- `include_content` (boolean, optional): if true, each pivot_file entry includes a `content` field with the file contents
 - `compression_level` (0/1/2, optional, default 0) — content compression applied when `include_content` is true:
   - `0` — full source (no change)
   - `1` — compact: comments and blank lines removed (~20-35% smaller)
@@ -44,6 +47,19 @@ Response fields (v0.9.2+):
   ```
 
 - Token estimates per pivot file are based on the real indexed file size (`chars / 4`), no longer on symbol-count heuristics
+
+Response fields (v0.9.4+, unified relevance scoring):
+
+- `pivot_files[].score` (number): unified relevance score combining symbol match quality, TF-IDF and BM25 (plus a git-diff boost). Normalized per query: comparable within one response, never across calls
+- `pivot_files[].match_reasons` (array of strings): which engines matched, e.g. `["symbol:survey+feedback", "tfidf", "bm25", "git_diff"]`
+- `pivot_files[].truncated` (boolean, optional): the file exceeded its per-file token cap even at maximum compression and was hard-capped
+- `confidence` ("high" / "medium" / "low"): overall result strength, judged from raw engine signals
+- `weak_results` (boolean): true when no engine found confident evidence; the pivot list is capped at 5 and agents should fall back to their own search
+- `dropped_low_relevance` (number): candidates discarded by the relevance cutoff (score below `min_score_ratio` of the top score, or below the absolute floor)
+
+`.comp/config.json` keys for the cutoff (all optional): `min_score_abs` (default 0.05, config-only), `min_score_ratio`, `max_pivots`, `max_file_budget_share`, `doc_token_cap`. Params override config.
+
+Note: git-diff files are score-boosted and never dropped by the cutoff, but no longer jump unconditionally ahead of strong matches.
 
 ---
 
