@@ -36,10 +36,17 @@ pub const GIT_DIFF_FACTOR: f32 = 1.15;
 /// five task words from one that exactly matches a single generic word.
 pub const W_COVERAGE: f32 = 0.6;
 pub const W_SYM_BEST: f32 = 0.4;
-/// Rows fetched per keyword from the symbol LIKE channel, and code files kept
-/// after ranking them by match quality (first-party first, shortest name).
-pub const LIKE_FETCH_ROWS: usize = 60;
+/// Rows fetched per keyword from the symbol LIKE channel (code files only),
+/// and files kept after ranking them by match quality (first-party first,
+/// shortest name). 120 rows: "settings" has 50 exact matches on Lynium and
+/// the class named GameSettings sits behind all of them.
+pub const LIKE_FETCH_ROWS: usize = 120;
 pub const LIKE_KEEP_FILES: usize = 12;
+/// Share of the pivots doc files (markdown, sql, pdf, office) may take while
+/// code candidates compete. WHY: without budget packing, the BM25 tail
+/// (migrations, READMEs) survived the cutoff and filled a third of the list.
+pub const DOC_PIVOT_SHARE: f32 = 0.15;
+pub const DOC_CAP_MIN_CODE: usize = 3;
 /// Matched symbols remembered per file / reported per pivot.
 pub const MAX_HITS_PER_FILE: usize = 8;
 pub const MATCHED_SYMBOLS_MAX: usize = 4;
@@ -195,6 +202,19 @@ pub fn symbol_match_quality(symbol: &str, keyword: &str) -> f32 {
         return 0.4;
     }
     0.0
+}
+
+/// How much a symbol of this kind says about the task's concept.
+///
+/// WHY: a property named `settings` inside any controller matched "settings"
+/// exactly (1.0) and outranked the class named `GameSettings` (token match,
+/// 0.85). Types name concepts; members name uses of them.
+pub fn kind_factor(kind: &str) -> f32 {
+    match kind {
+        "class" | "struct" | "interface" | "enum" | "type" | "namespace" | "trait" | "record" => 1.0,
+        "function" | "method" => 0.9,
+        _ => 0.75,
+    }
 }
 
 /// IDF-style keyword weight in (0, 1]: rare keywords approach 1, keywords
@@ -580,6 +600,8 @@ pub struct Candidate {
     pub git_diff: bool,
     /// Third-party code (asset store, packages); see indexer::vendor.
     pub vendor: bool,
+    /// Doc language (markdown, sql, pdf, office): reached through BM25 only.
+    pub doc: bool,
     /// Symbols that matched, best first (reported so the agent can jump to a line).
     pub matched_symbols: Vec<SymbolHit>,
 }
@@ -607,8 +629,28 @@ pub fn apply_vendor_factor(score: f32, vendor: bool, factor: f32) -> f32 {
 pub const VENDOR_CAP_MIN_FIRST_PARTY: usize = 3;
 
 pub fn apply_vendor_cap(candidates: Vec<Candidate>, max_pivots: usize, share: f32) -> (Vec<Candidate>, usize) {
-    let first_party = candidates.iter().filter(|c| !c.vendor).count();
-    if first_party < VENDOR_CAP_MIN_FIRST_PARTY {
+    apply_share_cap(candidates, max_pivots, share, VENDOR_CAP_MIN_FIRST_PARTY, |c| c.vendor)
+}
+
+/// Same rule for doc files: once DOC_CAP_MIN_CODE code candidates survived,
+/// docs fill at most ceil(share x max_pivots) slots.
+pub fn apply_doc_cap(candidates: Vec<Candidate>, max_pivots: usize, share: f32) -> (Vec<Candidate>, usize) {
+    apply_share_cap(candidates, max_pivots, share, DOC_CAP_MIN_CODE, |c| c.doc)
+}
+
+/// Keep every candidate the predicate rejects; let the ones it accepts fill
+/// at most ceil(share x max_pivots) slots, and only when at least
+/// `min_others` rejected candidates exist (otherwise the capped group is the
+/// answer and stays whole). Input sorted by score. Returns (survivors, dropped).
+pub fn apply_share_cap(
+    candidates: Vec<Candidate>,
+    max_pivots: usize,
+    share: f32,
+    min_others: usize,
+    capped: impl Fn(&Candidate) -> bool,
+) -> (Vec<Candidate>, usize) {
+    let others = candidates.iter().filter(|c| !capped(c)).count();
+    if others < min_others {
         return (candidates, 0);
     }
     let mut allowed = ((max_pivots as f32) * share.clamp(0.0, 1.0)).ceil() as usize;
@@ -619,7 +661,7 @@ pub fn apply_vendor_cap(candidates: Vec<Candidate>, max_pivots: usize, share: f3
     let survivors: Vec<Candidate> = candidates
         .into_iter()
         .filter(|c| {
-            if !c.vendor {
+            if !capped(c) {
                 return true;
             }
             if allowed > 0 {
@@ -775,6 +817,9 @@ pub struct RelevanceConfig {
     /// Max share of the returned pivots third-party files may occupy when
     /// first-party candidates exist (config + param).
     pub vendor_pivot_share: f32,
+    /// Max share of the returned pivots doc files may occupy when code
+    /// candidates exist (config + param).
+    pub doc_pivot_share: f32,
 }
 
 impl Default for RelevanceConfig {
@@ -788,6 +833,7 @@ impl Default for RelevanceConfig {
             noise_keywords: Vec::new(),
             vendor_score_factor: 0.5,
             vendor_pivot_share: 0.25,
+            doc_pivot_share: DOC_PIVOT_SHARE,
         }
     }
 }
@@ -837,6 +883,9 @@ impl RelevanceConfig {
             if let Some(v) = source["vendor_pivot_share"].as_f64() {
                 cfg.vendor_pivot_share = v as f32;
             }
+            if let Some(v) = source["doc_pivot_share"].as_f64() {
+                cfg.doc_pivot_share = v as f32;
+            }
         }
         // Clamp to sane ranges so a bad config cannot zero out results.
         cfg.min_score_abs = cfg.min_score_abs.clamp(0.0, 1.0);
@@ -844,6 +893,7 @@ impl RelevanceConfig {
         cfg.max_file_budget_share = cfg.max_file_budget_share.clamp(0.05, 1.0);
         cfg.vendor_score_factor = cfg.vendor_score_factor.clamp(0.05, 1.0);
         cfg.vendor_pivot_share = cfg.vendor_pivot_share.clamp(0.0, 1.0);
+        cfg.doc_pivot_share = cfg.doc_pivot_share.clamp(0.0, 1.0);
         if cfg.max_pivots == 0 {
             cfg.max_pivots = 1;
         }
@@ -872,12 +922,47 @@ mod tests {
             reasons: Vec::new(),
             git_diff,
             vendor: false,
+            doc: false,
             matched_symbols: Vec::new(),
         }
     }
 
     fn vendor_cand(path: &str, score: f32) -> Candidate {
         Candidate { vendor: true, ..cand(path, score, false) }
+    }
+
+    fn doc_cand(path: &str, score: f32) -> Candidate {
+        Candidate { doc: true, ..cand(path, score, false) }
+    }
+
+    #[test]
+    fn test_kind_factor_prefers_types_over_members() {
+        assert!(kind_factor("class") > kind_factor("method"));
+        assert!(kind_factor("method") > kind_factor("property"));
+        // A class matching by token beats a property matching exactly.
+        assert!(0.85 * kind_factor("class") > 1.0 * kind_factor("property"));
+    }
+
+    #[test]
+    fn test_doc_cap_limits_docs_when_code_competes() {
+        let cands = vec![
+            cand("a.cs", 0.9, false),
+            doc_cand("m1.sql", 0.5),
+            cand("b.cs", 0.45, false),
+            doc_cand("m2.sql", 0.4),
+            cand("c.cs", 0.35, false),
+            doc_cand("README.md", 0.3),
+            doc_cand("m3.sql", 0.25),
+        ];
+        // 15 % of 20 = 3 doc slots.
+        let (kept, dropped) = apply_doc_cap(cands, 20, 0.15);
+        assert_eq!(kept.len(), 6);
+        assert_eq!(dropped, 1);
+        // Fewer than three code candidates: docs are the answer, keep them.
+        let cands = vec![cand("a.cs", 0.9, false), doc_cand("m1.sql", 0.5), doc_cand("m2.sql", 0.4), doc_cand("m3.sql", 0.3), doc_cand("m4.sql", 0.2)];
+        let (kept, dropped) = apply_doc_cap(cands, 20, 0.15);
+        assert_eq!(kept.len(), 5);
+        assert_eq!(dropped, 0);
     }
 
     fn weights(pairs: &[(&str, f32)]) -> QueryWeights {

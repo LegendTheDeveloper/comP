@@ -684,12 +684,14 @@ impl MCPServer {
                 let mut best_per_file: std::collections::HashMap<String, relevance::SymbolHit> =
                     std::collections::HashMap::new();
                 for (file, name, kind, line) in
-                    self.state.graph_db.search_symbols_by_name(kw, relevance::LIKE_FETCH_ROWS)?
+                    self.state.graph_db.search_code_symbols_by_name(kw, relevance::LIKE_FETCH_ROWS)?
                 {
                     if lexically_excluded(&file) {
                         continue;
                     }
-                    let quality = relevance::symbol_match_quality(&name, kw);
+                    // Types name concepts, members name uses: a class named
+                    // GameSettings outranks a property named settings.
+                    let quality = relevance::symbol_match_quality(&name, kw) * relevance::kind_factor(&kind);
                     if quality <= 0.0 {
                         continue;
                     }
@@ -864,6 +866,7 @@ impl MCPServer {
                 reasons: relevance::match_reasons(ev, git_diff),
                 git_diff,
                 vendor,
+                doc: path_to_lang.get(file).map(|l| relevance::is_doc_language(l)).unwrap_or(false),
                 matched_symbols: ev.matched_symbols(relevance::MATCHED_SYMBOLS_MAX),
             });
         }
@@ -902,8 +905,12 @@ impl MCPServer {
         let (candidates, dropped_low_relevance) = relevance::apply_cutoff(candidates, &rel_cfg);
         // Third-party files may fill only a share of the list when the
         // project's own code competes (asset packages come in families).
-        let (mut candidates, dropped_vendor) =
+        let (candidates, dropped_vendor) =
             relevance::apply_vendor_cap(candidates, rel_cfg.max_pivots, rel_cfg.vendor_pivot_share);
+        // Same for docs: the BM25 tail (migrations, READMEs) must not fill
+        // the list once real code candidates exist.
+        let (mut candidates, dropped_doc) =
+            relevance::apply_doc_cap(candidates, rel_cfg.max_pivots, rel_cfg.doc_pivot_share);
         let coverage: Vec<relevance::KeywordCoverage> = kw_stats.values().cloned().collect();
         // How much of the task the top three pivots explain, and whether the
         // first one is the project's own code: the calibration raw signals
@@ -1218,8 +1225,10 @@ impl MCPServer {
             "weak_reason": weak_reason,
             "dropped_low_relevance": dropped_low_relevance,
             // Third-party candidates cut by the vendor share cap; each pivot
-            // that is third-party carries `vendor: true`.
+            // that is third-party carries `vendor: true`. Doc files cut by
+            // the doc share cap likewise.
             "dropped_vendor": dropped_vendor,
+            "dropped_doc": dropped_doc,
             "coverage": {
                 "indexed_doc_files": indexed_doc_count,
                 "bm25_hits": bm25_hit_count,
@@ -2128,6 +2137,10 @@ impl MCPServer {
                             "vendor_pivot_share": {
                                 "type": "number",
                                 "description": "Max share of the returned pivots third-party files may occupy while first-party code competes (0-1). Default: 0.25."
+                            },
+                            "doc_pivot_share": {
+                                "type": "number",
+                                "description": "Max share of the returned pivots doc files (markdown, sql, pdf, office) may occupy while code candidates compete (0-1). Default: 0.15. Raise it for documentation tasks."
                             },
                             "include_content": {
                                 "type": "boolean",

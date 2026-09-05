@@ -684,6 +684,49 @@ impl GraphDB {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Symbol search restricted to code files, for run_pipeline's LIKE channel.
+    ///
+    /// WHY a separate query: doc and data files (i18n bundles, migrations)
+    /// are excluded from that channel anyway, but when they were fetched
+    /// first they consumed the LIMIT window: "settings" had 19 exact matches
+    /// in translation JSONs alone, and the class named GameSettings never
+    /// made it into the rows. Ordering: first-party, exact name, types
+    /// before members, shortest name.
+    pub fn search_code_symbols_by_name(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String, String, i32)>> {
+        let pattern = format!("%{}%", query);
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare(
+            "SELECT files.path, nodes.name, nodes.kind, nodes.line
+             FROM nodes JOIN files ON nodes.file_id = files.id
+             WHERE LOWER(nodes.name) LIKE LOWER(?1)
+               AND files.language NOT IN ('json', 'jsonl', 'yaml', 'xml', 'toml',
+                                          'markdown', 'docx', 'pptx', 'xlsx', 'pdf', 'sql')
+             ORDER BY files.vendor ASC,
+                      (LOWER(nodes.name) = LOWER(?2)) DESC,
+                      CASE nodes.kind
+                          WHEN 'class' THEN 0 WHEN 'struct' THEN 0 WHEN 'interface' THEN 0
+                          WHEN 'enum' THEN 0 WHEN 'type' THEN 0 WHEN 'namespace' THEN 0
+                          WHEN 'function' THEN 1 WHEN 'method' THEN 1
+                          ELSE 2
+                      END ASC,
+                      LENGTH(nodes.name) ASC
+             LIMIT ?3"
+        )?;
+        let rows = stmt.query_map(rusqlite::params![pattern, query, limit as i64], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i32>(3)?,
+            ))
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     /// Count how many FILES hold a symbol matching `%keyword%`.
     ///
     /// WHY files: node counts are dominated by generated files (one Steam
