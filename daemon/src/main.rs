@@ -369,7 +369,7 @@ mod integration_tests {
         assert!(response["severity"].is_string(), "severity should be string");
 
         // MCP Tool: list_indexed_files
-        let result = mcp_server.handle_list_indexed_files().await;
+        let result = mcp_server.handle_list_indexed_files(json!({})).await;
         assert!(result.is_ok(), "list_indexed_files failed");
         let response = result.unwrap();
         assert!(response["files"].is_array(), "files should be array");

@@ -684,6 +684,30 @@ impl GraphDB {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Count how many FILES hold a symbol matching `%keyword%`.
+    ///
+    /// WHY files: node counts are dominated by generated files (one Steam
+    /// enum file holds 1 492 nodes), so "steam" looked corpus-common while
+    /// appearing in a modest share of files. Document frequency over files
+    /// is the quantity IDF is defined on.
+    pub fn count_symbol_name_matches_files(&self, keyword: &str) -> Result<i64> {
+        let pattern = format!("%{}%", keyword);
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT file_id) FROM nodes WHERE LOWER(name) LIKE LOWER(?)",
+            rusqlite::params![pattern],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    /// Files with at least one symbol: the corpus size for keyword weights.
+    pub fn count_code_files(&self) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let count: i64 = conn.query_row("SELECT COUNT(DISTINCT file_id) FROM nodes", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
     /// Count how many symbol nodes match `%keyword%` (case-insensitive).
     ///
     /// WHY: run_pipeline weights keywords by corpus rarity (IDF-style). A keyword

@@ -47,12 +47,28 @@ fn make_parser(language: &str) -> Option<Parser> {
         "c" => tree_sitter_c::LANGUAGE.into(),
         "cpp" | "cc" | "cxx" | "c++" => tree_sitter_cpp::LANGUAGE.into(),
         "java" => tree_sitter_java::LANGUAGE.into(),
+        // Until v0.9.7 neither was here: on a Unity + PHP workspace level 1
+        // removed nothing and level 2 returned the first line of the file,
+        // while the token estimate claimed 0.70x and 0.25x.
+        "cs" | "csharp" => tree_sitter_c_sharp::LANGUAGE.into(),
+        "php" => tree_sitter_php::LANGUAGE_PHP.into(),
         _ => return None,
     };
     let mut parser = Parser::new();
     parser.set_language(&lang).ok()?;
     Some(parser)
 }
+
+/// Whether `compress` can actually shrink this language (a grammar exists or
+/// it is Markdown). Callers estimate tokens honestly with this: an
+/// unsupported language keeps its full size at level 1 and gets only a head
+/// at level 2.
+pub fn supports(language: &str) -> bool {
+    matches!(language, "md" | "markdown") || make_parser(language).is_some()
+}
+
+/// Lines kept for unsupported languages at Skeleton level.
+pub const HEAD_LINES: usize = 30;
 
 fn compact(source: &str, language: &str) -> String {
     let tree = make_parser(language).and_then(|mut p| p.parse(source, None));
@@ -118,7 +134,12 @@ fn collapse_blank_lines(src: &str) -> String {
 fn skeleton(source: &str, language: &str) -> String {
     let tree = match make_parser(language).and_then(|mut p| p.parse(source, None)) {
         Some(t) => t,
-        None => return source.lines().next().unwrap_or("").to_string(),
+        // No grammar: the head of the file is at least something to read
+        // (the old single first line was usually a comment or a namespace).
+        None => {
+            let head: Vec<&str> = source.lines().take(HEAD_LINES).collect();
+            return collapse_blank_lines(&head.join("\n"));
+        }
     };
     let bytes = source.as_bytes();
     let mut out = String::new();
@@ -185,7 +206,24 @@ fn emit_node(node: &Node, bytes: &[u8], lang: &str, out: &mut String) {
         if let Some(body) = body {
             if let Ok(sig) = std::str::from_utf8(&bytes[node.start_byte()..body.start_byte()]) {
                 let sig = sig.trim_end();
-                if lang == "py" || lang == "python" {
+                let python = lang == "py" || lang == "python";
+                if is_scope_container(node.kind()) {
+                    // Namespaces, classes, impls: keep the members, indented.
+                    // Collapsing them too left a C# file as one line
+                    // ("namespace Game { ... }") because everything is nested.
+                    let mut inner = String::new();
+                    emit_children(&body, bytes, lang, &mut inner);
+                    out.push_str(sig);
+                    out.push_str(if python { "\n" } else { " {\n" });
+                    for line in inner.lines() {
+                        out.push_str("    ");
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                    if !python {
+                        out.push_str("}\n");
+                    }
+                } else if python {
                     out.push_str(sig);
                     out.push_str(" ...\n");
                 } else {
@@ -222,6 +260,34 @@ fn is_container(kind: &str) -> bool {
             | "function_definition"
             | "class_definition"
             | "method_declaration"
+            // C#
+            | "struct_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "record_declaration"
+            | "namespace_declaration"
+            | "constructor_declaration"
+            | "property_declaration"
+            // PHP
+            | "trait_declaration"
+    )
+}
+
+/// Containers whose members are declarations worth keeping in a skeleton
+/// (as opposed to function bodies, which become `{ ... }`).
+fn is_scope_container(kind: &str) -> bool {
+    matches!(
+        kind,
+        "class_declaration"
+            | "struct_declaration"
+            | "interface_declaration"
+            | "namespace_declaration"
+            | "record_declaration"
+            | "trait_declaration"
+            | "class_definition"
+            | "impl_item"
+            | "mod_item"
+            | "trait_item"
     )
 }
 
@@ -238,6 +304,14 @@ fn body_kinds_for(lang: &str) -> &'static [&'static str] {
         }
         "py" | "python" => &["block"],
         "go" => &["block"],
+        "cs" | "csharp" => &[
+            "block",
+            "declaration_list",
+            "enum_member_declaration_list",
+            "accessor_list",
+            "arrow_expression_clause",
+        ],
+        "php" => &["compound_statement", "declaration_list", "enum_declaration_list"],
         _ => &["block"],
     }
 }
@@ -317,5 +391,32 @@ mod tests {
         let src = "SELECT * FROM users WHERE id = 1;";
         let result = compress(src, "sql", CompressionLevel::Compact);
         assert!(!result.is_empty(), "unknown language should return something");
+        assert!(!supports("sql"));
+        // Skeleton of an unsupported language keeps a head, not one line.
+        let long: String = (0..60).map(|i| format!("line {}\n", i)).collect();
+        let head = compress(&long, "sql", CompressionLevel::Skeleton);
+        assert_eq!(head.lines().count(), HEAD_LINES);
+    }
+
+    #[test]
+    fn test_skeleton_csharp_class_and_method() {
+        let src = "// header\nnamespace Game {\n    public class GameSettings : MonoBehaviour {\n        // doc\n        public void Save() {\n            PlayerPrefs.SetInt(\"x\", 1);\n        }\n        public int Speed { get; set; }\n    }\n}\n";
+        assert!(supports("csharp"));
+        let compact = compress(src, "csharp", CompressionLevel::Compact);
+        assert!(!compact.contains("header"), "comments removed at level 1");
+        let result = compress(src, "csharp", CompressionLevel::Skeleton);
+        assert!(result.contains("public class GameSettings : MonoBehaviour"), "{}", result);
+        assert!(result.contains("public void Save()"), "{}", result);
+        assert!(!result.contains("PlayerPrefs"), "method body replaced: {}", result);
+    }
+
+    #[test]
+    fn test_skeleton_php_function() {
+        let src = "<?php\nfunction increment_downloads($id) {\n    $db->query('update');\n    return $id;\n}\nclass Repo {\n    public function find($id) { return 1; }\n}\n";
+        assert!(supports("php"));
+        let result = compress(src, "php", CompressionLevel::Skeleton);
+        assert!(result.contains("function increment_downloads($id)"), "{}", result);
+        assert!(!result.contains("query('update')"), "body replaced: {}", result);
+        assert!(result.contains("public function find($id)"), "{}", result);
     }
 }
