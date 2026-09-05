@@ -522,6 +522,7 @@ impl MCPServer {
 
         let symbol_counts = self.state.graph_db.count_symbols_per_file()?;
         let char_counts = self.state.graph_db.get_file_char_counts()?;
+        let vendor_flags = self.state.graph_db.get_vendor_flags()?;
         let files_list = self.state.graph_db.list_files()?;
         // WHY: Save language info before consuming. BM25 requires the list of Markdown and Office files.
         let doc_paths: Vec<String> = files_list
@@ -774,13 +775,19 @@ impl MCPServer {
                 .unwrap_or(0) as usize;
             let base = base_tokens_for(file, sym);
             let git_diff = git_diff_files.contains(file);
+            let vendor = vendor_flags.get(file).copied().unwrap_or(false);
             candidates.push(relevance::Candidate {
                 path: file.clone(),
                 sym_count: sym,
                 base_tokens: base,
-                score: relevance::combine_score(ev, max_tfidf_raw, max_bm25_raw, git_diff),
+                score: relevance::apply_vendor_factor(
+                    relevance::combine_score(ev, max_tfidf_raw, max_bm25_raw, git_diff),
+                    vendor,
+                    rel_cfg.vendor_score_factor,
+                ),
                 reasons: relevance::match_reasons(ev, git_diff),
                 git_diff,
+                vendor,
             });
         }
 
@@ -804,6 +811,7 @@ impl MCPServer {
                     score: relevance::GIT_DIFF_BOOST,
                     reasons: vec!["git_diff".to_string()],
                     git_diff: true,
+                    vendor: vendor_flags.get(diff_path).copied().unwrap_or(false),
                 });
                 recorded_files.push(diff_path.clone());
                 git_diff_boosted_count += 1;
@@ -828,7 +836,7 @@ impl MCPServer {
         //    Running the cutoff BEFORE level selection means noise files no
         //    longer inflate the total estimate and force skeleton compression
         //    on everything: survivors usually fit at level 0/1.
-        let (mut candidates, dropped_low_relevance) = relevance::apply_cutoff(candidates, &rel_cfg);
+        let (candidates, dropped_low_relevance) = relevance::apply_cutoff(candidates, &rel_cfg);
         let coverage: Vec<relevance::KeywordCoverage> = kw_stats.values().cloned().collect();
         let (confidence, weak_results) = relevance::assess_confidence(&signals);
         // Coverage pass: exact matches on generic words must not report
@@ -841,6 +849,10 @@ impl MCPServer {
         } else {
             rel_cfg.max_pivots
         };
+        // Third-party files may fill only a share of the list when the
+        // project's own code competes (asset packages come in families).
+        let (mut candidates, dropped_vendor) =
+            relevance::apply_vendor_cap(candidates, effective_max, rel_cfg.vendor_pivot_share);
         candidates.truncate(effective_max);
 
         // 4. Choose compression level and pack within budget.
@@ -892,6 +904,9 @@ impl MCPServer {
             });
             if pf.cand.git_diff {
                 entry["git_diff"] = Value::Bool(true);
+            }
+            if pf.cand.vendor {
+                entry["vendor"] = Value::Bool(true);
             }
             if truncated {
                 entry["truncated"] = Value::Bool(true);
@@ -1076,6 +1091,9 @@ impl MCPServer {
             "uncovered_keywords": uncovered_keywords,
             "weak_reason": weak_reason,
             "dropped_low_relevance": dropped_low_relevance,
+            // Third-party candidates cut by the vendor share cap; each pivot
+            // that is third-party carries `vendor: true`.
+            "dropped_vendor": dropped_vendor,
             "savings": savings,
             "full_workspace_tokens": full_workspace_tokens,
             "estimated_cost": cost,
@@ -1835,6 +1853,15 @@ impl MCPServer {
         info!("handle_get_stats: returning stats - files: {}, nodes: {}, edges: {}, repos: {}",
               file_count, node_count, edge_count, repos.len());
 
+        // Which folders were demoted as third-party and by which rule, so a
+        // wrong guess can be corrected in .comp/config.json (vendor_paths /
+        // first_party_paths) instead of being discovered from bad pivots.
+        let vendor_folders: Vec<Value> = self.state.graph_db.vendor_folder_summary()
+            .unwrap_or_else(|e| { log::warn!("vendor_folder_summary failed in get_stats: {}", e); Vec::new() })
+            .into_iter()
+            .map(|(folder, files, reason)| json!({ "folder": folder, "files": files, "reason": reason }))
+            .collect();
+
         Ok(json!({
             // Lets clients detect a stale running binary after an upgrade
             // (Windows locks the exe, so rebuilds don't take effect until restart).
@@ -1848,7 +1875,8 @@ impl MCPServer {
             "efficiency": efficiency,
             "avg_tokens_per_query": avg_tokens_per_query,
             "repos": repos,
-            "indexing": indexing
+            "indexing": indexing,
+            "vendor_folders": vendor_folders
         }))
     }
 
@@ -1903,6 +1931,14 @@ impl MCPServer {
                             "doc_token_cap": {
                                 "type": "integer",
                                 "description": "Additional absolute token cap for doc pivots (markdown/office/pdf). Default: 1500."
+                            },
+                            "vendor_score_factor": {
+                                "type": "number",
+                                "description": "Multiplier applied to third-party files (asset-store packages, NuGet, node_modules; marked vendor: true). Default: 0.5. Set 1.0 when the task is about a third-party package itself."
+                            },
+                            "vendor_pivot_share": {
+                                "type": "number",
+                                "description": "Max share of the returned pivots third-party files may occupy while first-party code competes (0-1). Default: 0.25."
                             },
                             "include_content": {
                                 "type": "boolean",

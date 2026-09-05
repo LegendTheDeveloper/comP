@@ -15,6 +15,7 @@ pub mod walker;
 pub mod parser;
 pub mod doc_parser;
 pub mod dependency;
+pub mod vendor;
 
 pub use walker::{FileWalker, FileEntry, WalkerConfig};
 pub use parser::CodeParser;
@@ -282,13 +283,16 @@ impl Indexer {
         let mut deps_by_file: Vec<(String, Vec<dependency::Dependency>)> = Vec::new();
         let ws_root = self.workspace_root.clone();
         let alias = self.alias.clone();
+        // First-party vs vendor, decided per pass from config, git activity and
+        // the built-in package patterns (see indexer::vendor).
+        let classifier = self.vendor_classifier(db, walk_result.files.iter().map(|f| f.path.as_str()));
         let outcomes: Vec<(usize, Option<(String, Vec<dependency::Dependency>)>)> = walk_result
             .changed_files
             .par_iter()
             .map_init(
                 || CodeParser::new().expect("failed to create tree-sitter parser"),
                 |parser, file_entry| {
-                    Self::index_one_file(parser, &ws_root, &alias, file_entry, db).unwrap_or_else(
+                    Self::index_one_file(parser, &ws_root, &alias, file_entry, db, &classifier).unwrap_or_else(
                         |e| {
                             eprintln!("Error parsing {}: {}", file_entry.path, e);
                             (0, None)
@@ -312,6 +316,33 @@ impl Indexer {
                     log::warn!("Failed to resolve edges for {}: {}", path, e);
                 }
             }
+        }
+
+        // 2c. Reclassify unchanged files. Vendor status depends on config and
+        //     git history, not on file content, so unchanged files would keep a
+        //     stale flag forever without this pass.
+        match db.get_vendor_flags() {
+            Ok(current) => {
+                let updates: Vec<(String, bool, String)> = walk_result
+                    .files
+                    .iter()
+                    .filter_map(|f| {
+                        let qualified = self.qualify(&f.path);
+                        let (is_vendor, reason) = classifier.classify(&f.path);
+                        match current.get(&qualified) {
+                            Some(&stored) if stored != is_vendor => Some((qualified, is_vendor, reason.to_string())),
+                            _ => None,
+                        }
+                    })
+                    .collect();
+                if !updates.is_empty() {
+                    match db.update_vendor_flags(&updates) {
+                        Ok(n) => log::info!("Reclassified vendor flag on {} file(s) in [{}]", n, self.alias),
+                        Err(e) => log::warn!("Failed to update vendor flags: {}", e),
+                    }
+                }
+            }
+            Err(e) => log::warn!("Failed to read vendor flags: {}", e),
         }
 
         // 3. Remove deleted file entries from the database (qualify back to the
@@ -385,6 +416,7 @@ impl Indexer {
         alias: &str,
         file_entry: &FileEntry,
         db: &crate::graph::GraphDB,
+        classifier: &vendor::VendorClassifier,
     ) -> Result<(usize, Option<(String, Vec<dependency::Dependency>)>)> {
         use std::fs;
 
@@ -444,7 +476,8 @@ impl Indexer {
         //      qualified key "<alias>/<rel>"; char_count drives the real-token
         //      baseline in run_pipeline.
         let char_count = content_str.len();
-        db.store_file_symbols(&db_path, &file_entry.hash, &file_entry.language, char_count, &symbols)?;
+        let vendor = classifier.classify(&file_entry.path);
+        db.store_file_symbols(&db_path, &file_entry.hash, &file_entry.language, char_count, vendor, &symbols)?;
 
         // 5. Extract raw dependencies from source code.
         // Edges are resolved in a second pass (see resolve_edges_for_file), once
@@ -475,9 +508,65 @@ impl Indexer {
         file_entry: &FileEntry,
         db: &crate::graph::GraphDB,
     ) -> Result<(usize, Vec<dependency::Dependency>)> {
-        let (count, deps) =
-            Self::index_one_file(&mut self.parser, &self.workspace_root, &self.alias, file_entry, db)?;
+        // Folder sizes come from what is already indexed under this alias; the
+        // git activity is cached in the DB, so a single-file update stays cheap.
+        let prefix = format!("{}/", self.alias);
+        let known: Vec<String> = db
+            .get_all_file_hashes()
+            .unwrap_or_default()
+            .into_keys()
+            .filter_map(|k| k.strip_prefix(&prefix).map(|s| s.to_string()))
+            .collect();
+        let classifier = self.vendor_classifier(db, known.iter().map(|s| s.as_str()));
+        let (count, deps) = Self::index_one_file(
+            &mut self.parser,
+            &self.workspace_root,
+            &self.alias,
+            file_entry,
+            db,
+            &classifier,
+        )?;
         Ok((count, deps.map(|(_, d)| d).unwrap_or_default()))
+    }
+
+    /// Build the vendor classifier for this repo: config from `.comp/`, the
+    /// git activity from the DB cache (recomputed when older than its TTL),
+    /// folder sizes from `paths`.
+    fn vendor_classifier<'a>(
+        &self,
+        db: &crate::graph::GraphDB,
+        paths: impl Iterator<Item = &'a str>,
+    ) -> vendor::VendorClassifier {
+        let cfg = vendor::VendorConfig::load(&self.workspace_root);
+        let cache_key = format!("vendor_activity:{}", self.alias);
+        let cached: Option<vendor::GitActivity> = db
+            .get_metadata(&cache_key)
+            .ok()
+            .flatten()
+            .and_then(|s| serde_json::from_str(&s).ok());
+        let activity = match cached {
+            Some(a) if a.is_fresh(cfg.activity_ttl_hours) => Some(a),
+            _ => {
+                let fresh = vendor::GitActivity::compute(&self.workspace_root, cfg.activity_months);
+                match &fresh {
+                    Some(a) => {
+                        log::info!(
+                            "Git activity for [{}]: {} commits in {} months across {} folders",
+                            self.alias, a.repo_commits, cfg.activity_months, a.folders.len()
+                        );
+                        if let Ok(s) = serde_json::to_string(a) {
+                            if let Err(e) = db.set_metadata(&cache_key, &s) {
+                                log::warn!("Failed to cache git activity: {}", e);
+                            }
+                        }
+                    }
+                    None => log::info!("No git history for [{}]: vendor detection uses config and built-ins only", self.alias),
+                }
+                fresh
+            }
+        };
+        let files_per_folder = vendor::count_files_per_folder(paths);
+        vendor::VendorClassifier::new(&self.workspace_root, cfg, activity, files_per_folder)
     }
 
     /// Resolve and store edges for a single file using the global symbol index.

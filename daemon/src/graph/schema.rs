@@ -132,6 +132,20 @@ impl Schema {
             conn.execute_batch("ALTER TABLE search_history ADD COLUMN kw_info TEXT;")?;
         }
 
+        // Migration 005: first-party vs vendor flag per file, with the rule
+        // that set it (see indexer::vendor). Same manual guard as char_count.
+        let has_vendor: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('files') WHERE name='vendor'",
+            [],
+            |row| row.get::<_, i64>(0),
+        ).map_err(|e| anyhow::anyhow!("Migration guard query failed: {}", e))? > 0;
+        if !has_vendor {
+            conn.execute_batch(
+                "ALTER TABLE files ADD COLUMN vendor INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE files ADD COLUMN vendor_reason TEXT;"
+            )?;
+        }
+
         // Initialize metadata keys used by token tracking
         for key in &["tokens_sent", "tokens_saved", "queries_count", "version"] {
             let value = if *key == "version" { "2" } else { "0" };

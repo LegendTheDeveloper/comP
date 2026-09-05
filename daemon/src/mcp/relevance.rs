@@ -414,6 +414,58 @@ pub struct Candidate {
     pub score: f32,
     pub reasons: Vec<String>,
     pub git_diff: bool,
+    /// Third-party code (asset store, packages); see indexer::vendor.
+    pub vendor: bool,
+}
+
+/// Demote third-party files: the score is multiplied, not zeroed, so a query
+/// that really is about a bought asset (Steamworks, UniTask) still finds it
+/// when nothing first-party competes.
+pub fn apply_vendor_factor(score: f32, vendor: bool, factor: f32) -> f32 {
+    if vendor {
+        score * factor
+    } else {
+        score
+    }
+}
+
+/// After the cutoff: when at least VENDOR_CAP_MIN_FIRST_PARTY first-party
+/// candidates survived, vendor files may fill at most ceil(share x max_pivots)
+/// of the returned slots. Input must be sorted by score. Returns
+/// (survivors, vendor_dropped).
+///
+/// WHY a cap on top of the factor: a halved vendor score still beats a weak
+/// first-party match, and asset-store packages come in families (eleven
+/// PostProcessing models all matching "model"), so without a cap they can
+/// still crowd the list.
+pub const VENDOR_CAP_MIN_FIRST_PARTY: usize = 3;
+
+pub fn apply_vendor_cap(candidates: Vec<Candidate>, max_pivots: usize, share: f32) -> (Vec<Candidate>, usize) {
+    let first_party = candidates.iter().filter(|c| !c.vendor).count();
+    if first_party < VENDOR_CAP_MIN_FIRST_PARTY {
+        return (candidates, 0);
+    }
+    let mut allowed = ((max_pivots as f32) * share.clamp(0.0, 1.0)).ceil() as usize;
+    if share > 0.0 {
+        allowed = allowed.max(1);
+    }
+    let mut dropped = 0usize;
+    let survivors: Vec<Candidate> = candidates
+        .into_iter()
+        .filter(|c| {
+            if !c.vendor {
+                return true;
+            }
+            if allowed > 0 {
+                allowed -= 1;
+                true
+            } else {
+                dropped += 1;
+                false
+            }
+        })
+        .collect();
+    (survivors, dropped)
 }
 
 /// Combine per-engine evidence into the final score:
@@ -545,6 +597,11 @@ pub struct RelevanceConfig {
     /// Extra workspace-specific noise keywords (config-only), merged with the
     /// tokens derived from repo aliases; skipped in LIKE/filename channels.
     pub noise_keywords: Vec<String>,
+    /// Multiplier applied to the score of third-party files (config + param).
+    pub vendor_score_factor: f32,
+    /// Max share of the returned pivots third-party files may occupy when
+    /// first-party candidates exist (config + param).
+    pub vendor_pivot_share: f32,
 }
 
 impl Default for RelevanceConfig {
@@ -556,6 +613,8 @@ impl Default for RelevanceConfig {
             max_file_budget_share: 0.25,
             doc_token_cap: 1500,
             noise_keywords: Vec::new(),
+            vendor_score_factor: 0.5,
+            vendor_pivot_share: 0.25,
         }
     }
 }
@@ -598,10 +657,20 @@ impl RelevanceConfig {
         if let Some(v) = params["doc_token_cap"].as_u64() {
             cfg.doc_token_cap = v as usize;
         }
+        for source in [config, params] {
+            if let Some(v) = source["vendor_score_factor"].as_f64() {
+                cfg.vendor_score_factor = v as f32;
+            }
+            if let Some(v) = source["vendor_pivot_share"].as_f64() {
+                cfg.vendor_pivot_share = v as f32;
+            }
+        }
         // Clamp to sane ranges so a bad config cannot zero out results.
         cfg.min_score_abs = cfg.min_score_abs.clamp(0.0, 1.0);
         cfg.min_score_ratio = cfg.min_score_ratio.clamp(0.0, 1.0);
         cfg.max_file_budget_share = cfg.max_file_budget_share.clamp(0.05, 1.0);
+        cfg.vendor_score_factor = cfg.vendor_score_factor.clamp(0.05, 1.0);
+        cfg.vendor_pivot_share = cfg.vendor_pivot_share.clamp(0.0, 1.0);
         if cfg.max_pivots == 0 {
             cfg.max_pivots = 1;
         }
@@ -629,7 +698,63 @@ mod tests {
             score,
             reasons: Vec::new(),
             git_diff,
+            vendor: false,
         }
+    }
+
+    fn vendor_cand(path: &str, score: f32) -> Candidate {
+        Candidate { vendor: true, ..cand(path, score, false) }
+    }
+
+    #[test]
+    fn test_vendor_factor_only_touches_vendor() {
+        assert_eq!(apply_vendor_factor(0.8, false, 0.5), 0.8);
+        assert_eq!(apply_vendor_factor(0.8, true, 0.5), 0.4);
+    }
+
+    #[test]
+    fn test_vendor_cap_limits_vendor_slots_when_first_party_exists() {
+        let mut cands = vec![
+            vendor_cand("v1.cs", 0.9),
+            cand("a.cs", 0.8, false),
+            vendor_cand("v2.cs", 0.7),
+            cand("b.cs", 0.6, false),
+            vendor_cand("v3.cs", 0.5),
+            cand("c.cs", 0.4, false),
+            vendor_cand("v4.cs", 0.3),
+        ];
+        sort_by_score(&mut cands);
+        // 25% of 8 pivots = 2 vendor slots.
+        let (kept, dropped) = apply_vendor_cap(cands, 8, 0.25);
+        let paths: Vec<&str> = kept.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(paths, vec!["v1.cs", "a.cs", "v2.cs", "b.cs", "c.cs"]);
+        assert_eq!(dropped, 2);
+    }
+
+    #[test]
+    fn test_vendor_cap_is_inert_without_first_party_competition() {
+        // Two first-party survivors are not enough to claim the list.
+        let cands = vec![vendor_cand("v1.cs", 0.9), vendor_cand("v2.cs", 0.8), cand("a.cs", 0.7, false), cand("b.cs", 0.6, false)];
+        let (kept, dropped) = apply_vendor_cap(cands, 4, 0.25);
+        assert_eq!(kept.len(), 4);
+        assert_eq!(dropped, 0);
+        // share 0 with competition: no vendor at all.
+        let cands = vec![vendor_cand("v1.cs", 0.9), cand("a.cs", 0.7, false), cand("b.cs", 0.6, false), cand("c.cs", 0.5, false)];
+        let (kept, dropped) = apply_vendor_cap(cands, 4, 0.0);
+        assert!(kept.iter().all(|c| !c.vendor));
+        assert_eq!(dropped, 1);
+    }
+
+    #[test]
+    fn test_config_vendor_knobs_and_clamps() {
+        let config = json!({ "vendor_score_factor": 0.7, "vendor_pivot_share": 0.5 });
+        let params = json!({ "vendor_score_factor": 2.0 });
+        let cfg = RelevanceConfig::from_sources(&config, &params);
+        assert_eq!(cfg.vendor_score_factor, 1.0, "param wins, then clamped to 1.0");
+        assert_eq!(cfg.vendor_pivot_share, 0.5);
+        let d = RelevanceConfig::from_sources(&Value::Null, &Value::Null);
+        assert_eq!(d.vendor_score_factor, 0.5);
+        assert_eq!(d.vendor_pivot_share, 0.25);
     }
 
     #[test]

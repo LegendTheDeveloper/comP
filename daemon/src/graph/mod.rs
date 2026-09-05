@@ -183,15 +183,16 @@ impl GraphDB {
         hash: &str,
         language: &str,
         char_count: usize,
+        vendor: (bool, &str),
         symbols: &[crate::indexer::parser::Symbol],
     ) -> Result<i64> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
         let tx = conn.unchecked_transaction()?;
 
         tx.execute(
-            "INSERT OR REPLACE INTO files (path, hash, language, last_indexed, char_count)
-             VALUES (?, ?, ?, strftime('%s', 'now'), ?)",
-            rusqlite::params![path, hash, language, char_count as i64],
+            "INSERT OR REPLACE INTO files (path, hash, language, last_indexed, char_count, vendor, vendor_reason)
+             VALUES (?, ?, ?, strftime('%s', 'now'), ?, ?, ?)",
+            rusqlite::params![path, hash, language, char_count as i64, if vendor.0 { 1 } else { 0 }, vendor.1],
         )?;
         let file_id: i64 =
             tx.query_row("SELECT id FROM files WHERE path = ?", [path], |row| row.get(0))?;
@@ -536,6 +537,81 @@ impl GraphDB {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// path -> vendor flag for every indexed file.
+    pub fn get_vendor_flags(&self) -> Result<HashMap<String, bool>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT path, vendor FROM files")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? != 0))
+        })?;
+        Ok(rows.collect::<Result<HashMap<_, _>, _>>()?)
+    }
+
+    /// Rewrite the vendor flag of the given files in one transaction.
+    ///
+    /// WHY: classification depends on config and git history, which change
+    /// without the files changing; the reclassify pass after every walk keeps
+    /// unchanged files current instead of waiting for a forced reindex.
+    pub fn update_vendor_flags(&self, updates: &[(String, bool, String)]) -> Result<usize> {
+        if updates.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let tx = conn.unchecked_transaction()?;
+        let mut changed = 0usize;
+        {
+            let mut stmt = tx.prepare("UPDATE files SET vendor = ?, vendor_reason = ? WHERE path = ?")?;
+            for (path, vendor, reason) in updates {
+                changed += stmt.execute(rusqlite::params![if *vendor { 1 } else { 0 }, reason, path])?;
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
+    /// Vendor files grouped by "<alias>/<a>/<b>" folder, with the rule that
+    /// classified most of them. Sorted by file count, for `get_stats`.
+    pub fn vendor_folder_summary(&self) -> Result<Vec<(String, usize, String)>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let mut stmt = conn.prepare("SELECT path, COALESCE(vendor_reason, '') FROM files WHERE vendor = 1")?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
+        let mut folders: HashMap<String, (usize, HashMap<String, usize>)> = HashMap::new();
+        for row in rows {
+            let (path, reason) = row?;
+            let key: String = path.split('/').take(3).collect::<Vec<_>>().join("/");
+            let entry = folders.entry(key).or_insert_with(|| (0, HashMap::new()));
+            entry.0 += 1;
+            *entry.1.entry(reason).or_insert(0) += 1;
+        }
+        let mut out: Vec<(String, usize, String)> = folders
+            .into_iter()
+            .map(|(folder, (count, reasons))| {
+                let reason = reasons.into_iter().max_by_key(|(_, n)| *n).map(|(r, _)| r).unwrap_or_default();
+                (folder, count, reason)
+            })
+            .collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        Ok(out)
+    }
+
+    /// Free-form key/value in the metadata table (caches, flags).
+    pub fn get_metadata(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let value = conn
+            .query_row("SELECT value FROM metadata WHERE key = ?", [key], |row| row.get::<_, String>(0))
+            .ok();
+        Ok(value)
+    }
+
+    pub fn set_metadata(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)",
+            rusqlite::params![key, value],
+        )?;
+        Ok(())
+    }
+
     /// Count symbols (nodes) per file_id
     pub fn count_symbols_per_file(&self) -> Result<HashMap<i64, i64>> {
         let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
@@ -577,9 +653,11 @@ impl GraphDB {
     /// WHY: Since SearchEngine's TF-IDF is not yet built, we temporarily return context
     /// by searching symbol names using a LIKE pattern.
     ///
-    /// Ordering: exact name matches first, then shorter names (closer to the query)
-    /// before longer ones. Without this, LIMIT returns arbitrary DB rows and the
-    /// exact-match symbol may not even be included.
+    /// Ordering: first-party files before vendor ones, then exact name matches,
+    /// then shorter names (closer to the query) before longer ones. Without
+    /// this, LIMIT returns arbitrary DB rows and the exact-match symbol may not
+    /// even be included; without the vendor key, the short names of bought
+    /// assets (`Settings`, `Player`) filled the whole window.
     pub fn search_symbols_by_name(
         &self,
         query: &str,
@@ -592,7 +670,7 @@ impl GraphDB {
             "SELECT files.path, nodes.name, nodes.kind, nodes.line
              FROM nodes JOIN files ON nodes.file_id = files.id
              WHERE LOWER(nodes.name) LIKE LOWER(?1)
-             ORDER BY (LOWER(nodes.name) = LOWER(?2)) DESC, LENGTH(nodes.name) ASC
+             ORDER BY files.vendor ASC, (LOWER(nodes.name) = LOWER(?2)) DESC, LENGTH(nodes.name) ASC
              LIMIT ?3"
         )?;
         let rows = stmt.query_map(rusqlite::params![pattern, query, limit as i64], |row| {
