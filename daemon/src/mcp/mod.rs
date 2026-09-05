@@ -514,6 +514,13 @@ impl MCPServer {
             .as_str()
             .ok_or_else(|| anyhow!("Missing 'task' parameter"))?;
 
+        // The daemon answers the MCP handshake before indexing finishes, and
+        // the TF-IDF index is only built once indexing ends; the first query
+        // of every session used to run against a half-built index with no
+        // TF-IDF channel at all and nobody was told. Wait a bounded time for
+        // the initial pass, then say so if it is still running.
+        let index_ready = self.wait_for_index(std::time::Duration::from_secs(45)).await;
+
         // budget: explicit param overrides config default
         let budget = params["max_tokens"].as_u64().map(|v| v as usize)
             .unwrap_or_else(|| Self::load_default_budget(&self.state.workspace_root));
@@ -1235,6 +1242,9 @@ impl MCPServer {
             // the doc share cap likewise.
             "dropped_vendor": dropped_vendor,
             "dropped_doc": dropped_doc,
+            // false when the initial indexing pass was still running after
+            // the wait: the answer lacks the TF-IDF channel and may miss files.
+            "index_ready": index_ready,
             "coverage": {
                 "indexed_doc_files": indexed_doc_count,
                 "bm25_hits": bm25_hit_count,
@@ -1262,6 +1272,28 @@ impl MCPServer {
 
     /// Read `default_budget_tokens` from `.comp/config.json`.
     /// Falls back to 8000 if the file is absent or the key is missing.
+    /// Block until the background indexing job is idle or `max` elapses.
+    /// Returns whether the index was ready.
+    async fn wait_for_index(&self, max: std::time::Duration) -> bool {
+        let started = std::time::Instant::now();
+        loop {
+            let indexing = self
+                .state
+                .indexing_status
+                .lock()
+                .map(|s| s.is_indexing())
+                .unwrap_or(false);
+            if !indexing {
+                return true;
+            }
+            if started.elapsed() >= max {
+                log::warn!("run_pipeline answered while the initial indexing pass was still running");
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    }
+
     fn load_default_budget(root: &str) -> usize {
         let path = std::path::Path::new(root).join(".comp/config.json");
         let content = std::fs::read_to_string(path).unwrap_or_default();
