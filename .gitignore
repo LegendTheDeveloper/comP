@@ -116,3 +116,9 @@ daemon/build_output.txt
 # これらはローカル専用の開発メモ。GitHubには上げない。
 docs/conversation_log.md
 docs/work_plan.md
+
+# Replay outputs of daemon/tools/replay.py are large and machine-specific; the
+# ground truth and vendor prefix fixtures beside them are committed.
+daemon/tools/baseline/*.json
+!daemon/tools/baseline/*-groundtruth.json
+daemon/tools/baseline/*.log

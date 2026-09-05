@@ -1,0 +1,975 @@
+{
+ "project": "C:/Users/Legend/.claude/projects/c--Users-Legend-OneDrive-Documents-GitHub-Lynium",
+ "entries": [
+  {
+   "query": "show assigned keybind labels above the playfield lanes when a map starts, including the rhythm note key",
+   "params": {
+    "repos": [
+     "Lynium"
+    ]
+   },
+   "session": "2550e90c-780f-40f4-b821-9eb3beb5fc88.jsonl",
+   "timestamp": "2026-08-17T00:50:15.115Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_Note.cs",
+    "Lynium/Assets/M1_ShowMods.cs",
+    "Lynium/Assets/Scripts/KeyValue.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PositionsAdmin.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/Misc/bl_KeyOptionsUI.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Internal/Structures/bl_KeyInfoUI.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_NoteData.cs",
+    "Lynium/Assets/Implementation/RhythmTool/Editor/RhythmToolEditor.cs",
+    "Lynium/Assets/Implementation/Rhythm Visualizator Pro/Editor/RhythmVisualizatorEditor.cs",
+    "Lynium/Assets/Implementation/RhythmTool/Editor/RhythmEventProviderEditor.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_LaneVisuals.cs",
+    "Lynium/Assets/LoginPro/System/UI/Animations/UIAnimator.cs",
+    "Lynium/Assets/Animations/InGameAnimations/OnStartCameraAnimationFromAbove.anim",
+    "Lynium/Assets/Animations/InGameAnimations/OnStartCameraAnimationFromAbove.anim.meta",
+    "Lynium/Assets/Resources/RhythmNoteFail.png.meta",
+    "Lynium/Assets/Scripts/Framework/DeepLinks/SingleInstanceRelay.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_Grid.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_MinimapPlacement.cs"
+   ],
+   "edited": [
+    "Lynium/Assets/M1_Game_DisplayKeys.cs"
+   ]
+  },
+  {
+   "query": "show beatmap chart duration on song selection row and on difficulty hover in the song selector",
+   "params": {
+    "max_pivots": 12,
+    "repos": [
+     "Lynium"
+    ]
+   },
+   "session": "6d861a8c-5070-4564-a377-afd8190befd8.jsonl",
+   "timestamp": "2026-08-16T23:57:11.370Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptionsHelper.cs",
+    "Lynium/Assets/SongSelection_Button.cs",
+    "Lynium/Assets/SongSelection_DisplayBeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_RankingTypes.cs",
+    "Lynium/Assets/OnHover.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptions.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Metronome.cs",
+    "Lynium/Assets/Tutorial_SongSelection.cs",
+    "Lynium/Assets/Implementation/RhythmTool/Examples/Scripts/VisualizerExample.cs",
+    "Lynium/Assets/TextMesh Pro/Examples & Extras/Scripts/TMP_TextEventCheck.cs",
+    "Lynium/Assets/DisplayUserInformationOnHover.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/.github/workflows/deploy.yml",
+    "Lynium-Backend/UNIREST/api/v2/beatmaps/getAllBeatmapSets/index.php",
+    "Lynium-Backend/UNIREST/api/v2/beatmaps/searchBeatmapSets/index.php",
+    "Lynium-Backend/UNIREST/migrations/2026-08-16_beatmaps_chart_length.sql",
+    "Lynium-Backend/UNIREST/migrations/2026-08-16_beatmaps_chart_length_backfill.php",
+    "Lynium-Backend/UNIREST/migrations/2026-08-16_chart_length_apply.sh",
+    "Lynium-Backend/UNIREST/migrations/migrate.sh",
+    "Lynium/Assets/BeatmapVersionIconData.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/LoginPro_BeatmapsDownloads.cs"
+   ]
+  },
+  {
+   "query": "calculate total performance points pp for a user profile",
+   "params": {
+    "max_pivots": 20
+   },
+   "session": "d3b713a1-b4ff-4932-9530-f4aa26e6cf56.jsonl",
+   "timestamp": "2026-08-17T03:13:08.260Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Modes/M1/Game/InGameScores.cs",
+    "Lynium/Assets/Scripts/Framework/Testing/HR_CalculateDifficulty.cs",
+    "Lynium-Frontend/src/app/pages/users/user-profile.component.ts",
+    "Lynium/Assets/ViewUserProfile.cs",
+    "Lynium/Assets/DisplayUserInformationOnHover.cs",
+    "Lynium-Frontend/src/app/shared/utils/profile.ts",
+    "Lynium/Assets/Scripts/Framework/IO/Network/ServerFiles.cs",
+    "Lynium/Assets/GetUserData.cs",
+    "Lynium-Frontend/CLAUDE.md",
+    "Lynium/Assets/Scripts/Framework/Users/UserData.cs",
+    "Lynium/Assets/LoginPro/Use my content/Examples to study/LoginPro_GetProfileImage.cs",
+    "Lynium-Frontend/src/app/components/header/navigation-bar/navigation-bar.component.html",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_ChangeProfileIcon.cs",
+    "Lynium-Frontend/src/app/shared/components/profile-icon/profile-icon.component.ts",
+    "Lynium-Frontend/src/app/components/footer/footer.component.html",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/BL_LoadUserData.cs",
+    "Lynium/Assets/Resources/UserRanking.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/api/index.php"
+   ]
+  },
+  {
+   "query": "stop the song audio preview when closing the beatmap downloads panel",
+   "params": {
+    "repos": [
+     "Lynium"
+    ]
+   },
+   "session": "c9d40e68-0937-4355-bb29-58884cba99c9.jsonl",
+   "timestamp": "2026-08-17T06:34:54.896Z",
+   "observed_pivots": [
+    "Lynium/Assets/Plugins/uAudio/Scripts/uAudioStreamer.cs",
+    "Lynium/Assets/Plugins/uAudio/Scripts/uAudioPlayer_UI.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapPreviewPlayer.cs",
+    "Lynium/Assets/Plugins/Demigiant/DOTweenPro/Editor/DOTweenPreviewManager.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapSetRowData.cs",
+    "Lynium/Assets/SongSelection_DisplayBeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/LoginPro_BeatmapsDownloads.cs",
+    "Lynium/Assets/Plugins/uAudio/Scripts/Support/dirLoop_UI.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/BeatmapDataPosition.cs",
+    "Lynium/Assets/Scripts/Utilities/UI Extensions/TogglePanelButton.cs",
+    "Lynium/Assets/Scripts/Framework/IO/File/ImportSong.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptionsHelper.cs",
+    "Lynium/Assets/Plugins/uAudio/Scripts/uAudioStreamer_UI.cs",
+    "Lynium/Assets/Editor/DownloadsPanelBuilder.cs.meta",
+    "Lynium/Assets/Prefabs/BeatmapSet Downloads.meta",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapPreviewPlayer.cs.meta",
+    "Lynium/Assets/Resources/AudioMixer Song.mixer"
+   ],
+   "edited": [
+    "Lynium/.gitignore",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapPreviewPlayer.cs"
+   ]
+  },
+  {
+   "query": "let users edit their profile and add social network links (Twitch, YouTube) on the website",
+   "params": {
+    "max_pivots": 20
+   },
+   "session": "8e4de0f4-3214-4173-81dc-6980f49a06da.jsonl",
+   "timestamp": "2026-08-17T07:13:47.988Z",
+   "observed_pivots": [
+    "Lynium/Assets/Modern UI Pack/Editor/UIManagerEditor.cs",
+    "Lynium/Assets/DisplayUserInformationOnHover.cs",
+    "Lynium/Assets/ViewUserProfile.cs",
+    "Lynium-Frontend/src/app/shared/utils/profile.ts",
+    "Lynium-Frontend/src/app/shared/components/profile-icon/profile-icon.component.ts",
+    "Lynium/Assets/LoginPro/Use my content/Examples to study/LoginPro_GetProfileImage.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/SendRateOnSerializeField.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/PropertyFields/UserIdField.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/GameVersionField.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/NickNameField.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/SendRateField.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/BackgroundTimeOutField.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptions.cs",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/autogen/SteamEnums.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/UniRESTClientConfig.cs",
+    "Lynium/Assets/Modern UI Pack/Textures/Icon/Communication & Social.meta",
+    "Lynium/Assets/Modern UI Pack/Textures/Icon/Communication & Social/YouTube.png.meta",
+    "Lynium/Assets/Scripts/OpenURL.cs",
+    "Lynium/Assets/Scripts/Framework/Users.meta"
+   ],
+   "edited": [
+    "Lynium-Backend/UNIREST/migrations/2026-08-17_user_profile_editing.sql",
+    "Lynium-Backend/api/auth/index.php",
+    "Lynium-Backend/api/index.php",
+    "Lynium-Backend/api/socials.php",
+    "Lynium-Frontend/src/app/app.routes.server.ts",
+    "Lynium-Frontend/src/app/app.routes.ts",
+    "Lynium-Frontend/src/app/auth/services/auth.service.ts",
+    "Lynium-Frontend/src/app/components/header/account-menu/account-menu.component.ts",
+    "Lynium-Frontend/src/app/pages/settings/settings.component.html",
+    "Lynium-Frontend/src/app/pages/settings/settings.component.ts",
+    "Lynium-Frontend/src/app/pages/users/user-profile.component.html",
+    "Lynium-Frontend/src/app/pages/users/user-profile.component.ts",
+    "Lynium-Frontend/src/app/shared/interfaces/models.ts",
+    "Lynium-Frontend/src/app/shared/services/app-update.service.ts",
+    "Lynium-Frontend/src/app/shared/services/mock-data.ts",
+    "Lynium-Frontend/src/app/shared/services/presence.service.ts",
+    "Lynium-Frontend/src/app/shared/services/settings.service.ts",
+    "Lynium-Frontend/src/app/shared/utils/countries.ts"
+   ]
+  },
+  {
+   "query": "add sorting by beatmap duration and audio duration in song selection screen",
+   "params": {
+    "max_pivots": 15
+   },
+   "session": "93a56321-f7fa-46da-8d93-2e377245da04.jsonl",
+   "timestamp": "2026-08-17T14:20:42.062Z",
+   "observed_pivots": [
+    "Lynium/Assets/SongSelection_DisplayBeatmapData.cs",
+    "Lynium/Assets/SongSelection_Button.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptionsHelper.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_RankingTypes.cs",
+    "Lynium-Frontend/src/app/shared/pipes/duration.pipe.ts",
+    "Lynium/Assets/Tutorial_SongSelection.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptions.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_BeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/BeatmapDataPosition.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Metronome.cs",
+    "Lynium/Assets/Plugins/uAudio/Scripts/uAudioPlayer_UI.cs",
+    "Lynium/Assets/Plugins/uAudio/Scripts/Support/dirLoop_UI.cs",
+    "Lynium/Assets/TextMesh Pro/Examples & Extras/Scripts/TMP_TextEventCheck.cs"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/SongSelectionBuilder.cs",
+    "Lynium/Assets/Editor/SongSelectionInfoBuilder.cs",
+    "Lynium/Assets/Resources/Localizatron/Locale/es_MX.txt",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapIndexEntry.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapIndexFile.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapLibrary.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapMetadataReader.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/Scripts/UI/PauseBeatmapInfo.cs",
+    "Lynium/Assets/Scripts/UI/SongSelectionBeatmapInfo.cs"
+   ]
+  },
+  {
+   "query": "share beatmap link copy to clipboard",
+   "params": {
+    "max_pivots": 12
+   },
+   "session": "1e8fb729-99f1-4c1e-a858-e68c56db4b93.jsonl",
+   "timestamp": "2026-08-17T01:02:01.252Z",
+   "observed_pivots": [
+    "Lynium-Frontend/src/app/shared/components/score-detail/score-detail.component.ts",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Editor/RedistCopy.cs",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/autogen/isteamhtmlsurface.cs",
+    "Lynium/Assets/Scripts/Framework/Utility/LinkToAdditionalData.cs",
+    "Lynium/Assets/Scripts/Framework/DeepLinks/GameLink.cs",
+    "Lynium-Frontend/CLAUDE.md",
+    "Lynium/Assets/Scripts/Framework/SongSelection/BeatmapDataPosition.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapStats.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapSetData.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/DocLinkButton.cs",
+    "Lynium-Frontend/src/app/shared/services/beatmaps.service.ts",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapSetRowData.cs"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/PauseBeatmapInfoBuilder.cs",
+    "Lynium/Assets/Scripts/Framework/IO/Network/ServerFiles.cs",
+    "Lynium/Assets/Scripts/UI/PauseBeatmapInfo.cs",
+    "Lynium/Assets/Scripts/UI/PauseShareButton.cs"
+   ]
+  },
+  {
+   "query": "add an option to the right click context menu on a song row in song selection",
+   "params": {
+    "max_pivots": 12
+   },
+   "session": "1e8fb729-99f1-4c1e-a858-e68c56db4b93.jsonl",
+   "timestamp": "2026-08-17T03:14:37.399Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptionsHelper.cs",
+    "Lynium/Assets/SongSelection_Button.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_RankingTypes.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptions.cs",
+    "Lynium/Assets/Scripts/Framework/Utility/ContextMenu_Caller.cs",
+    "Lynium/Assets/Tutorial_SongSelection.cs",
+    "Lynium/Assets/Modern UI Pack/Scripts/Context Menu/ContextMenuManager.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/Modern UI Pack/Scripts/Context Menu/ContextMenuContent.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Metronome.cs",
+    "Lynium/Assets/Modern UI Pack/Scripts/UI Manager/UIManagerContextMenu.cs",
+    "Lynium-Frontend/src/app/shared/components/chip-select/chip-select.component.ts"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/BeatmapOptionsMenuBuilder.cs",
+    "Lynium/Assets/Editor/PauseBeatmapInfoBuilder.cs",
+    "Lynium/Assets/Editor/SongSelectionBuilder.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapLikes.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapShare.cs",
+    "Lynium/Assets/Scripts/Framework/IO/File/GamePaths.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_BeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_SongOptions.cs",
+    "Lynium/Assets/Scripts/UI/PauseBeatmapInfo.cs"
+   ]
+  },
+  {
+   "query": "results screen back retry website buttons styling and hover",
+   "params": {
+    "repos": [
+     "Lynium"
+    ]
+   },
+   "session": "3f589288-e67d-44e0-82b7-82cdedf9645b.jsonl",
+   "timestamp": "2026-08-17T16:44:13.430Z",
+   "observed_pivots": [
+    "Lynium/Assets/Implementation/GE Common Assets/GE Toggle Full Screen/Scripts/GE_ToggleFullScreenUI.cs",
+    "Lynium/Assets/OnHoverViewData.cs",
+    "Lynium/Assets/Modern UI Pack/Editor/UIManagerEditor.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/bl_ScreenRainEffect.cs",
+    "Lynium/Assets/Frost UI/Scripts/SplashScreenManager.cs",
+    "Lynium/Assets/OnHover.cs",
+    "Lynium/Assets/Frost UI/Scripts/LoadingScreen.cs",
+    "Lynium/Assets/PostProcessing/Editor/Models/ScreenSpaceReflectionModelEditor.cs",
+    "Lynium/Assets/Scripts/Framework/Utility/LoadingScreenButton.cs",
+    "Lynium/Assets/Scripts/Framework/Utility/EsperarEntrada.cs",
+    "Lynium/Assets/Implementation/GUI Animator/GUI Animator FREE/Demo (CSharp)/Scripts/GA_FREE_Demo07.cs",
+    "Lynium/Assets/Implementation/GaussianBlur/GaussianBlur_LiveBlur/Demo/Scripts/SyncCoordinates.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/bl_AllOptionsPro.cs",
+    "Lynium/Assets/Editor/ResultsScreenBuilder.cs.meta",
+    "Lynium/Assets/Art/New Design/Buttons.meta",
+    "Lynium/Assets/Art/New Design/Prefabs/Buttons.meta",
+    "Lynium/Assets/Frost UI/Animations/Buttons.meta",
+    "Lynium/Assets/Frost UI/Prefabs/Buttons.meta"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/ResultsSceneBuilder.cs",
+    "Lynium/Assets/Scripts/Framework/Results/CelebrationBanner.cs",
+    "Lynium/Assets/Scripts/Framework/Results/ShowResults.cs"
+   ]
+  },
+  {
+   "query": "fix like/dislike buttons on results screen not sending, add timeout error and stop song music on results",
+   "params": {
+    "max_pivots": 12,
+    "compression_level": 2
+   },
+   "session": "6ab09b1c-fa47-45bf-a05f-7e23f6761c9d.jsonl",
+   "timestamp": "2026-08-16T22:10:22.560Z",
+   "observed_pivots": [
+    "GameLauncherCloud-UnityExtension/Game Launcher Cloud - Unity Extension/Packages/com.unity.asset-store-tools/Editor/Validator/Scripts/UI/Elements/ValidatorResultsElement.cs",
+    "GameLauncherCloud-UnityExtension/Game Launcher Cloud - Unity Extension/Packages/com.unity.asset-store-tools/Editor/Uploader/Scripts/Services/Analytics/Data/ValidationResultsSerializer.cs",
+    "GameLauncherCloud-UnityExtension/Game Launcher Cloud - Unity Extension/Packages/com.unity.asset-store-tools/Editor/Validator/Scripts/UI/Data/Serialization/ValidatorStateResults.cs",
+    "GameLauncherCloud-Frontend/src/app/pages/manage-collaborators/components/team-card.component.ts",
+    "GameLauncherCloud-Backend/GameLauncher/GameLauncher.API/Controllers/Analytics/Dto/AppPlayerMetricsDto.cs",
+    "GameLauncherCloud-Backend/GameLauncher/GameLauncher.API/Controllers/Analytics/Dto/LauncherPlayerMetricsDto.cs",
+    "GameLauncherCloud-Backend/stop.sh",
+    "GameLauncherCloud-Desktop/GameLauncher/Helpers/OAuthCallbackListener.cs",
+    "GameLauncherCloud-Desktop/GameLauncher/Services/LiveStatus/ILiveStatusService.cs",
+    "GameLauncherCloud-Desktop/GameLauncher/Services/LiveStatus/LiveStatusService.cs",
+    "GameLauncherCloud-Backend/GameLauncher/GameLauncher.API/Controllers/Launchers/Dto/LauncherEmailSettingsResponseDto.cs",
+    "GameLauncherCloud-Backend/GameLauncher/GameLauncher.API/Models/LoginSystem/LauncherEmailSettings.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/UNIREST/api/v2/beatmaps/getBeatmapRatings/index.php",
+    "Lynium/Assets/Editor/ResultsSceneBuilder.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapLikes.cs",
+    "Lynium/Assets/Scripts/Framework/Results/ShowResults.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs"
+   ]
+  },
+  {
+   "query": "fix keyboard layout / key binding settings not changeable for 6K and 7K key modes",
+   "params": {
+    "max_pivots": 15
+   },
+   "session": "5c46f98e-6414-4a19-b0d5-b4c41b4ae3e6.jsonl",
+   "timestamp": "2026-08-17T14:04:53.578Z",
+   "observed_pivots": [
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/bl_Input.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_TimeAndKey.cs",
+    "Lynium/Assets/Scripts/KeyValue.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/Misc/bl_KeyOptionsUI.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Internal/Structures/bl_KeyInfoUI.cs",
+    "Lynium/Assets/MHLab/Localizatron/Settings/Settings.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Internal/Structures/bl_KeyInfo.cs",
+    "Lynium/Assets/Scripts/OneTimeKey.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/BloomModel.cs",
+    "Lynium/Assets/Frost UI/Scripts/LayoutGroupPositionFix.cs",
+    "Lynium-Frontend/src/app/auth/layout/login-layout/login-layout.component.ts",
+    "Lynium/Assets/M1_Editor_CreateNotesWithKey.cs",
+    "Lynium/Assets/Frost UI/Scripts/PressKey.cs",
+    "Lynium/Assets/Photon/PhotonChat/Demos/DemoChat/AppSettingsExtensions.cs",
+    "Lynium/Assets/Frost UI/Scripts/HoldKeyEvent.cs"
+   ],
+   "edited": [
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/Misc/bl_KeyOptionsUI.cs"
+   ]
+  },
+  {
+   "query": "render long note body sprite and add tick marks along the hold",
+   "params": {
+    "max_pivots": 15
+   },
+   "session": "c11ec65f-3b1f-4f84-bd36-167715eeb3e5.jsonl",
+   "timestamp": "2026-08-22T06:06:34.936Z",
+   "observed_pivots": [
+    "Lynium/Assets/TigerForge/UniRESTClient/Core/UniTask/Runtime/Linq/LongCount.cs",
+    "Lynium/Assets/Implementation/GaussianBlur/GaussianBlur_RenderBlur/Scripts/BlurRenderer.cs",
+    "Lynium/Assets/Frost UI/Scripts/HoldKeyEvent.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PositionsAdmin.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_Note.cs",
+    "Lynium-Frontend/src/index.html",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_NoteData.cs",
+    "Lynium/Assets/Implementation/GaussianBlur/GaussianBlur_RenderBlur/Demo/Scripts/DemoSliderControl.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_UndoRedo_Commands.cs",
+    "Lynium/Assets/Scripts/Modes/Testing/M9_Game_Note.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Utils/RenderTextureFactory.cs",
+    "Lynium/Assets/Scripts/Framework/Users/Progression/ProgressionCelebrations.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/AsyncImageLoader.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/UNIREST/CustomFunctions/note_counts.php"
+   ]
+  },
+  {
+   "query": "RainDropEffect2 rain drop camera effect component setup and usage",
+   "params": {
+    "max_pivots": 15
+   },
+   "session": "d3b40e39-76fe-494b-9cbb-15a6a8840f25.jsonl",
+   "timestamp": "2026-08-22T22:45:18.178Z",
+   "observed_pivots": [
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/Common/RainDrawer.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/Common/RainDropTools.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/bl_ScreenRainEffect.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Editor/RainCameraControllerInspector.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/StaticRain/StaticRainBehaviour.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/Camera/RainCameraController.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/Common/RainBehaviourBase.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/SimpleRain/SimpleRainBehaviour.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/FlowRain/FlowRainBehaviour.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/FrictionFlowRain/FrictionFlowRainBehaviour.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/Common/RainDrawerContainer.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/StaticRain/StaticRainController.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/SimpleRain/SimpleRainVariables.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/StaticRain/StaticRainVariables.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Scripts/RainBehaviours/FlowRain/FlowRainVariables.cs"
+   ],
+   "edited": [
+    "Lynium/Assets/CustomizeGame.cs",
+    "Lynium/Assets/M1_Game_Customization.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/GameSettings.cs",
+    "Lynium/Assets/Scripts/Framework/Weather/WeatherScreen.cs",
+    "Lynium/Assets/Scripts/Framework/Weather/WeatherScreenRig.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_Weather.cs"
+   ]
+  },
+  {
+   "query": "wet screen and frozen screen weather visual effects overlay on the gameplay HUD",
+   "params": {
+    "max_pivots": 20
+   },
+   "session": "6b63c1d5-2459-4657-8b89-e79e8ec1098b.jsonl",
+   "timestamp": "2026-08-22T22:45:08.919Z",
+   "observed_pivots": [
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/bl_AllOptionsPro.cs",
+    "Lynium/Assets/Implementation/GE Common Assets/GE Toggle Full Screen/Scripts/GE_ToggleFullScreenUI.cs",
+    "Lynium/Assets/PostProcessing/Editor/Models/ScreenSpaceReflectionModelEditor.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/bl_ScreenRainEffect.cs",
+    "Lynium/Assets/Frost UI/Scripts/SplashScreenManager.cs",
+    "Lynium/Assets/Frost UI/Scripts/LoadingScreen.cs",
+    "Lynium/Assets/Scripts/Framework/Utility/LoadingScreenButton.cs",
+    "Lynium/Assets/Implementation/GaussianBlur/GaussianBlur_LiveBlur/Demo/Scripts/SyncCoordinates.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/ScreenSpaceReflectionModel.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/DemoSlotRacer/Scripts/SlotRacerSplashScreen.cs",
+    "Lynium/Assets/Editor/SongSelectionBuilder.cs",
+    "Lynium/Assets/Frost UI/Animations/HUD.meta",
+    "Lynium/Assets/Frost UI/Prefabs/HUD.meta",
+    "Lynium/Assets/Frost UI/Scenes/HUD.unity",
+    "Lynium/Assets/Implementation/RainDropEffect2/Demo/Scripts/DemoScene1.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Demo/Scripts/DemoScene2.cs",
+    "Lynium/Assets/Implementation/RainDropEffect2/Textures/Frozen.meta",
+    "Lynium/Assets/Frost UI/Animations/Effects.meta",
+    "Lynium/Assets/Standard Assets/Effects.meta"
+   ],
+   "edited": [
+    "Lynium/Assets/CustomizeGame.cs",
+    "Lynium/Assets/M1_Game_Customization.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/GameSettings.cs",
+    "Lynium/Assets/Scripts/Framework/Weather/WeatherScreen.cs",
+    "Lynium/Assets/Scripts/Framework/Weather/WeatherScreenRig.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_Weather.cs"
+   ]
+  },
+  {
+   "query": "make the Controls section of the settings sidebar navigation look like the other category buttons (Display, Audio, Gameplay, Visuals) instead of a separate group header with Mania and Standard sub-items",
+   "params": {
+    "max_tokens": 6000
+   },
+   "session": "fca12c5e-a039-4435-b121-5a60c05bef6c.jsonl",
+   "timestamp": "2026-08-23T17:23:43.255Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/InputMaster.cs",
+    "Lynium-Frontend/src/app/components/header/navigation-bar/navigation-bar.component.html",
+    "Lynium-Frontend/src/app/pages/settings/settings.component.html",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/autogen/SteamCallbacks.cs",
+    "Lynium/Assets/Modern UI Pack/Textures/Icon/Navigation.meta",
+    "Lynium-Frontend/src/app/shared/components/section-header/section-header.component.ts",
+    "Lynium/Assets/Frost UI/Prefabs/Others/Settings Header.prefab",
+    "Lynium/Assets/Frost UI/Prefabs/Others/Settings Header.prefab.meta",
+    "Lynium/Assets/Scripts/Framework/Settings/DisplaySettings.cs.meta",
+    "Lynium/Assets/Art/New Design/Buttons.meta",
+    "Lynium/Assets/Art/New Design/Prefabs/Buttons.meta",
+    "Lynium/Assets/Frost UI/Animations/Buttons.meta",
+    "Lynium/Assets/Frost UI/Prefabs/Buttons.meta",
+    "Lynium/Assets/Textures/New Design/Buttons.meta"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/SettingsPanelBuilder.cs",
+    "Lynium/Assets/Scripts/UI/DesignSystem/LyniumTabRail.cs"
+   ]
+  },
+  {
+   "query": "add a per-beatmap offset row under the global offset row in the settings screen",
+   "params": {
+    "max_tokens": 6000
+   },
+   "session": "fca12c5e-a039-4435-b121-5a60c05bef6c.jsonl",
+   "timestamp": "2026-08-23T19:33:08.515Z",
+   "observed_pivots": [
+    "Lynium/Assets/Editor/SettingsDiagnostics.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_VideoOffsetRow.cs",
+    "Lynium-Frontend/src/app/shared/components/beatmap-row/beatmap-row.component.ts",
+    "Lynium/Assets/Editor/BeatmapOptionsMenuBuilder.cs",
+    "Lynium/Assets/Implementation/RhythmTool/Scripts/EventProvider.cs",
+    "Lynium-Frontend/src/app/shared/components/score-row/score-row.component.ts",
+    "Lynium/Assets/MHLab/Localizatron/Settings/Settings.cs",
+    "Lynium/Assets/Editor/SongSelectionBuilder.cs",
+    "Lynium/Assets/LobbyRow.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/BloomModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/ScreenSpaceReflectionModel.cs",
+    "Lynium/Assets/Scripts/Framework/GlobalVolume.cs",
+    "Lynium/Assets/PostProcessing/Editor/Models/ScreenSpaceReflectionModelEditor.cs",
+    "Lynium/Assets/Multiplayer_UserRow.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapOffset.cs.meta",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_VideoOffsetRow.cs.meta"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/SettingsPanelBuilder.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Resources/InputManager.asset",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Scripts/Core/bl_Input.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/ActionBinds.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/LyniumSettings.cs",
+    "Lynium/Assets/Scripts/UI/DesignSystem/LyniumKeycap.cs"
+   ]
+  },
+  {
+   "query": "make the quick restart hotkey rebindable in the settings controls panel",
+   "params": {
+    "repos": [
+     "Lynium"
+    ],
+    "max_pivots": 15
+   },
+   "session": "c87a4933-bbca-42a5-acc1-c0e4b626056e.jsonl",
+   "timestamp": "2026-08-23T17:51:32.563Z",
+   "observed_pivots": [
+    "Lynium/Assets/MHLab/Localizatron/Settings/Settings.cs",
+    "Lynium/Assets/Editor/SettingsPanelBuilder.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/BloomModel.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/PlayAttempts.cs",
+    "Lynium/Assets/Scripts/Utilities/UI Extensions/TogglePanelButton.cs",
+    "Lynium/Assets/Photon/PhotonChat/Demos/DemoChat/AppSettingsExtensions.cs",
+    "Lynium/Assets/Frost UI/Scripts/TopPanelManager.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/SettingsData.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/CustomizeSettings.cs",
+    "Lynium/Assets/Implementation/Rhythm Visualizator Pro/RhythmVisualizatorPro.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_VideoBackdrop.cs",
+    "Lynium/Assets/Editor/SettingsPanelBuilder.cs.meta",
+    "Lynium/Assets/Implementation/Art/Animations/InitSettingsPanel.anim"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/PauseShortcutsBuilder.cs",
+    "Lynium/Assets/Editor/SettingsPanelBuilder.cs",
+    "Lynium/Assets/Implementation/All Settings Pro/Content/Resources/InputManager.asset",
+    "Lynium/Assets/Scripts/Framework/GameAdministrator.cs",
+    "Lynium/Assets/Scripts/Framework/IO/File/GamePaths.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/ActionBinds.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/LyniumSettings.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_ScrollCamera.cs",
+    "Lynium/Assets/Scripts/UI/DesignSystem/ActionKeyHint.cs",
+    "Lynium/Assets/Scripts/UI/DesignSystem/LyniumKeycap.cs"
+   ]
+  },
+  {
+   "query": "show the beatmaps a user has liked on their profile page",
+   "params": {
+    "max_tokens": 6000
+   },
+   "session": "334f1bec-3eec-40a0-a6f7-df33d115f637.jsonl",
+   "timestamp": "2026-08-23T21:44:34.097Z",
+   "observed_pivots": [
+    "Lynium/Assets/DisplayUserInformationOnHover.cs",
+    "Lynium/Assets/ViewUserProfile.cs",
+    "Lynium-Frontend/src/app/shared/utils/profile.ts",
+    "Lynium/Assets/GetUserData.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/LoginPro_BeatmapsDownloads.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_ChangeProfileIcon.cs",
+    "Lynium/Assets/M1_ShowMods.cs",
+    "Lynium/Assets/Scripts/Framework/Users/UserData.cs",
+    "Lynium/Assets/Scripts/Framework/Rankings/ShowRankings.cs",
+    "Lynium-Frontend/src/app/shared/components/profile-icon/profile-icon.component.ts",
+    "Lynium/Assets/LoginPro/Use my content/Examples to study/LoginPro_GetProfileImage.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_UserOptions.cs",
+    "Lynium/Assets/ShowMessageOnStart.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/PropertyFields/UserIdField.cs"
+   ],
+   "edited": [
+    "Lynium-Frontend/src/app/pages/settings/settings.component.html",
+    "Lynium-Frontend/src/app/pages/users/user-profile.component.html",
+    "Lynium-Frontend/src/app/pages/users/user-profile.component.ts",
+    "Lynium-Frontend/src/app/shared/components/beatmap-row/beatmap-row.component.html",
+    "Lynium-Frontend/src/app/shared/components/beatmap-row/beatmap-row.component.ts",
+    "Lynium-Frontend/src/app/shared/components/difficulty-badge/difficulty-badge.component.ts",
+    "Lynium-Frontend/src/app/shared/interfaces/models.ts",
+    "Lynium-Frontend/src/app/shared/services/users.service.ts"
+   ]
+  },
+  {
+   "query": "display romanized beatmap title and artist on the website with a toggle to show original unicode names",
+   "params": {
+    "max_tokens": 6000
+   },
+   "session": "348ddb89-d967-4b42-bb8f-e536a93ed135.jsonl",
+   "timestamp": "2026-08-27T06:08:30.964Z",
+   "observed_pivots": [
+    "Lynium/Assets/M1_ShowMods.cs",
+    "Lynium/Assets/DisplayUserInformationOnHover.cs",
+    "Lynium-Frontend/src/app/shared/components/beatmap-row/beatmap-row.component.ts",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/CurrentRoom/CurrentRoomIsOpenToggle.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/CrcCheckToggle.cs",
+    "Lynium/Assets/M1_Game_DisplayKeys.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/AutoSyncSceneToggle.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/Demos/PunCockpit/Scripts/Autonomous UI/CurrentRoom/CurrentRoomIsVisibleToggle.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/UtilityScripts/UI/TextToggleIsOnTransition.cs",
+    "Lynium/Assets/Photon/PhotonChat/Demos/Common/TextToggleIsOnTransition.cs",
+    "Lynium/Assets/Modern UI Pack/Scripts/UI Manager/UIManagerToggle.cs",
+    "Lynium/Assets/Frost UI/Scripts/ToggleAnim.cs",
+    "Lynium/Assets/Photon/PhotonUnityNetworking/UtilityScripts/UI/GraphicToggleIsOnTransition.cs",
+    "Lynium/Assets/Scripts/Utilities/UI Extensions/TogglePanelButton.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/UniRESTClientConfig.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_Editor_Windows_BeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapFavorites.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/api/beatmapsets.php",
+    "Lynium-Backend/api/index.php",
+    "Lynium-Frontend/public/i18n/en.json",
+    "Lynium-Frontend/public/i18n/es.json",
+    "Lynium-Frontend/src/app/pages/beatmaps/beatmap-detail/beatmap-detail.component.html",
+    "Lynium-Frontend/src/app/pages/beatmaps/beatmap-detail/beatmap-detail.component.ts",
+    "Lynium-Frontend/src/app/shared/components/beatmap-row/beatmap-row.component.html",
+    "Lynium-Frontend/src/app/shared/components/beatmap-row/beatmap-row.component.ts",
+    "Lynium-Frontend/src/app/shared/interfaces/models.ts",
+    "Lynium-Frontend/src/app/shared/services/audio-player.service.ts",
+    "Lynium-Frontend/src/app/shared/services/beatmaps.service.ts",
+    "Lynium-Frontend/src/app/shared/utils/beatmap-names.ts"
+   ]
+  },
+  {
+   "query": "replace the MAX PERFECT judgement popup text with a texture image per judgement",
+   "params": {
+    "max_pivots": 12
+   },
+   "session": "48eadbf6-9b05-436a-bbcb-00966d0e1657.jsonl",
+   "timestamp": "2026-08-25T01:32:28.332Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Framework/IO/File/ImportImage.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/Core/UniTask/Runtime/Linq/Max.cs",
+    "Lynium/Assets/Plugins/Beebyte/Obfuscator/ReplaceLiteralsWithName.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_ChangeProfileImageOLD.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/Core/UniTask/Runtime/Linq/MinMax.cs",
+    "Lynium/Assets/LoginPro/Use my content/Examples to study/LoginPro_GetProfileImage.cs",
+    "Lynium/Assets/TextMesh Pro/Examples & Extras/Scripts/TextMeshProFloatingText.cs",
+    "Lynium/Assets/Plugins/Demigiant/DOTweenPro/Editor/DOTweenAnimationInspector.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/AsyncImageLoader.cs",
+    "Lynium/Assets/TextMesh Pro/Examples & Extras/Scripts/TMP_TextSelector_A.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Utils/RenderTextureFactory.cs",
+    "Lynium/Assets/TextMesh Pro/Examples & Extras/Scripts/SkewTextExample.cs"
+   ],
+   "edited": [
+    "Lynium/Assets/Editor/OsuHitsoundAdopt.cs"
+   ]
+  },
+  {
+   "query": "score is marked unranked when autoplay or speed mods are enabled during gameplay",
+   "params": {
+    "max_pivots": 15
+   },
+   "session": "631c0c89-c610-493c-920d-7ee875a92c0d.jsonl",
+   "timestamp": "2026-08-31T04:17:28.193Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Framework/GameMods.cs",
+    "Lynium-Frontend/src/app/shared/components/score-row/score-row.component.ts",
+    "Lynium/Assets/M1_ShowMods.cs",
+    "Lynium/Assets/M1_Mods.cs",
+    "Lynium/Assets/LoginPro/System/Framework/Player.cs",
+    "Lynium/Assets/Scripts/Framework/Rankings/ScoreOutbox.cs",
+    "Lynium/Assets/Scripts/UI/SpeedStepper.cs",
+    "Lynium/Assets/Editor/PauseModsButtonBuilder.cs",
+    "Lynium-Frontend/src/app/shared/components/score-detail/score-detail.component.ts",
+    "Lynium/Assets/Scripts/Threading/TaskExtension.cs",
+    "Lynium/Assets/Art/New Design/Images/Icons/Mods.meta"
+   ],
+   "edited": [
+    "Lynium/Assets/Scripts/Framework/GameAdministrator.cs",
+    "Lynium/Assets/Scripts/Framework/GameMods.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs",
+    "Lynium/Assets/Scripts/UI/PauseModsGuard.cs"
+   ]
+  },
+  {
+   "query": "replay recording and playback, replay file format, insert ranking score submission with mods",
+   "params": {
+    "repos": [
+     "Lynium"
+    ],
+    "max_pivots": 15
+   },
+   "session": "a781db85-d0ac-4331-8fba-2dd907abd36b.jsonl",
+   "timestamp": "2026-09-02T18:49:50.960Z",
+   "observed_pivots": [
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_InsertRanking.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Osu/OsuFile.cs",
+    "Lynium/Assets/Scripts/Framework/GameMods.cs",
+    "Lynium/Assets/Scripts/Modes/M1/M1_Ranking.cs",
+    "Lynium/Assets/Plugins/uAudio/Scripts/uAudioStreamer_UI.cs",
+    "Lynium/Assets/Resources/UserRanking.cs",
+    "Lynium/Assets/M1_ShowMods.cs",
+    "Lynium/Assets/Scripts/Framework/Rankings/RankingsUsuario.cs",
+    "Lynium/Assets/Plugins/uAudio/Scripts/uAudioStreamer.cs",
+    "Lynium/Assets/Scripts/Framework/IO/File/FileSafety.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/SettingsFileWriter.cs",
+    "Lynium/Assets/Implementation/PygmyMonkey/FileBrowser/Demo/FileBrowserDemo.cs",
+    "Lynium/Assets/Implementation/PygmyMonkey/FileBrowser/Scripts/FileBrowserWindows.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_InsertRanking.cs.meta"
+   ],
+   "edited": [
+    "Lynium-Backend/UNIREST/CustomFunctions/performance.php",
+    "Lynium-Backend/UNIREST/api/v2/rankings/insertRanking/index.php",
+    "Lynium-Frontend/src/app/shared/utils/mods.ts",
+    "Lynium/Assets/Editor/AdaptiveGoldenVectors.cs",
+    "Lynium/Assets/Editor/ModBadgesBuilder.cs",
+    "Lynium/Assets/Editor/ModsPanelBuilder.cs",
+    "Lynium/Assets/Editor/ResultsSceneBuilder.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_InsertRanking.cs",
+    "Lynium/Assets/M1_Mods.cs",
+    "Lynium/Assets/M1_ShowMods.cs",
+    "Lynium/Assets/Multiplayer_MatchSetup.cs",
+    "Lynium/Assets/OnHoverViewData.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/AdaptiveRules.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/BeatGrid.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/BeatmapAnalyzer.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/BeatmapValidator.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/ChartModel.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/DifficultySectionAnalyzer.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/Easy/ReduceChordComplexity.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/Easy/ReduceStreamDensity.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/Easy/SimplifyJackPattern.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/EasyTransformer.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/EditSession.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/Harder/CreateChordAccent.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/PatternDetector.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Adaptive/PatternTransformer.cs",
+    "Lynium/Assets/Scripts/Framework/GameMods.cs",
+    "Lynium/Assets/Scripts/Framework/Presence/DiscordPresence.cs",
+    "Lynium/Assets/Scripts/Framework/Results/ManiaPerformance.cs",
+    "Lynium/Assets/Scripts/Framework/Results/PlayResult.cs",
+    "Lynium/Assets/Scripts/Framework/Results/ShowResults.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/InGameScores.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs",
+    "Lynium/Assets/Scripts/UI/PauseBeatmapInfo.cs"
+   ]
+  },
+  {
+   "query": "fix default skin textures rendering all white in gameplay but correct in skin editor",
+   "params": {
+    "max_pivots": 18
+   },
+   "session": "48b74f8a-ccd1-4966-8d52-24f2fd1adbd2.jsonl",
+   "timestamp": "2026-09-04T06:04:59.880Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinSoundRow.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinTextureRow.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/M1_SkinEditor.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinEditorHudTargets.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinShippedArt.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinEditorCapture.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinCursors.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinBarDrag.cs",
+    "Lynium/Assets/Scripts/Framework/Audio/Hitsounds.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinPanelDrag.cs",
+    "Lynium/Assets/Scripts/Modes/M1/SkinEditor/SkinLaneOverrides.cs",
+    "Lynium/Assets/Modern UI Pack/Scripts/Rendering.meta",
+    "Lynium/WhiteSkin.lys",
+    "Lynium/Assets/Modern UI Pack/Resources/Button/Basic - Gradient/White.prefab"
+   ],
+   "edited": [
+    "Lynium/Assets/M1_Game_Customization.cs",
+    "Lynium/Assets/Scripts/UI/DesignSystem/KeybindPreview.cs"
+   ]
+  },
+  {
+   "query": "achievements experience level up lynium points rewards shown to player",
+   "params": {
+    "repos": [
+     "Lynium"
+    ],
+    "max_pivots": 10,
+    "max_tokens": 3000
+   },
+   "session": "58a91b5a-962a-477f-8988-e675f9385d86.jsonl",
+   "timestamp": "2026-09-03T16:45:59.813Z",
+   "observed_pivots": [
+    "Lynium/Assets/Scripts/Framework/Users/UserExperienceBar.cs",
+    "Lynium/Assets/Scripts/Framework/Achievements/Achievements.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_AchievementsManager.cs",
+    "Lynium/Assets/LoginPro/System/Framework/Player.cs",
+    "Lynium/Assets/Scripts/Framework/Users/HomePoints.cs",
+    "Lynium/Assets/Scripts/UI/MusicPlayerVolume.cs",
+    "Lynium/Assets/Editor/MusicPlayerBuilder.cs",
+    "Lynium/Assets/Scripts/MusicPlayer/MusicPlayerRow.cs",
+    "Lynium/Assets/Editor/CustomizePanelBuilder.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/UNIREST/CustomFunctions/events.php",
+    "Lynium-Backend/UNIREST/api/v2/player/dailyReward/index.php",
+    "Lynium-Backend/UNIREST/api/v2/rankings/insertRanking/index.php",
+    "Lynium-Backend/api/auth/index.php",
+    "Lynium-Frontend/src/app/shared/utils/events.ts",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_InsertRanking.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_Login.cs",
+    "Lynium/Assets/Scripts/Framework/Analytics/LyniumEvents.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/StarterPack.cs",
+    "Lynium/Assets/Scripts/Framework/GameAdministrator.cs",
+    "Lynium/Assets/Scripts/Framework/Onboarding/OnboardingState.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_BeatmapData.cs",
+    "Lynium/Assets/Scripts/Framework/SongSelection/SongSelection_Scroll.cs",
+    "Lynium/Assets/Scripts/IntroScreens.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs",
+    "Lynium/Assets/Scripts/UI/SongIntro.cs",
+    "Lynium/Assets/SongSelection_DisplayBeatmapData.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/Core/UniRESTHttp.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/UniRESTClientConfig.cs",
+    "Lynium/Steam/rich_presence_localization.vdf"
+   ]
+  },
+  {
+   "query": "game settings model, how each setting is stored and changed by the player",
+   "params": {
+    "repos": [
+     "Lynium"
+    ],
+    "max_pivots": 12,
+    "max_tokens": 3000
+   },
+   "session": "58a91b5a-962a-477f-8988-e675f9385d86.jsonl",
+   "timestamp": "2026-09-03T18:05:06.855Z",
+   "observed_pivots": [
+    "Lynium/Assets/MHLab/Localizatron/Settings/Settings.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/BloomModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/DitheringModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/FogModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/GrainModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/UserLutModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/MotionBlurModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/AmbientOcclusionModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/ChromaticAberrationModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/ColorGradingModel.cs",
+    "Lynium/Assets/PostProcessing/Runtime/Models/VignetteModel.cs",
+    "Lynium/Assets/LoginPro/System/Framework/Player.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/UNIREST/CustomFunctions/events.php",
+    "Lynium-Backend/UNIREST/api/v2/player/settings/index.php",
+    "Lynium-Backend/UNIREST/api/v2/rankings/insertRanking/index.php",
+    "Lynium-Backend/UNIREST/tools/beatmapsets_downloads.php",
+    "Lynium-Backend/api/index.php",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_InsertRanking.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_Login.cs",
+    "Lynium/Assets/Scripts/Framework/Analytics/LyniumEvents.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapAcquire.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/Compression/BeatmapsCompression.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/LoginPro_BeatmapsDownloads.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/StarterPack.cs",
+    "Lynium/Assets/Scripts/Framework/DeepLinks/DeepLinkRouter.cs",
+    "Lynium/Assets/Scripts/Framework/GameAdministrator.cs",
+    "Lynium/Assets/Scripts/Framework/IO/Network/ServerFiles.cs",
+    "Lynium/Assets/Scripts/Framework/Replays/ReplayLauncher.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/Setting.cs",
+    "Lynium/Assets/Scripts/Framework/Spectate/SpectatorSession.cs",
+    "Lynium/Assets/Scripts/Framework/Testing/DownloadUploadTest.cs",
+    "Lynium/Assets/Scripts/Home/Feeds/HomeFeeds.cs",
+    "Lynium/Assets/Scripts/Home/Screens/FeaturedStreetScreen.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/UniRESTClientConfig.cs"
+   ]
+  },
+  {
+   "query": "implement spectator mode, gameplay replay recording and playback with input events, and time-synced replay comments",
+   "params": {
+    "max_pivots": 30,
+    "max_tokens": 6000
+   },
+   "session": "344ee3e9-8255-4646-9d4c-de5a8643cd86.jsonl",
+   "timestamp": "2026-09-02T18:40:50.726Z",
+   "observed_pivots": [
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/autogen/isteamgameserver.cs",
+    "Lynium/Assets/Scripts/Framework/Analytics/LyniumEvents.cs",
+    "Lynium/Assets/OnEndAnimation.cs",
+    "Lynium/Assets/Standard Assets/CrossPlatformInput/Scripts/InputAxisScrollbar.cs",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/autogen/NativeMethods.cs",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/autogen/SteamEnums.cs",
+    "Lynium/Assets/Modern UI Pack/Scripts/UI Manager/UIManagerInputField.cs",
+    "Lynium-Backend/api/comments.php",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/types/SteamInput/InputHandle_t.cs",
+    "Lynium/Assets/com.rlabrecque.steamworks.net/Runtime/types/SteamInput/SteamInputActionEventCallbackPointer.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Creation/M1_TimeAndKey.cs",
+    "Lynium-Frontend/src/app/shared/utils/events.ts",
+    "Lynium/Assets/Implementation/RhythmTool/Examples/Events Example.unity.meta",
+    "Lynium/Assets/Implementation/RhythmTool/Examples/Scripts/EventsExample.cs"
+   ],
+   "edited": [
+    "Lynium-Backend/UNIREST/CustomFunctions/chat.php",
+    "Lynium-Backend/UNIREST/CustomFunctions/spectate.php",
+    "Lynium-Backend/UNIREST/api/v2/beatmaps/getRankings/index.php",
+    "Lynium-Backend/api/index.php",
+    "Lynium-Frontend/deploy/htaccess-apex.conf",
+    "Lynium-Frontend/src/app/pages/beatmaps/beatmap-detail/beatmap-detail.component.html",
+    "Lynium-Frontend/src/app/pages/beatmaps/beatmap-detail/beatmap-detail.component.ts",
+    "Lynium-Frontend/src/app/shared/components/score-detail/score-detail.component.html",
+    "Lynium-Frontend/src/app/shared/components/score-detail/score-detail.component.ts",
+    "Lynium-Frontend/src/app/shared/components/score-row/score-row.component.html",
+    "Lynium-Frontend/src/app/shared/components/score-row/score-row.component.ts",
+    "Lynium-Frontend/src/app/shared/interfaces/models.ts",
+    "Lynium-Frontend/src/app/shared/services/mock-data.ts",
+    "Lynium-Frontend/src/app/shared/utils/game-link.ts",
+    "Lynium/Assets/Editor/BestPlaysPanelBuilder.cs",
+    "Lynium/Assets/Editor/PauseWatchersBuilder.cs",
+    "Lynium/Assets/Editor/ReplayHudBuilder.cs",
+    "Lynium/Assets/Editor/ResultsSceneBuilder.cs",
+    "Lynium/Assets/Editor/SpectatorPanelBuilder.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_InsertRanking.cs",
+    "Lynium/Assets/LoginPro/System/UI/Scripts/LoginPro_Login.cs",
+    "Lynium/Assets/Scripts/Framework/ActualSceneAdministrator.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapAcquire.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/BeatmapLibrary.cs",
+    "Lynium/Assets/Scripts/Framework/Beatmaps/ChartMods.cs",
+    "Lynium/Assets/Scripts/Framework/DeepLinks/DeepLinkRouter.cs",
+    "Lynium/Assets/Scripts/Framework/DeepLinks/GameLink.cs",
+    "Lynium/Assets/Scripts/Framework/GameAdministrator.cs",
+    "Lynium/Assets/Scripts/Framework/GameMods.cs",
+    "Lynium/Assets/Scripts/Framework/IO/File/GamePaths.cs",
+    "Lynium/Assets/Scripts/Framework/Online/Chat/ChatPresence.cs",
+    "Lynium/Assets/Scripts/Framework/Online/Chat/ChatPresenceRow.cs",
+    "Lynium/Assets/Scripts/Framework/Online/Chat/ChatWindow.cs",
+    "Lynium/Assets/Scripts/Framework/Rankings/GetRankings.cs",
+    "Lynium/Assets/Scripts/Framework/Rankings/RankingRowData.cs",
+    "Lynium/Assets/Scripts/Framework/Rankings/ScoreOutbox.cs",
+    "Lynium/Assets/Scripts/Framework/Replays/ReplayData.cs",
+    "Lynium/Assets/Scripts/Framework/Replays/ReplayLauncher.cs",
+    "Lynium/Assets/Scripts/Framework/Replays/ReplayOutbox.cs",
+    "Lynium/Assets/Scripts/Framework/Replays/ReplayRecorder.cs",
+    "Lynium/Assets/Scripts/Framework/Results/ShowResults.cs",
+    "Lynium/Assets/Scripts/Framework/Settings/GameSettings.cs",
+    "Lynium/Assets/Scripts/Framework/Spectate/SpectateWire.cs",
+    "Lynium/Assets/Scripts/Framework/Spectate/SpectatorBroadcaster.cs",
+    "Lynium/Assets/Scripts/Framework/Spectate/SpectatorSession.cs",
+    "Lynium/Assets/Scripts/Framework/Spectate/SpectatorWindow.cs",
+    "Lynium/Assets/Scripts/Framework/Users/BestPlaysWindow.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/InGameScores.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_InputNotesReplay.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_PlaySong.cs",
+    "Lynium/Assets/Scripts/Modes/M1/Game/M1_Game_ScrollCamera.cs",
+    "Lynium/Assets/Scripts/Modes/M1/M1_Ranking.cs",
+    "Lynium/Assets/Scripts/UI/PauseWatchers.cs",
+    "Lynium/Assets/Scripts/UI/ReplayHud.cs",
+    "Lynium/Assets/TigerForge/UniRESTClient/UniRESTClientConfig.cs"
+   ]
+  }
+ ]
+}

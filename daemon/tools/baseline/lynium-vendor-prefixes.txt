@@ -1,0 +1,26 @@
+# Third-party code in the Lynium workspace, for compare.py's "vendor by path"
+# column. One repo-qualified prefix (or glob) per line. Mirrors what
+# Lynium/.comp/vendor plus the daemon's built-in defaults classify as vendor,
+# so the metric means the same thing for a daemon that emits no vendor flag.
+Lynium/Assets/Plugins/
+Lynium/Assets/Standard Assets/
+Lynium/Assets/TextMesh Pro/
+Lynium/Assets/PostProcessing/
+Lynium/Packages/
+Lynium/Assets/Photon/
+Lynium/Assets/Modern UI Pack/
+Lynium/Assets/Frost UI/
+Lynium/Assets/MHLab/
+Lynium/Assets/Implementation/GE Common Assets/
+Lynium/Assets/Trello Bug Tracker - Pro/
+Lynium/Assets/Christmas Tree - POLYCRAFT Series/
+Lynium/Assets/Christmas pack/
+Lynium/Assets/WorldFlags/
+Lynium/Assets/com.rlabrecque.steamworks.net/
+Lynium/Assets/Rhythm Visualizator Pro/
+Lynium/Assets/CielaSpike/
+Lynium/Assets/DinV/
+Lynium/Assets/Simple Scene Fade Load System/
+Lynium/Assets/LoginPro/Use my content/
+Lynium/Assets/TigerForge/UniRESTClient/Core/UniTask/
+Lynium-Backend/UNIREST/CustomFunctions/Mail/phpmailer/
