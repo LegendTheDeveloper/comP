@@ -22,8 +22,13 @@ pub struct SearchResult {
     pub file_path: String,
     /// Symbol name
     pub symbol_name: String,
-    /// Relevance score (0.0 - 1.0)
+    /// Ranking score: dot product of the TF-IDF vectors under a softened
+    /// document-length normalization (see LENGTH_NORM_EXPONENT). Compared
+    /// across files within one query only.
     pub score: f32,
+    /// Plain cosine similarity (0.0 - 1.0), kept for the raw-signal
+    /// thresholds that were calibrated on it.
+    pub cosine: f32,
     /// Symbol kind (function, class, type, etc.)
     pub kind: String,
     /// Line number in file
@@ -76,12 +81,29 @@ fn tokenize(text: &str) -> Vec<String> {
     tokens.into_iter().filter(|t| !t.is_empty()).collect()
 }
 
+/// Exponent of the document-length normalization used for ranking
+/// (pivoted length normalization): the ranking score is
+/// `cosine x |d_raw|^(1 - LENGTH_NORM_EXPONENT)`, where |d_raw| is the
+/// magnitude of the file's raw-count TF-IDF vector. 1.0 is plain cosine.
+///
+/// WHY not plain cosine: a file's vector holds every token of every symbol
+/// it defines, so cosine is highest for a file with three symbols that all
+/// match and lowest for the hundred-symbol file that defines the concept.
+/// On the Lynium replay 35 % of the top pivots had five symbols or fewer,
+/// and GameSettings.cs ranked 18th for "game settings model" behind
+/// SettingsSync.cs. At 0.5 a file of twenty symbols with one match keeps
+/// about half the score of a one-symbol file instead of a fifth.
+pub const LENGTH_NORM_EXPONENT: f32 = 0.5;
+
 /// Search engine for code queries
 pub struct SearchEngine {
     /// TF-IDF matrix (term -> file -> weight)
     tfidf_matrix: HashMap<String, HashMap<String, f32>>,
     /// Document metadata (file_path -> [(symbol_name, kind, line)])
     documents: HashMap<String, Vec<(String, String, u32)>>,
+    /// Total symbol-name tokens per file (the TF denominator), so the raw
+    /// vector magnitude can be recovered for length normalization.
+    doc_lengths: HashMap<String, f32>,
     /// Total number of documents (files)
     doc_count: usize,
 }
@@ -92,6 +114,7 @@ impl SearchEngine {
         SearchEngine {
             tfidf_matrix: HashMap::new(),
             documents: HashMap::new(),
+            doc_lengths: HashMap::new(),
             doc_count: 0,
         }
     }
@@ -135,6 +158,7 @@ impl SearchEngine {
 
             // Normalize TF (term frequency)
             let total_terms: f32 = term_freq.values().sum();
+            self.doc_lengths.insert(file_path.clone(), total_terms);
             if total_terms > 0.0 {
                 for freq in term_freq.values_mut() {
                     *freq /= total_terms;
@@ -210,8 +234,8 @@ impl SearchEngine {
             *freq /= query_magnitude;
         }
 
-        // 3. Score each document
-        let mut scores: Vec<(String, f32)> = Vec::new();
+        // 3. Score each document: (file, ranking score, cosine)
+        let mut scores: Vec<(String, f32, f32)> = Vec::new();
 
         for (file_path, symbols) in &self.documents {
             // Calculate document TF-IDF vector.
@@ -241,14 +265,18 @@ impl SearchEngine {
             }
 
             let doc_magnitude: f32 = doc_vector.values().map(|x| x * x).sum::<f32>().sqrt();
-            let similarity = if doc_magnitude > 0.0 {
-                dot_product / doc_magnitude
+            let (similarity, cosine) = if doc_magnitude > 0.0 {
+                let cosine = dot_product / doc_magnitude;
+                // TF was divided by the file's token count, so the raw-count
+                // vector magnitude is that count times the stored magnitude.
+                let raw_magnitude = doc_magnitude * self.doc_lengths.get(file_path).copied().unwrap_or(1.0);
+                (cosine * raw_magnitude.max(1e-6).powf(1.0 - LENGTH_NORM_EXPONENT), cosine)
             } else {
-                0.0
+                (0.0, 0.0)
             };
 
             if similarity > 0.0 {
-                scores.push((file_path.clone(), similarity));
+                scores.push((file_path.clone(), similarity, cosine));
             }
         }
 
@@ -256,7 +284,7 @@ impl SearchEngine {
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut results = Vec::new();
-        for (file_path, score) in scores.iter().take(limit) {
+        for (file_path, score, cosine) in scores.iter().take(limit) {
             if let Some(symbols) = self.documents.get(file_path) {
                 // Return first symbol from matching file
                 if let Some((symbol_name, kind, line)) = symbols.first() {
@@ -264,6 +292,7 @@ impl SearchEngine {
                         file_path: file_path.clone(),
                         symbol_name: symbol_name.clone(),
                         score: *score,
+                        cosine: *cosine,
                         kind: kind.clone(),
                         line: *line,
                         is_fallback: false,
@@ -285,6 +314,7 @@ impl SearchEngine {
                             file_path: file_path.clone(),
                             symbol_name: symbol_name.clone(),
                             score: 0.3,
+                            cosine: 0.3,
                             kind: kind.clone(),
                             line: *line,
                             is_fallback: true,
@@ -553,6 +583,37 @@ mod tests {
 
         // Empty query should return no results
         assert!(results.is_empty());
+    }
+
+    /// A large file that defines the concept must not be buried under a
+    /// one-symbol file: cosine alone gives it a fifth of the score, the
+    /// length-softened ranking about half.
+    #[test]
+    fn test_search_softens_length_penalty() {
+        let mut engine = SearchEngine::new();
+        let mut symbols = vec![
+            ("tiny.rs".to_string(), "Settings".to_string(), "class".to_string(), 1u32),
+            ("big.rs".to_string(), "Settings".to_string(), "class".to_string(), 1u32),
+        ];
+        for i in 0..20 {
+            symbols.push(("big.rs".to_string(), format!("Member{}", i), "method".to_string(), 10 + i));
+        }
+        // A third file so "settings" is not in every document (idf > 0).
+        symbols.push(("other.rs".to_string(), "Unrelated".to_string(), "class".to_string(), 1));
+        engine.build_index(&symbols).unwrap();
+        let results = engine.search("settings", 10).unwrap();
+        let tiny = results.iter().find(|r| r.file_path == "tiny.rs").expect("tiny found");
+        let big = results.iter().find(|r| r.file_path == "big.rs").expect("big found");
+        assert!(tiny.score >= big.score, "the focused file still ranks first");
+        let cosine_ratio = big.cosine / tiny.cosine;
+        let softened_ratio = big.score / tiny.score;
+        assert!(cosine_ratio < 0.1, "cosine alone buries the big file: {}", cosine_ratio);
+        assert!(
+            softened_ratio > 2.5 * cosine_ratio && softened_ratio < 1.0,
+            "softened ratio {} should lift the big file well above cosine's {} without overtaking",
+            softened_ratio,
+            cosine_ratio
+        );
     }
 
     #[test]

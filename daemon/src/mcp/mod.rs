@@ -801,7 +801,9 @@ impl MCPServer {
                 if lexically_excluded(&hit.file_path) {
                     continue;
                 }
-                signals.note_tfidf(hit.score, hit.is_fallback);
+                // Raw-signal thresholds were calibrated on cosine; ranking
+                // uses the length-softened score (search::LENGTH_NORM_EXPONENT).
+                signals.note_tfidf(hit.cosine, hit.is_fallback);
                 evidence.entry(hit.file_path).or_default().add_tfidf(hit.score);
                 code_hits += 1;
                 if code_hits >= 20 {
