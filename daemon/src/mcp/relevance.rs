@@ -17,10 +17,16 @@ use std::collections::{HashMap, HashSet};
 // Scoring weights and raw-signal thresholds
 // ---------------------------------------------------------------------------
 
-/// Weight of the symbol-LIKE component (highest precision signal).
-pub const W_SYMBOL: f32 = 0.40;
+/// Weight of the symbol-LIKE component (highest precision signal; since
+/// v0.9.7 it carries keyword coverage and symbol kind).
+pub const W_SYMBOL: f32 = 0.50;
 /// Weight of the TF-IDF cosine component (multi-token code semantics).
-pub const W_TFIDF: f32 = 0.35;
+///
+/// WHY 0.25: cosine over symbol-name tokens is highest for files with few
+/// symbols, all of them matching, so at 0.35 the top pivot was a file of
+/// five symbols or fewer in 38 % of the replayed queries and GameSettings.cs
+/// (a hundred symbols, the right answer) sat at rank 18 behind SettingsSync.
+pub const W_TFIDF: f32 = 0.25;
 /// Weight of the BM25 component (docs only; docs were the observed noise source).
 pub const W_BM25: f32 = 0.25;
 /// Multiplier for files in `git diff HEAD` that also carry engine evidence.
@@ -681,7 +687,7 @@ pub fn apply_share_cap(
 }
 
 /// Combine per-engine evidence into the final score:
-///   final = (0.40 * sym + 0.35 * tfidf_norm + 0.25 * bm25_norm) x 1.15 if git diff
+///   final = (0.50 * sym + 0.25 * tfidf_norm + 0.25 * bm25_norm) x 1.15 if git diff
 /// TF-IDF and BM25 are max-normalized over this query's result set (the
 /// standard fix for BM25's unbounded scale vs cosine's [0, 1]).
 pub fn combine_score(
