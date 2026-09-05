@@ -61,7 +61,7 @@ Response fields (v0.9.4+, unified relevance scoring):
 
 Note (superseded in v0.9.7): git-diff files used to be score-boosted and exempt from the cutoff; see "Search quality (v0.9.7+)" below for the current rule.
 
-Parameters added in v0.9.7: `repos` (array of aliases), `vendor_score_factor` (0.05–1, default 0.5), `vendor_pivot_share` (0–1, default 0.25), `doc_pivot_share` (0–1, default 0.15; doc files — markdown, sql, pdf, office — fill at most this share of the pivots while code candidates compete, `dropped_doc` counts the rest; raise it for documentation tasks), `dry_run` (boolean).
+Parameters added in v0.9.7: `repos` (array of aliases), `vendor_score_factor` (0.05–1, default 0.5), `vendor_pivot_share` (0–1, default 0.25), `doc_pivot_share` (0–1, default 0.15; doc files — markdown, sql, pdf, office — fill at most this share of the pivots while code candidates compete, `dropped_doc` counts the rest; raise it for documentation tasks), `doc_score_factor` (0.05–1, default 0.7; multiplies doc scores while code candidates compete, since a doc's only channel, BM25, always hands its best hit the full weight), `dry_run` (boolean).
 
 Search history (v0.9.5+): every `run_pipeline` / `get_context` call is recorded in the shared index DB (`search_history` table, newest 500 kept) with its query, filtered keywords, confidence, weak_results, pivot/dropped counts, tokens, duration, and top-8 pivots with scores. Retrieve via the `getSearchHistory` JSON-RPC method (`{ "limit": 50 }`, capped at 200); the VS Code sidebar shows it as the "Recent Searches" panel. Intended for reviewing search quality and tuning the relevance scoring.
 

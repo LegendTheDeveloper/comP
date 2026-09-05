@@ -830,6 +830,15 @@ pub struct RelevanceConfig {
     /// Max share of the returned pivots doc files may occupy when code
     /// candidates exist (config + param).
     pub doc_pivot_share: f32,
+    /// Multiplier applied to doc files while code candidates compete
+    /// (config + param).
+    ///
+    /// WHY: a doc's only evidence is BM25, and the best BM25 hit is always
+    /// max-normalized to a full 0.25, so migrations and READMEs tied with
+    /// or beat code files whose TF-IDF share had shrunk. Docs still lead
+    /// when the task is about docs (fewer than DOC_CAP_MIN_CODE code
+    /// candidates leave them untouched).
+    pub doc_score_factor: f32,
 }
 
 impl Default for RelevanceConfig {
@@ -844,6 +853,7 @@ impl Default for RelevanceConfig {
             vendor_score_factor: 0.5,
             vendor_pivot_share: 0.25,
             doc_pivot_share: DOC_PIVOT_SHARE,
+            doc_score_factor: 0.7,
         }
     }
 }
@@ -896,6 +906,9 @@ impl RelevanceConfig {
             if let Some(v) = source["doc_pivot_share"].as_f64() {
                 cfg.doc_pivot_share = v as f32;
             }
+            if let Some(v) = source["doc_score_factor"].as_f64() {
+                cfg.doc_score_factor = v as f32;
+            }
         }
         // Clamp to sane ranges so a bad config cannot zero out results.
         cfg.min_score_abs = cfg.min_score_abs.clamp(0.0, 1.0);
@@ -904,6 +917,7 @@ impl RelevanceConfig {
         cfg.vendor_score_factor = cfg.vendor_score_factor.clamp(0.05, 1.0);
         cfg.vendor_pivot_share = cfg.vendor_pivot_share.clamp(0.0, 1.0);
         cfg.doc_pivot_share = cfg.doc_pivot_share.clamp(0.0, 1.0);
+        cfg.doc_score_factor = cfg.doc_score_factor.clamp(0.05, 1.0);
         if cfg.max_pivots == 0 {
             cfg.max_pivots = 1;
         }
@@ -1109,6 +1123,9 @@ mod tests {
         let d = RelevanceConfig::from_sources(&Value::Null, &Value::Null);
         assert_eq!(d.vendor_score_factor, 0.5);
         assert_eq!(d.vendor_pivot_share, 0.25);
+        assert_eq!(d.doc_score_factor, 0.7);
+        let docs = RelevanceConfig::from_sources(&json!({ "doc_score_factor": 0.0 }), &Value::Null);
+        assert_eq!(docs.doc_score_factor, 0.05, "clamped above zero");
     }
 
     #[test]

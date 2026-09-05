@@ -26,6 +26,7 @@ All keys are optional. `.comp/` is per repo: an `additional_paths` repo reads it
 | `vendor_score_factor` | `0.5` | Multiplier for third-party files in `run_pipeline` (also a request parameter). |
 | `vendor_pivot_share` | `0.25` | Max share of the pivots third-party files may take while first-party candidates compete (also a request parameter). |
 | `doc_pivot_share` | `0.15` | Max share of the pivots doc files (markdown, sql, pdf, office) may take while code candidates compete (also a request parameter). |
+| `doc_score_factor` | `0.7` | Multiplier for doc files while at least three code candidates compete; a doc's only channel is BM25, whose best hit is always normalized to the full weight (also a request parameter). |
 | `noise_keywords` | `[]` | Keywords skipped in the LIKE and filename channels, merged with the tokens of the repo aliases. |
 | `min_score_abs`, `min_score_ratio`, `max_pivots`, `max_file_budget_share`, `doc_token_cap` | 0.05, 0.30, 20, 0.25, 1500 | Relevance cutoff and per-file caps (all but `min_score_abs` are also request parameters). |
 

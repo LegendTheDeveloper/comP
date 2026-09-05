@@ -859,6 +859,19 @@ impl MCPServer {
         // without parent) silently degrades to no boost.
         let git_diff_files = get_git_diff_files_multi(&repos);
 
+        let is_doc_path = |p: &str| -> bool {
+            path_to_lang.get(p).map(|l| relevance::is_doc_language(l)).unwrap_or(false)
+        };
+        // Docs are demoted only when the task found real code: their single
+        // channel (BM25) always hands its best hit a full 0.25, which tied
+        // migrations with the code files that answer the question.
+        let code_candidates = evidence.keys().filter(|p| !is_doc_path(p)).count();
+        let doc_factor = if code_candidates >= relevance::DOC_CAP_MIN_CODE {
+            rel_cfg.doc_score_factor
+        } else {
+            1.0
+        };
+
         let mut candidates: Vec<relevance::Candidate> = Vec::new();
         for (file, ev) in &evidence {
             let sym = path_to_id
@@ -869,19 +882,24 @@ impl MCPServer {
             let base = base_tokens_for(file, sym);
             let git_diff = git_diff_files.contains(file);
             let vendor = vendor_flags.get(file).copied().unwrap_or(false);
+            let doc = is_doc_path(file);
+            let mut score = relevance::apply_vendor_factor(
+                relevance::combine_score(ev, &query_weights, max_tfidf_raw, max_bm25_raw, git_diff),
+                vendor,
+                rel_cfg.vendor_score_factor,
+            );
+            if doc {
+                score *= doc_factor;
+            }
             candidates.push(relevance::Candidate {
                 path: file.clone(),
                 sym_count: sym,
                 base_tokens: base,
-                score: relevance::apply_vendor_factor(
-                    relevance::combine_score(ev, &query_weights, max_tfidf_raw, max_bm25_raw, git_diff),
-                    vendor,
-                    rel_cfg.vendor_score_factor,
-                ),
+                score,
                 reasons: relevance::match_reasons(ev, git_diff),
                 git_diff,
                 vendor,
-                doc: path_to_lang.get(file).map(|l| relevance::is_doc_language(l)).unwrap_or(false),
+                doc,
                 matched_symbols: ev.matched_symbols(relevance::MATCHED_SYMBOLS_MAX),
             });
         }
@@ -2181,6 +2199,10 @@ impl MCPServer {
                             "doc_pivot_share": {
                                 "type": "number",
                                 "description": "Max share of the returned pivots doc files (markdown, sql, pdf, office) may occupy while code candidates compete (0-1). Default: 0.15. Raise it for documentation tasks."
+                            },
+                            "doc_score_factor": {
+                                "type": "number",
+                                "description": "Multiplier applied to doc files while code candidates compete (0.05-1). Default: 0.7. Set 1.0 for documentation tasks."
                             },
                             "include_content": {
                                 "type": "boolean",
