@@ -291,7 +291,17 @@ impl VendorClassifier {
     /// is stored beside the flag so `get_stats` can show why a folder was
     /// demoted and the user can correct it in config.
     pub fn classify(&self, rel_path: &str) -> (bool, &'static str) {
-        let path = Path::new(rel_path);
+        // The gitignore matcher asserts that its input is relative to the
+        // root and panics otherwise; the single-file path has handed it an
+        // absolute path when the workspace prefix did not strip (drive-letter
+        // case, canonical form), which took the whole daemon down. Anything
+        // not repo-relative is simply not classified.
+        let normalized = rel_path.replace('\\', "/");
+        if Path::new(&normalized).has_root() || normalized.chars().nth(1) == Some(':') {
+            log::debug!("vendor classify skipped, path is not repo-relative: {}", rel_path);
+            return (false, "");
+        }
+        let path = Path::new(&normalized);
         if self.config_first_party.matched_path_or_any_parents(path, false).is_ignore() {
             return (false, "first-party:config");
         }
@@ -417,6 +427,18 @@ mod tests {
         let c = classifier(VendorConfig::default(), None, &[]);
         assert_eq!(c.classify("README.md"), (false, ""));
         assert_eq!(c.classify("bundle.min.js"), (true, "builtin"));
+    }
+
+    /// An absolute path must never reach the gitignore matcher (it asserts
+    /// and would abort the daemon); it is left unclassified instead.
+    #[test]
+    fn test_absolute_paths_are_not_classified() {
+        let cfg = VendorConfig { vendor_paths: vec!["Assets/Photon/".into()], ..VendorConfig::default() };
+        let c = classifier(cfg, None, &[]);
+        assert_eq!(c.classify("C:\\Users\\me\\repo\\Assets\\Photon\\X.cs"), (false, ""));
+        assert_eq!(c.classify("c:/Users/me/repo/Assets/Photon/X.cs"), (false, ""));
+        assert_eq!(c.classify("/home/me/repo/Assets/Photon/X.cs"), (false, ""));
+        assert_eq!(c.classify("Assets\\Photon\\X.cs"), (true, "config"), "backslashes are normalized");
     }
 
     #[test]

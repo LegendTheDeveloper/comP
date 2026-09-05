@@ -310,7 +310,7 @@ impl Indexer {
         let alias = self.alias.clone();
         // First-party vs vendor, decided per pass from config, git activity and
         // the built-in package patterns (see indexer::vendor).
-        let classifier = self.vendor_classifier(db, walk_result.files.iter().map(|f| f.path.as_str()));
+        let classifier = self.vendor_classifier(db, walk_result.files.iter().map(|f| f.path.as_str()), true);
         let outcomes: Vec<(usize, Option<(String, Vec<dependency::Dependency>)>)> = walk_result
             .changed_files
             .par_iter()
@@ -542,7 +542,7 @@ impl Indexer {
             .into_keys()
             .filter_map(|k| k.strip_prefix(&prefix).map(|s| s.to_string()))
             .collect();
-        let classifier = self.vendor_classifier(db, known.iter().map(|s| s.as_str()));
+        let classifier = self.vendor_classifier(db, known.iter().map(|s| s.as_str()), false);
         let (count, deps) = Self::index_one_file(
             &mut self.parser,
             &self.workspace_root,
@@ -555,12 +555,18 @@ impl Indexer {
     }
 
     /// Build the vendor classifier for this repo: config from `.comp/`, the
-    /// git activity from the DB cache (recomputed when older than its TTL),
-    /// folder sizes from `paths`.
+    /// git activity from the DB cache, folder sizes from `paths`.
+    ///
+    /// `may_run_git`: only the full workspace pass recomputes a missing or
+    /// stale activity cache. The single-file path (VS Code's save watcher)
+    /// answers inside the extension's 3 s request timeout, and `git log`
+    /// over 18 months of a busy repo does not; it uses whatever the cache
+    /// holds, or config and built-ins alone.
     fn vendor_classifier<'a>(
         &self,
         db: &crate::graph::GraphDB,
         paths: impl Iterator<Item = &'a str>,
+        may_run_git: bool,
     ) -> vendor::VendorClassifier {
         let cfg = vendor::VendorConfig::load(&self.workspace_root);
         let cache_key = format!("vendor_activity:{}", self.alias);
@@ -571,6 +577,7 @@ impl Indexer {
             .and_then(|s| serde_json::from_str(&s).ok());
         let activity = match cached {
             Some(a) if a.is_fresh(cfg.activity_ttl_hours) => Some(a),
+            stale if !may_run_git => stale,
             _ => {
                 let fresh = vendor::GitActivity::compute(&self.workspace_root, cfg.activity_months);
                 match &fresh {
@@ -636,10 +643,18 @@ impl Indexer {
         // Convert to workspace-relative path (using absolute paths breaks DB uniqueness constraint)
         // WHY: Windows path normalizer returns backslashes (\), but the database must use forward slashes (/) consistently.
         //      The TypeScript extension sends forward slashes, so mismatch breaks path lookups.
-        let relative_path = path
-            .strip_prefix(&self.workspace_root)
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
+        // The prefix strip compares canonical forms case-insensitively: the
+        // extension hands over `c:\...` while the validated path may come back
+        // as `C:\...` or `\\?\C:\...`, and a failed strip used to index the
+        // absolute path under an absolute key.
+        let Some(relative_path) = Self::relative_to_root(&self.workspace_root, path) else {
+            log::warn!(
+                "index_file ignored, path is not under the workspace root {}: {}",
+                self.workspace_root,
+                path.display()
+            );
+            return Ok(());
+        };
 
         // WHY: FileSystemWatcher fires for any matching extension, including paths inside
         //      excluded directories (.venv, node_modules, __pycache__, etc.).
@@ -675,6 +690,34 @@ impl Indexer {
         Ok(())
     }
 
+    /// Workspace-relative, forward-slash path of `path`, or None when it does
+    /// not live under `root`. Both sides are canonicalized when possible and
+    /// compared case-insensitively, so `c:\` vs `C:\` and the `\\?\` prefix
+    /// Windows canonicalization adds no longer break the strip.
+    fn relative_to_root(root: &str, path: &Path) -> Option<String> {
+        fn canon(p: &Path) -> String {
+            let c = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+            let s = c.to_string_lossy().replace('\\', "/");
+            s.trim_start_matches("//?/").to_string()
+        }
+        let root_s = canon(Path::new(root)).trim_end_matches('/').to_string();
+        let path_s = canon(path);
+        let root_l = root_s.to_lowercase();
+        let path_l = path_s.to_lowercase();
+        if path_l.len() > root_l.len() + 1
+            && path_l.starts_with(&root_l)
+            && path_l.as_bytes()[root_l.len()] == b'/'
+        {
+            return Some(path_s[root_l.len() + 1..].to_string());
+        }
+        // Already relative (tests and callers that stripped the root themselves).
+        let raw = path.to_string_lossy().replace('\\', "/");
+        if !Path::new(&raw).has_root() && raw.chars().nth(1) != Some(':') {
+            return Some(raw);
+        }
+        None
+    }
+
     /// Language detection for the single-file path: the walker's table, not a
     /// copy of it. The copy that lived here until v0.9.7 had drifted (no
     /// `xaml`, so every `.axaml` saved in VS Code was re-indexed as "unknown").
@@ -706,6 +749,26 @@ mod tests {
         assert_eq!(indexer.walker_detect_language("slides.pptx"), "pptx");
         assert_eq!(indexer.walker_detect_language("data.xlsx"), "xlsx");
         assert_eq!(indexer.walker_detect_language("data.parquet"), "parquet");
+    }
+
+    #[test]
+    fn test_relative_to_root_handles_case_and_canonical_forms() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path().join("Repo");
+        std::fs::create_dir_all(root.join("Assets")).unwrap();
+        std::fs::write(root.join("Assets").join("X.cs"), "class X {}").unwrap();
+        let root_s = root.to_string_lossy().to_string();
+        let file = root.join("Assets").join("X.cs");
+
+        assert_eq!(Indexer::relative_to_root(&root_s, &file).as_deref(), Some("Assets/X.cs"));
+        // Different case of the root still strips.
+        let upper = root_s.to_uppercase();
+        assert_eq!(Indexer::relative_to_root(&upper, &file).as_deref(), Some("Assets/X.cs"));
+        // A path outside the root is refused instead of indexed under an absolute key.
+        let outside = temp.path().join("Elsewhere").join("Y.cs");
+        assert_eq!(Indexer::relative_to_root(&root_s, &outside), None);
+        // Relative input passes through with forward slashes.
+        assert_eq!(Indexer::relative_to_root(&root_s, Path::new("Assets\\Sub\\Z.cs")).as_deref(), Some("Assets/Sub/Z.cs"));
     }
 
     /// A row written by an older daemon under a stale language label is
