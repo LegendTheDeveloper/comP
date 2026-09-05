@@ -53,7 +53,11 @@ pub const MATCHED_SYMBOLS_MAX: usize = 4;
 /// Dirty files without evidence listed apart from the pivots.
 pub const WORKING_TREE_MAX: usize = 20;
 /// Confidence calibration on the union coverage of the top three pivots.
-pub const HIGH_TOP_COVERAGE: f32 = 0.5;
+/// Measured on 99 Lynium and 266 GameLauncherCloud queries: median coverage
+/// 0.31 and 0.24, 75th percentile 0.40 and 0.34, 90th 0.47 and 0.43. 0.4
+/// makes "high" mean the top quarter of answers; 0.5 left it at one in
+/// twelve, which told the agent nothing.
+pub const HIGH_TOP_COVERAGE: f32 = 0.4;
 pub const LOW_TOP_COVERAGE: f32 = 0.2;
 
 /// Raw-signal thresholds for confidence assessment. Heuristics validated
@@ -1040,6 +1044,7 @@ mod tests {
         assert_eq!(calibrate_confidence("high", false, &strong, Some(0.7), true), ("high", false));
         assert_eq!(calibrate_confidence("high", false, &strong, Some(0.7), false), ("medium", false));
         assert_eq!(calibrate_confidence("high", false, &strong, Some(0.3), true), ("medium", false));
+        assert_eq!(calibrate_confidence("high", false, &strong, Some(HIGH_TOP_COVERAGE), true), ("high", false));
         // Thin coverage with nothing strong behind it is weak.
         assert_eq!(calibrate_confidence("medium", false, &mild, Some(0.1), true), ("low", true));
         // ...but a strong raw signal keeps it at medium.
