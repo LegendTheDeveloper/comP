@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/) and this 
 
 ---
 
+## [0.9.7] - 2026-09-04
+
+Measured on the Lynium workspace (Unity + PHP + Angular, 99 recorded queries replayed with `daemon/tools/replay.py`): third-party pivots 17 % → 1 %, queries whose first pivot was third-party 16 % → 0 %, symbol-less pivots (`.meta`, prefabs, doc XML) 6 % → 0 %, indexed files 13 211 → 2 544.
+
+### Added
+
+- **Replay harness** (`daemon/tools/`): `replay.py` drives a daemon build over stdio with every query recorded in `search_history` and restores the logs it pollutes; `mine_transcripts.py` turns Claude Code transcripts into a ground-truth set (which files the agent edited after each search); `compare.py` prints vendor share, symbol-less pivots, confidence spread, size, latency and recall for two runs. `run_pipeline` accepts `dry_run: true` for harnesses.
+- **PHP symbols** (tree-sitter-php): functions, methods, classes, interfaces, traits, enums, namespaces. Backend files had zero symbols before.
+- **First-party vs vendor classification** (`indexer/vendor.rs`, `files.vendor` column): config (`vendor_paths`, `.comp/vendor`, `first_party_paths`), git activity (cached in `metadata`, 24 h), built-in package patterns, inactive-folder heuristic. Unchanged files are reclassified after every walk. `run_pipeline` demotes vendor files (`vendor_score_factor`, `vendor_pivot_share`, `vendor: true`, `dropped_vendor`); `get_context` orders first-party rows first; `get_stats.vendor_folders` explains the verdicts.
+- **`pivot_files[].matched_symbols`**: the symbols (name, kind, line) the task's words hit, so the agent reads lines instead of files.
+- **`working_tree_files`**: dirty files without evidence, listed apart from the pivots.
+- **`coverage.top_coverage`** and calibrated `confidence`.
+- C# and PHP compact/skeleton compression; skeletons keep the members of namespaces, classes and impls instead of collapsing them.
+- Paging on `list_indexed_files` (`prefix`, `language`, `limit`, `offset`) and `get_file_summary` (`limit`, `offset`).
+- `daemon/tools/shrink_session_memory.py` for session-memory files written by older versions.
+
+### Changed
+
+- **Indexing scope**: the walker decides what is indexable. Unity asset formats and `.meta` twins (`skip_extensions`), files of unknown extension and NuGet documentation XML are no longer indexed; rows stored by older versions are purged in one batched transaction on the next pass. Shader, text and installer scripts are stored without symbols so they remain findable by name. The single-file path uses the walker's language table (its private copy lacked `xaml`).
+- **Scoring**: symbol component = 0.6 × weighted keyword coverage + 0.4 × best hit (the distinct-keyword bonus is gone). Keyword rarity is measured over files, and keywords in more than 8 % of code files are skipped in the lexical channels. The LIKE channel fetches 60 rows per keyword and keeps the 12 best files (quality, first-party first, shortest name). Raw signals are noted only for code files. Git-diff is a ×1.15 factor on evidence-bearing files, with no cutoff exemption.
+- **Response shape**: compression and budget diagnostics (`savings`, `full_workspace_tokens`, `estimated_cost`, `compression_level_applied`, ...) travel only with `include_content: true`; metadata-only calls no longer run budget packing (which silently dropped pivots). `get_project_overview` shows folders and top first-party files instead of a per-file table and every exported symbol (3.4 MB before).
+- **Session memory** records only the returned pivots and related files (≤ 20 symbols), keeps the newest 300 calls, and is written compactly and atomically.
+- Token estimates are honest about languages without a grammar (full size at level 1, a 30-line head at level 2).
+
+### Fixed
+
+- `visibility_modifier` no longer marks PHP `private`/`protected` members as exported.
+- `note_symbol` / `note_tfidf` counted doc and data hits into the reported confidence.
+
+### Earlier fork releases (not previously listed here)
+
+- **0.9.6** — keyword coverage confidence (`uncovered_keywords`, `weak_reason`), workspace noise keywords, `.Designer.cs` dedupe, `.sql` in BM25, `search_history.kw_info`.
+- **0.9.5** — search history recorded for every search, exposed via `getSearchHistory`, shown as "Recent Searches" in the sidebar.
+- **0.9.4** — unified relevance scoring with cutoff and per-file caps for `run_pipeline` (`score`, `match_reasons`, `confidence`, `weak_results`, `dropped_low_relevance`).
+- **0.9.3** — native multi-repo indexing with per-repo stats, repo add/remove from the sidebar, parallel indexing, C#/Java/C/C++/XAML symbol extraction, batched per-file DB writes.
+
+---
+
 ## [Unreleased] - 0.9.2
 
 ### Added

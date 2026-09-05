@@ -59,7 +59,9 @@ Response fields (v0.9.4+, unified relevance scoring):
 
 `.comp/config.json` keys for the cutoff (all optional): `min_score_abs` (default 0.05, config-only), `min_score_ratio`, `max_pivots`, `max_file_budget_share`, `doc_token_cap`. Params override config.
 
-Note: git-diff files are score-boosted and never dropped by the cutoff, but no longer jump unconditionally ahead of strong matches.
+Note (superseded in v0.9.7): git-diff files used to be score-boosted and exempt from the cutoff; see "Search quality (v0.9.7+)" below for the current rule.
+
+Parameters added in v0.9.7: `repos` (array of aliases), `vendor_score_factor` (0.05–1, default 0.5), `vendor_pivot_share` (0–1, default 0.25), `dry_run` (boolean).
 
 Search history (v0.9.5+): every `run_pipeline` / `get_context` call is recorded in the shared index DB (`search_history` table, newest 500 kept) with its query, filtered keywords, confidence, weak_results, pivot/dropped counts, tokens, duration, and top-8 pivots with scores. Retrieve via the `getSearchHistory` JSON-RPC method (`{ "limit": 50 }`, capped at 200); the VS Code sidebar shows it as the "Recent Searches" panel. Intended for reviewing search quality and tuning the relevance scoring.
 
@@ -71,6 +73,17 @@ Keyword coverage and workspace noise (v0.9.6+):
 - Generated `X.Designer.cs` twins are dropped from pivots when their base `X.cs` is also a candidate.
 - `.sql` files now participate in the BM25 doc channel (schema files, RLS policies).
 - `search_history.kw_info` records per-keyword df/weight/best-quality plus the uncovered list for offline tuning.
+
+Search quality (v0.9.7+):
+
+- `pivot_files[].matched_symbols` (array of `{ name, kind, line }`, up to 4): the symbols the task's words hit inside the file, best first. Read those lines instead of the whole file.
+- `pivot_files[].vendor` (boolean, present only when true): third-party code (asset-store packages, NuGet, node_modules). Vendor files are scored × `vendor_score_factor` (0.5) and, while first-party candidates compete, fill at most `vendor_pivot_share` (25 %) of the pivots; `dropped_vendor` counts the ones cut. A file gets the flag from, in order: `vendor_paths` / `.comp/vendor` / `first_party_paths` in config; git activity (a folder with `vendor_active_min_commits` or more distinct commits in the last `vendor_activity_months` is first-party even under a built-in vendor path); the built-in package patterns; and the inactive-folder heuristic (`vendor_auto`). `get_stats.vendor_folders` shows the verdict per folder with its reason.
+- `working_tree_files` (array of paths): files dirty in `git diff HEAD` that matched nothing. Dirty files with evidence stay pivots with `git_diff: true` and a ×1.15 factor; nothing is exempt from the cutoff any more.
+- Scoring: the symbol component is `0.6 × weighted keyword coverage + 0.4 × best hit`, coverage being the share of the task's keyword weight the file matches. Keyword rarity is measured over files (`COUNT(DISTINCT file_id)`), and keywords matching more than `common_keyword_file_share` (8 %) of the code files are skipped in the LIKE and filename channels. The LIKE channel fetches 60 rows per keyword and keeps the 12 best files (match quality, first-party first, shortest name).
+- `confidence` is calibrated after ranking: `high` needs the top three pivots to cover at least half of the task's keyword weight (`coverage.top_coverage`) and a first-party first pivot; coverage under 0.2 with no strong raw signal is `low` with `weak_results`.
+- Metadata-only calls (no `include_content`) no longer run budget packing, so no pivot is dropped for a content budget that was not requested; `tokens` is the file's raw size estimate. `compression_level_applied`, `budget_adjusted`, `compression_rules_applied`, `budget_exceeded_by_rules`, `savings`, `full_workspace_tokens` and `estimated_cost` are returned only with `include_content: true`. C# and PHP now have real compact/skeleton compression; languages without a grammar are estimated at full size (level 1) or a 30-line head (level 2).
+- `dry_run: true` answers without recording to session memory, search history or token stats (for evaluation harnesses, see `daemon/tools/`).
+- Session memory records only the returned pivots and related files (up to 20 symbols per call), keeps the newest 300 calls and is written atomically. `daemon/tools/shrink_session_memory.py` rewrites files left by older versions.
 
 ---
 
@@ -102,11 +115,29 @@ Parameters:
 
 ### `list_indexed_files`
 
-List all indexed files with symbol counts and detected language.
+List indexed files with symbol counts, detected language and a `vendor` flag. Paged since v0.9.7: the unpaged list was 13 000 entries on a Unity workspace.
 
 ```json
-{}
+{ "prefix": "Lynium/Assets/Scripts/", "language": "csharp", "limit": 300, "offset": 0 }
 ```
+
+Parameters (all optional): `prefix` (repo-qualified path prefix), `language`, `limit` (default 300, max 5000), `offset`. The response carries `total_files` for the selection, `returned`, and `truncated` when more remain.
+
+---
+
+### `get_file_summary`
+
+Every symbol of one file with line, kind, scope and signature; no bodies. Paged since v0.9.7 (`limit` default 300, `offset`); the last line says how many symbols remain and which offset to pass.
+
+```json
+{ "file_path": "Lynium/Assets/Scripts/Framework/Settings/GameSettings.cs" }
+```
+
+---
+
+### `get_project_overview`
+
+One-screen Markdown summary: file, symbol and edge counts, registered repos, language distribution, the 40 largest folders (`<repo>/<a>/<b>`, with files, symbols and how many are third-party) and the 30 largest first-party files. The per-file table and the dump of every exported symbol that used to follow (3.4 MB on a Unity workspace) are gone; use `list_indexed_files` or `get_file_summary`.
 
 ---
 

@@ -9,6 +9,27 @@ All settings are under `comp.*` in VS Code settings (`Ctrl+,`).
 | `comp.autoIndex` | boolean | `true` | Automatically index files on workspace open |
 | `comp.exclude` | string[] | `[]` | Additional directory names to exclude from indexing. Synced to `.comp/config.json` on activation. Changes take effect after Force Re-index. |
 
+## Indexing scope and search quality (`.comp/config.json`, v0.9.7)
+
+All keys are optional. `.comp/` is per repo: an `additional_paths` repo reads its own `.comp/config.json`, `.comp/ignore` and `.comp/vendor`.
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `skip_extensions` | `[]` | Extensions never indexed, added to the built-in list (Unity `.meta`, `.prefab`, `.unity`, `.asset`, `.mat`, `.anim`, `.controller`, ...). Files of unknown extension and NuGet documentation XML (`<doc><assembly>`) are never indexed either; shaders, `.txt`, `.ini`, installer and build scripts are stored without symbols so they stay findable by name. |
+| `vendor_paths` | `[]` | gitignore-style patterns forced to third-party. The lines of `.comp/vendor` are appended. |
+| `first_party_paths` | `[]` | Patterns forced to first-party (beats everything else). |
+| `vendor_auto` | `true` | Treat a folder with `vendor_auto_min_files` or more indexed files and at most `vendor_auto_max_commits` distinct commits in the activity window as a dropped-in package. Needs 50+ commits in the repo. |
+| `vendor_active_min_commits` | `6` | A folder with this many distinct commits in the window is first-party even under a built-in vendor pattern (bought assets the project patches). |
+| `vendor_auto_max_commits` | `3` | See `vendor_auto`. |
+| `vendor_auto_min_files` | `20` | See `vendor_auto`. |
+| `vendor_activity_months` | `18` | How far back `git log` looks. Cached in the index DB for `vendor_activity_ttl_hours` (24). |
+| `vendor_score_factor` | `0.5` | Multiplier for third-party files in `run_pipeline` (also a request parameter). |
+| `vendor_pivot_share` | `0.25` | Max share of the pivots third-party files may take while first-party candidates compete (also a request parameter). |
+| `noise_keywords` | `[]` | Keywords skipped in the LIKE and filename channels, merged with the tokens of the repo aliases. |
+| `min_score_abs`, `min_score_ratio`, `max_pivots`, `max_file_budget_share`, `doc_token_cap` | 0.05, 0.30, 20, 0.25, 1500 | Relevance cutoff and per-file caps (all but `min_score_abs` are also request parameters). |
+
+Built-in vendor patterns: `Assets/Plugins/`, `Assets/Standard Assets/`, `Assets/TextMesh Pro/`, `Assets/PostProcessing/`, `Assets/Photon/`, `/Packages/`, `/Library/`, `packages/`, `bin/`, `obj/`, `node_modules/`, `vendor/`, `dist/`, `wwwroot/lib/`, `ThirdParty/`, `third_party/`, `3rdParty/`, `External/`, `Externals/`, `phpmailer/`, `*.min.js`. `get_stats.vendor_folders` lists which folders were demoted and by which rule (`config`, `builtin`, `git-inactive`).
+
 ## Workspace vs User settings
 
 Settings can be applied at user level (`~/.config/Code/User/settings.json`) or

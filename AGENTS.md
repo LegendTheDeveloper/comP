@@ -1,48 +1,69 @@
 # comP — AI Agent Instructions
 
-## MANDATORY: use comP MCP pipeline — do NOT grep or glob the codebase
+## Start every task with `run_pipeline`
 
-For every task — bug fixes, features, refactors, debugging:
-**call `run_pipeline` FIRST**. It searches the indexed codebase and returns
-the most relevant files and symbols for your task.
+For every task — bug fixes, features, refactors, debugging — call `run_pipeline`
+first, before grepping or reading around. It ranks the indexed files of every
+registered repo for the task and says where inside them the task's words hit.
+Then read what it pointed at; search by hand only when it tells you to
+(`weak_results: true`).
 
-Do NOT use grep, glob, Bash find, or cat to search/explore the codebase.
-comP returns pre-indexed, graph-ranked context that is more relevant and
-uses fewer tokens than manual searching.
-Only use Read when you need exact raw content to edit a specific line.
+- `run_pipeline({ "task": "fix JWT validation bug" })`
+- `run_pipeline({ "task": "add user authentication", "repos": ["Backend"] })`
+- `run_pipeline({ "task": "sidebar panel webview", "max_pivots": 10 })`
 
-## Primary Tool
+The `task` must be in English: keywords are matched against symbol names.
 
-- `run_pipeline` — **USE THIS FOR EVERYTHING**. Splits your task into keywords,
-  searches the symbol graph, and returns ranked pivot files.
+## Reading the answer
 
-  Examples:
-  - `run_pipeline({ "task": "fix JWT validation bug" })`
-  - `run_pipeline({ "task": "add user authentication", "max_tokens": 12000 })`
-  - `run_pipeline({ "task": "sidebar panel webview", "max_pivots": 10 })`
+Each entry of `pivot_files` carries:
 
-  Each pivot carries a `score` (relevance, normalized per query) and
-  `match_reasons`. If the response has `weak_results: true`, the index found
-  nothing confident: fall back to your own search.
+- `path` — repo-qualified as `<repo>/<relative>`.
+- `score` — normalized per query; comparable only within one response.
+- `match_reasons` — which engines matched (`symbol:settings+keybinds`, `filename`, `tfidf`, `bm25`, `git_diff`).
+- `matched_symbols` — `[{ name, kind, line }]`: the symbols the task's words hit.
+  Read those lines with your file reader instead of the whole file.
+- `vendor: true` — third-party code (asset-store packages, NuGet, node_modules).
+  Demoted, still returned when it is the best answer.
 
-## Other MCP tools (use only when run_pipeline is insufficient)
+At the top level:
 
-- `get_context` — search symbols by query string, returns ranked results
-- `get_impact_graph` — show files affected by a symbol change (blast radius)
-- `list_indexed_files` — list all indexed files with symbol counts and language
-- `get_stats` — show total file/node/edge counts (health check)
+- `working_tree_files` — files dirty in git that matched nothing. Mid-edit context, not answers.
+- `confidence` — `high` only when the top three pivots cover most of the task
+  (`coverage.top_coverage`) and the first pivot is first-party.
+- `weak_results: true` — the index found nothing it trusts: fall back to your own
+  search (`weak_reason` explains why).
+- `uncovered_keywords` — defining task words that matched nothing in code. If your
+  feature's name is there, it probably does not exist yet and the pivots are
+  integration points, not the feature.
+- `dropped_low_relevance`, `dropped_vendor` — what was cut and why.
 
-## Workflow
+## Other tools (when `run_pipeline` is not enough)
 
-1. `run_pipeline({ "task": "..." })` — ALWAYS FIRST
-2. Need to see what's indexed? Use `list_indexed_files`
-3. Editing a specific file? Use Read only for exact line content
-4. Need blast radius before refactor? Use `get_impact_graph`
+- `get_context` — symbols by name or keyword (first-party rows first).
+- `get_symbol` — a symbol's source slice plus its dependencies.
+- `get_file_summary` — every symbol of one file with line and signature (paged, 300 rows).
+- `get_impact_graph` — files affected by a symbol change.
+- `list_indexed_files` — paged listing (300 entries), filter by `prefix` or `language`.
+- `get_project_overview` — one-screen summary: repos, languages, largest folders and files.
+- `session_recall` — what was searched before, across sessions.
 
-## Parameters
+## Parameters worth knowing
 
-- `max_tokens`: increase result budget (default: 8000)
-- `min_score_ratio`: relevance cutoff as a fraction of the top score (default: 0.30)
-- `max_pivots`: cap on returned pivot files (default: 20)
-- `max_file_budget_share`: max budget share per pivot (default: 0.25)
-- `doc_token_cap`: absolute token cap for doc pivots (default: 1500)
+- `max_pivots` (20), `min_score_ratio` (0.30), `repos` (all).
+- `vendor_score_factor` (0.5): set `1.0` when the task is about a third-party package itself.
+- `vendor_pivot_share` (0.25): max share of the pivots third-party files may take while first-party code competes.
+- `include_content: true` packs compressed file content into `max_tokens` (8000); without it the answer is metadata only and nothing is dropped for budget.
+
+## Workspace configuration (`.comp/config.json`, all optional)
+
+- `skip_extensions` — extra extensions never indexed (Unity asset formats and `.meta` are built in).
+- `vendor_paths` / `.comp/vendor` (gitignore syntax) and `first_party_paths` — override the third-party detection.
+- `vendor_auto`, `vendor_active_min_commits` (6), `vendor_auto_max_commits` (3), `vendor_auto_min_files` (20), `vendor_activity_months` (18) — the git-activity heuristic.
+- `noise_keywords`, `min_score_abs` and the cutoff knobs: see `docs/user/CONFIGURATION.md`.
+
+## Session continuity
+
+Sessions persist across daemon restarts. When resuming work, call `session_recall()`
+(`{ "query": "keyword" }` to filter, `{ "limit": 5 }` for the last N) and continue in
+that context.

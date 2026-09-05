@@ -59,7 +59,9 @@ export class SessionMemoryManager {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
-      fs.writeFileSync(this.memoryFilePath, JSON.stringify(memory, null, 2), "utf8");
+      // Compact, like the daemon writes it: the pretty-printed form was a
+      // 3 MB rewrite on every save and the two writers disagreed on layout.
+      fs.writeFileSync(this.memoryFilePath, JSON.stringify(memory), "utf8");
     } catch (e) {
       console.error("[comP] Failed to save session memory:", e);
     }
@@ -74,10 +76,17 @@ export class SessionMemoryManager {
     const memory = this.load();
     let updated = false;
 
+    // The daemon stores repo-qualified paths ("<alias>/<relative>") while the
+    // watcher hands over workspace-relative ones, so an exact comparison never
+    // matched in multi-repo mode; a suffix match covers both layouts.
+    const suffix = "/" + normalizedPath;
     for (const session of memory.sessions) {
       for (const call of session.calls) {
         if (!call.stale) {
-          const match = call.files.some(f => f.replace(/\\/g, "/") === normalizedPath);
+          const match = (call.files || []).some(f => {
+            const stored = f.replace(/\\/g, "/");
+            return stored === normalizedPath || stored.endsWith(suffix);
+          });
           if (match) {
             call.stale = true;
             updated = true;
