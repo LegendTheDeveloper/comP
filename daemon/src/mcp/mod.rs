@@ -703,16 +703,22 @@ impl MCPServer {
                         }
                     }
                 }
+                // Rank with the vendor factor already applied: eleven
+                // PostProcessing models each hold an exact `Settings` struct,
+                // and at equal raw quality they filled every slot before the
+                // first-party class named GameSettings (a token match).
+                let ranking_key = |file: &str, hit: &relevance::SymbolHit| -> f32 {
+                    relevance::apply_vendor_factor(
+                        hit.quality,
+                        vendor_flags.get(file).copied().unwrap_or(false),
+                        rel_cfg.vendor_score_factor,
+                    )
+                };
                 let mut ranked: Vec<(String, relevance::SymbolHit)> = best_per_file.into_iter().collect();
                 ranked.sort_by(|a, b| {
-                    b.1.quality
-                        .partial_cmp(&a.1.quality)
+                    ranking_key(&b.0, &b.1)
+                        .partial_cmp(&ranking_key(&a.0, &a.1))
                         .unwrap_or(std::cmp::Ordering::Equal)
-                        .then_with(|| {
-                            let va = vendor_flags.get(&a.0).copied().unwrap_or(false);
-                            let vb = vendor_flags.get(&b.0).copied().unwrap_or(false);
-                            va.cmp(&vb)
-                        })
                         .then_with(|| a.1.name.len().cmp(&b.1.name.len()))
                         .then_with(|| a.0.cmp(&b.0))
                 });

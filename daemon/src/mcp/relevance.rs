@@ -41,7 +41,7 @@ pub const W_SYM_BEST: f32 = 0.4;
 /// shortest name). 120 rows: "settings" has 50 exact matches on Lynium and
 /// the class named GameSettings sits behind all of them.
 pub const LIKE_FETCH_ROWS: usize = 120;
-pub const LIKE_KEEP_FILES: usize = 12;
+pub const LIKE_KEEP_FILES: usize = 16;
 /// Share of the pivots doc files (markdown, sql, pdf, office) may take while
 /// code candidates compete. WHY: without budget packing, the BM25 tail
 /// (migrations, READMEs) survived the cutoff and filled a third of the list.

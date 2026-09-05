@@ -238,8 +238,33 @@ impl Indexer {
                 .filter_map(|(k, v)| k.strip_prefix(&prefix).map(|rel| (rel.to_string(), v.clone())))
                 .collect()
         });
-        let walk_result = self.walker.walk(local_hashes.as_ref())?;
+        let mut walk_result = self.walker.walk(local_hashes.as_ref())?;
         let total_files = walk_result.files.len();
+
+        // A file whose detected language changed without its content changing
+        // (v0.9.7 turned `.shader` and `.txt` from "unknown" into "shader" and
+        // "text") keeps the old label forever under a hash-only comparison,
+        // and the old label decides which search channels see it.
+        if let Ok(stored) = db.list_files() {
+            let prefix = format!("{}/", self.alias);
+            let stored_lang: HashMap<String, String> = stored
+                .into_iter()
+                .filter_map(|(_, path, lang)| path.strip_prefix(&prefix).map(|rel| (rel.to_string(), lang)))
+                .collect();
+            let already: std::collections::HashSet<String> =
+                walk_result.changed_files.iter().map(|f| f.path.clone()).collect();
+            let relabel: Vec<FileEntry> = walk_result
+                .files
+                .iter()
+                .filter(|f| !already.contains(&f.path))
+                .filter(|f| stored_lang.get(&f.path).is_some_and(|l| *l != f.language))
+                .cloned()
+                .collect();
+            if !relabel.is_empty() {
+                log::info!("Re-indexing {} file(s) whose language changed in [{}]", relabel.len(), self.alias);
+                walk_result.changed_files.extend(relabel);
+            }
+        }
         let changed_count = walk_result.changed_files.len();
 
         // WHY: Warn early when the file count is unexpectedly high so users can
@@ -681,6 +706,34 @@ mod tests {
         assert_eq!(indexer.walker_detect_language("slides.pptx"), "pptx");
         assert_eq!(indexer.walker_detect_language("data.xlsx"), "xlsx");
         assert_eq!(indexer.walker_detect_language("data.parquet"), "parquet");
+    }
+
+    /// A row written by an older daemon under a stale language label is
+    /// re-indexed even though its hash did not change.
+    #[tokio::test]
+    async fn test_index_workspace_reindexes_files_whose_language_changed() -> Result<()> {
+        use tempfile::TempDir;
+        let temp_dir = TempDir::new()?;
+        let root = temp_dir.path().to_string_lossy().to_string();
+        std::fs::write(temp_dir.path().join("Lane.shader"), "Shader \"Lane\" {}")?;
+
+        let db = crate::graph::GraphDB::new(&root).await?;
+        let mut indexer = Indexer::with_alias(&root, "repo");
+        indexer.index_workspace(None, &db).await?;
+
+        let hash = db
+            .get_all_file_hashes()?
+            .get("repo/Lane.shader")
+            .cloned()
+            .expect("shader indexed on the first pass");
+        db.upsert_file("repo/Lane.shader", &hash, "unknown", 10)?;
+
+        let hashes = db.get_all_file_hashes()?;
+        indexer.index_workspace(Some(&hashes), &db).await?;
+        let langs: HashMap<String, String> =
+            db.list_files()?.into_iter().map(|(_, p, l)| (p, l)).collect();
+        assert_eq!(langs.get("repo/Lane.shader").map(|s| s.as_str()), Some("shader"));
+        Ok(())
     }
 
     #[tokio::test]
