@@ -30,10 +30,14 @@ Measured on the Lynium workspace (Unity + PHP + Angular, 99 recorded queries rep
 - **Session memory** records only the returned pivots and related files (≤ 20 symbols), keeps the newest 300 calls, and is written compactly and atomically.
 - Token estimates are honest about languages without a grammar (full size at level 1, a 30-line head at level 2).
 
+- TF-IDF ranking uses pivoted length normalization (`cosine × |d_raw|^0.5`): cosine alone made a file of three symbols outrank the hundred-symbol file that defines the concept. Cosine is kept for the raw-signal thresholds.
+- `run_pipeline` waits up to 45 s for the initial indexing pass and reports `index_ready`; the first query of a session used to run against a half-built index.
+
 ### Fixed
 
 - `visibility_modifier` no longer marks PHP `private`/`protected` members as exported.
 - `note_symbol` / `note_tfidf` counted doc and data hits into the reported confidence.
+- The daemon aborted (exit 101) on the first `indexFile` from the VS Code save watcher when the workspace prefix failed to strip: the absolute path reached the gitignore matcher of the vendor classifier, which asserts on it. Paths that are not repo-relative are left unclassified, `index_file` strips the root case-insensitively on canonical forms, and the single-file path no longer runs `git log` (it did not fit the extension's 3 s timeout).
 
 ### Earlier fork releases (not previously listed here)
 
