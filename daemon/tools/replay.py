@@ -17,7 +17,10 @@ Usage:
             --workspace C:/path/to/repo --out baseline/lynium-0.9.6.json
   Options: --limit N (first N distinct queries), --params '{"max_pivots": 12}'
            (extra run_pipeline params for every query), --queries FILE (one
-           query per line instead of search_history), --no-restore.
+           query per line instead of search_history), --from-run PREVIOUS.json
+           (the queries of an earlier replay: use it for the second run of a
+           before/after pair, because search_history keeps only 500 rows and
+           a replay against an old daemon appends to it), --no-restore.
 """
 
 import argparse
@@ -105,6 +108,7 @@ def main():
     ap.add_argument("--limit", type=int)
     ap.add_argument("--params", default="{}", help="JSON object merged into every run_pipeline call")
     ap.add_argument("--queries", help="text file with one query per line (overrides search_history)")
+    ap.add_argument("--from-run", help="reuse the queries of a previous replay output (overrides search_history)")
     ap.add_argument("--no-restore", action="store_true", help="leave the replayed calls in the daemon logs")
     ap.add_argument("--stderr", help="file to capture daemon stderr (default: discard)")
     args = ap.parse_args()
@@ -113,11 +117,28 @@ def main():
     comp_dir = os.path.join(workspace, ".comp")
     db_path = os.path.join(comp_dir, "index.db")
     memory_path = os.path.join(comp_dir, "session-memory.json")
-    extra_params = json.loads(args.params)
+    # dry_run keeps a 0.9.7+ daemon from writing session memory, search
+    # history or token stats; older daemons ignore the unknown parameter and
+    # the restore step below covers them. search_history keeps only the
+    # newest 500 rows, so a replay without dry_run against a big history
+    # evicts real queries: prefer --from-run for the second run of a pair.
+    extra_params = {"dry_run": True}
+    extra_params.update(json.loads(args.params))
 
     if args.queries:
         with open(args.queries, encoding="utf-8") as f:
             queries = [l.strip() for l in f if l.strip()]
+        if args.limit:
+            queries = queries[: args.limit]
+    elif args.from_run:
+        with open(args.from_run, encoding="utf-8") as f:
+            previous = json.load(f)
+        queries = []
+        seen = set()
+        for r in previous.get("results", []):
+            if r["query"] not in seen:
+                seen.add(r["query"])
+                queries.append(r["query"])
         if args.limit:
             queries = queries[: args.limit]
     else:
