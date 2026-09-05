@@ -89,6 +89,9 @@ impl CodeParser {
             "c" => tree_sitter_c::LANGUAGE.into(),
             "cpp" => tree_sitter_cpp::LANGUAGE.into(),
             "java" => tree_sitter_java::LANGUAGE.into(),
+            // The mixed grammar (HTML + `<?php` blocks): backend endpoints are
+            // plain .php files, but templates interleave markup and code.
+            "php" => tree_sitter_php::LANGUAGE_PHP.into(),
             // XAML is XML-shaped; reuse the HTML grammar to extract element/tag symbols.
             "html" | "htm" | "xaml" => tree_sitter_html::LANGUAGE.into(),
             _ => return Ok(Vec::new()), // Fallback for unsupported languages
@@ -187,6 +190,17 @@ impl CodeParser {
             ("csharp", "namespace_declaration")             => (SymbolKind::Namespace, node.child_by_field_name("name")),
             ("csharp", "file_scoped_namespace_declaration") => (SymbolKind::Namespace, node.child_by_field_name("name")),
 
+            // PHP. Until v0.9.7 no PHP grammar was wired, so every backend
+            // file indexed with zero symbols and was reachable only by filename.
+            ("php", "function_definition")  => (SymbolKind::Function,  node.child_by_field_name("name")),
+            ("php", "method_declaration")   => (SymbolKind::Method,    node.child_by_field_name("name")),
+            ("php", "class_declaration")    => (SymbolKind::Class,     node.child_by_field_name("name")),
+            ("php", "interface_declaration") => (SymbolKind::Interface, node.child_by_field_name("name")),
+            ("php", "trait_declaration")    => (SymbolKind::Class,     node.child_by_field_name("name")),
+            ("php", "enum_declaration")     => (SymbolKind::Enum,      node.child_by_field_name("name")),
+            ("php", "enum_case")            => (SymbolKind::Constant,  node.child_by_field_name("name")),
+            ("php", "namespace_definition") => (SymbolKind::Namespace, node.child_by_field_name("name")),
+
             // Java
             ("java", "class_declaration")       => (SymbolKind::Class,     node.child_by_field_name("name")),
             ("java", "interface_declaration")   => (SymbolKind::Interface, node.child_by_field_name("name")),
@@ -284,9 +298,14 @@ impl CodeParser {
             let mut walk = node.walk();
             for child in node.children(&mut walk) {
                 match child.kind() {
+                    // Rust: "pub", "pub(crate)". PHP uses the same node kind
+                    // for "public" AND "private"/"protected", so only the
+                    // "pub…" spellings count.
                     "visibility_modifier" => {
-                        is_exported = true;
-                        break;
+                        if child.utf8_text(source_code.as_bytes()).map(|t| t.starts_with("pub")).unwrap_or(false) {
+                            is_exported = true;
+                            break;
+                        }
                     }
                     "modifier" => {
                         if child.utf8_text(source_code.as_bytes()).map(|t| t == "public").unwrap_or(false) {
@@ -386,6 +405,27 @@ mod tests {
         assert_eq!(cls.kind.as_str(), "class");
         assert!(cls.is_exported, "public class should be marked exported");
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_parse_php() -> Result<()> {
+        let mut parser = CodeParser::new()?;
+        let code = "<html><?php\nnamespace Api;\nfunction increment_downloads($id) { return $id; }\nclass BeatmapRepo {\n    public function find($id) { }\n    private function cache() { }\n}\n?></html>";
+
+        let symbols = parser.parse_file("php", code)?;
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"increment_downloads"), "top-level function, got {names:?}");
+        assert!(names.contains(&"BeatmapRepo"), "class, got {names:?}");
+        assert!(names.contains(&"find"), "method, got {names:?}");
+        assert!(names.contains(&"Api"), "namespace, got {names:?}");
+
+        let find = symbols.iter().find(|s| s.name == "find").unwrap();
+        assert_eq!(find.kind.as_str(), "method");
+        assert_eq!(find.scope.as_deref(), Some("BeatmapRepo"));
+        assert!(find.is_exported, "public method should be exported");
+        let cache = symbols.iter().find(|s| s.name == "cache").unwrap();
+        assert!(!cache.is_exported, "private method should not be exported");
         Ok(())
     }
 

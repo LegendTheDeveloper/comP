@@ -55,7 +55,26 @@ pub struct WalkerConfig {
     /// Skip files larger than this size in bytes. Default: 5 MiB.
     /// WHY: Unbounded reads of huge binaries/generated files waste I/O and token budget.
     pub max_file_bytes: u64,
+    /// File extensions (lowercase, no dot) that are never indexed.
+    ///
+    /// WHY: a Unity project ships one `.meta` twin per asset and thousands of
+    /// YAML assets (`.prefab`, `.unity`, `.mat`, `.anim`...). None of them has a
+    /// symbol, but until v0.9.7 they were stored as `unknown` files with their
+    /// full `char_count`, so `PlayerController.cs.meta` matched the filename
+    /// channel exactly like the script and `full_workspace_tokens` counted a
+    /// 155k-line prefab. Measured on a real workspace: 10 251 of 13 205 indexed
+    /// files had zero symbols. Extended by `.comp/config.json → skip_extensions`.
+    pub skip_extensions: Vec<String>,
 }
+
+/// Extensions skipped by default: Unity's serialized asset formats and their
+/// `.meta` twins. Lowercase; compared case-insensitively.
+pub const DEFAULT_SKIP_EXTENSIONS: &[&str] = &[
+    "meta", "prefab", "unity", "asset", "mat", "anim", "controller", "mixer", "lighting",
+    "rendertexture", "terrainlayer", "physicmaterial", "physicsmaterial2d", "cubemap",
+    "preset", "spriteatlas", "guiskin", "flare", "signal", "playable", "overridecontroller",
+    "brush", "mask", "giparams", "shadervariants", "fontsettings",
+];
 
 impl Default for WalkerConfig {
     fn default() -> Self {
@@ -72,8 +91,53 @@ impl Default for WalkerConfig {
             ],
             custom_ignore_file: None,
             max_file_bytes: 5 * 1024 * 1024, // 5 MiB
+            skip_extensions: DEFAULT_SKIP_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
         }
     }
+}
+
+/// Lowercase extension of a path, without the dot ("" when there is none).
+pub fn extension_lower(path: &str) -> String {
+    Path::new(path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+}
+
+/// True for the XML documentation files that ship inside NuGet packages
+/// (`<doc><assembly><name>System.Runtime</name>...`).
+///
+/// WHY: a project that commits its `Packages/` folder carries hundreds of
+/// them, and each one is thousands of `<param>`/`<summary>`/`<see>` tags. The
+/// XML parser indexed every distinct tag as a symbol, which added ~18k nodes
+/// of pure noise to the corpus and inflated every keyword's document
+/// frequency. Only the prologue is inspected, so the check costs one read of
+/// the first bytes.
+pub fn is_dotnet_doc_xml(head: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(head);
+    let mut rest = text.trim_start_matches('\u{feff}').trim_start();
+    // Skip the XML declaration, comments and processing instructions.
+    loop {
+        if rest.starts_with("<?") {
+            match rest.find("?>") {
+                Some(end) => rest = rest[end + 2..].trim_start(),
+                None => return false,
+            }
+        } else if rest.starts_with("<!--") {
+            match rest.find("-->") {
+                Some(end) => rest = rest[end + 3..].trim_start(),
+                None => return false,
+            }
+        } else {
+            break;
+        }
+    }
+    let Some(tag) = rest.strip_prefix('<') else { return false };
+    let name: String = tag
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+        .collect();
+    name == "doc"
 }
 
 pub struct FileWalker {
@@ -143,6 +207,15 @@ impl FileWalker {
                 }
             }
 
+            // Only indexable files are returned. A file the walker stops
+            // returning is reported as deleted on the next pass, which is how
+            // rows stored by older versions get purged without a forced
+            // reindex; filtering later, in the indexer, would leave those rows
+            // in place because unchanged files are never re-visited.
+            if !self.is_indexable(&relative_path, entry.path()) {
+                continue;
+            }
+
             let hash = match self.calculate_file_hash(entry.path()) {
                 Ok(h) => h,
                 Err(_) => continue,
@@ -206,7 +279,37 @@ impl FileWalker {
                 return true;
             }
         }
-        false
+        // The single-file watcher path must apply the same extension and
+        // language rules as the batch walk, or a saved `.meta` would sneak in.
+        let abs = self.workspace_root.join(&normalized);
+        !self.is_indexable(&normalized, &abs)
+    }
+
+    /// Whether a file belongs in the index at all: not a skipped extension,
+    /// a language the daemon knows what to do with (files it can neither
+    /// parse nor classify carry no symbols and would only pollute the
+    /// filename channel and the token baseline), and not a NuGet doc XML.
+    fn is_indexable(&self, relative_path: &str, abs_path: &Path) -> bool {
+        let ext = extension_lower(relative_path);
+        if self.config.skip_extensions.iter().any(|s| *s == ext) {
+            return false;
+        }
+        let language = self.detect_language(relative_path);
+        if language == "unknown" {
+            return false;
+        }
+        if language == "xml" {
+            let mut head = [0u8; 512];
+            if let Ok(mut f) = fs::File::open(abs_path) {
+                use std::io::Read;
+                if let Ok(n) = f.read(&mut head) {
+                    if is_dotnet_doc_xml(&head[..n]) {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 
     /// Get relative path from workspace root, normalized to forward slashes
@@ -231,10 +334,15 @@ impl FileWalker {
         Ok(duration.as_secs() as i64)
     }
 
-    /// Detect programming language from file extension
+    /// Detect programming language from file extension.
+    ///
+    /// "shader" and "text" have no parser: they are stored with zero symbols
+    /// so the filename channel can still find `Playfield.shader` or an i18n
+    /// `es_MX.txt`. Anything else without a mapping is "unknown" and is not
+    /// indexed at all (see `is_indexable`).
     pub fn detect_language(&self, path: &str) -> String {
         if let Some(ext) = Path::new(path).extension() {
-            match ext.to_string_lossy().as_ref() {
+            match ext.to_string_lossy().to_lowercase().as_str() {
                 "rs" => "rust",
                 "ts" | "tsx" => "typescript",
                 "js" | "jsx" => "javascript",
@@ -261,6 +369,12 @@ impl FileWalker {
                 "xlsx" => "xlsx",
                 "pdf" => "pdf",
                 "parquet" => "parquet",
+                "shader" | "cginc" | "hlsl" | "glsl" | "compute" => "shader",
+                // Findable by name, never parsed: notes, i18n tables, installer
+                // and build scripts (NSIS, PowerShell, batch), Unity style sheets.
+                "txt" | "text" | "ini" | "cfg" | "conf" | "uss" | "ps1" | "psm1" | "bat" | "cmd"
+                | "nsh" | "nsi" | "resx" | "properties" | "env" => "text",
+                "toml" => "toml",
                 _ => "unknown",
             }
         } else {
@@ -297,6 +411,91 @@ mod tests {
         assert_eq!(walker.detect_language("slides.pptx"), "pptx");
         assert_eq!(walker.detect_language("sheet.xlsx"), "xlsx");
         assert_eq!(walker.detect_language("data.jsonl"), "jsonl");
+        assert_eq!(walker.detect_language("Playfield.shader"), "shader");
+        assert_eq!(walker.detect_language("Common.cginc"), "shader");
+        assert_eq!(walker.detect_language("es_MX.txt"), "text");
+        assert_eq!(walker.detect_language("README.TXT"), "text", "extension match is case-insensitive");
+        assert_eq!(walker.detect_language("installer.nsh"), "text");
+        assert_eq!(walker.detect_language("deploy.ps1"), "text");
+        assert_eq!(walker.detect_language("Cargo.toml"), "toml");
+        assert_eq!(walker.detect_language("icon.svg"), "unknown");
+    }
+
+    #[test]
+    fn test_dotnet_doc_xml_detection() {
+        assert!(is_dotnet_doc_xml(b"<?xml version=\"1.0\"?>\n<doc>\n  <assembly><name>System.Runtime</name></assembly>"));
+        assert!(is_dotnet_doc_xml("\u{feff}<!-- generated -->\n<doc><assembly/></doc>".as_bytes()));
+        assert!(!is_dotnet_doc_xml(b"<?xml version=\"1.0\"?><manifest package=\"com.example\"/>"));
+        assert!(!is_dotnet_doc_xml(b"<document><doc/></document>"));
+        assert!(!is_dotnet_doc_xml(b""));
+    }
+
+    /// Unity asset formats, their .meta twins, unmapped extensions and NuGet
+    /// doc XML never reach the index; the script beside them still does.
+    #[tokio::test]
+    async fn test_walk_skips_assets_unknown_and_doc_xml() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let root = temp_dir.path();
+        File::create(root.join("Player.cs"))?.write_all(b"class Player {}")?;
+        File::create(root.join("Player.cs.meta"))?.write_all(b"guid: 1")?;
+        File::create(root.join("Main.unity"))?.write_all(b"%YAML 1.1")?;
+        File::create(root.join("Glow.mat"))?.write_all(b"%YAML 1.1")?;
+        File::create(root.join("Menu.PREFAB"))?.write_all(b"%YAML 1.1")?;
+        File::create(root.join("icon.png"))?.write_all(b"\x89PNG")?;
+        File::create(root.join("_._"))?.write_all(b"")?;
+        File::create(root.join("System.Runtime.xml"))?
+            .write_all(b"<?xml version=\"1.0\"?><doc><assembly><name>System.Runtime</name></assembly></doc>")?;
+        File::create(root.join("AndroidManifest.xml"))?
+            .write_all(b"<?xml version=\"1.0\"?><manifest package=\"x\"/>")?;
+        File::create(root.join("Lane.shader"))?.write_all(b"Shader \"Lane\" {}")?;
+
+        let walker = FileWalker::new(root.to_str().unwrap(), WalkerConfig::default());
+        let result = walker.walk(None)?;
+        let mut paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, vec!["AndroidManifest.xml", "Lane.shader", "Player.cs"]);
+        assert!(walker.should_skip_relative_path("Player.cs.meta"));
+        assert!(walker.should_skip_relative_path("System.Runtime.xml"));
+        assert!(!walker.should_skip_relative_path("Player.cs"));
+        Ok(())
+    }
+
+    /// A file stored by an older daemon that the walker no longer returns is
+    /// reported as deleted, so the index purges itself on the next pass.
+    #[tokio::test]
+    async fn test_walk_reports_now_skipped_files_as_deleted() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let root = temp_dir.path();
+        File::create(root.join("Player.cs"))?.write_all(b"class Player {}")?;
+        File::create(root.join("Player.cs.meta"))?.write_all(b"guid: 1")?;
+
+        let mut previous = HashMap::new();
+        previous.insert("Player.cs".to_string(), "stale".to_string());
+        previous.insert("Player.cs.meta".to_string(), "stale".to_string());
+
+        let walker = FileWalker::new(root.to_str().unwrap(), WalkerConfig::default());
+        let result = walker.walk(Some(&previous))?;
+        assert_eq!(result.deleted_files, vec!["Player.cs.meta".to_string()]);
+        Ok(())
+    }
+
+    /// Extra extensions from config are added to the built-in list, never
+    /// replace it.
+    #[tokio::test]
+    async fn test_walk_honours_configured_skip_extensions() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let root = temp_dir.path();
+        File::create(root.join("a.cs"))?.write_all(b"class A {}")?;
+        File::create(root.join("gen.sql"))?.write_all(b"select 1;")?;
+        File::create(root.join("a.cs.meta"))?.write_all(b"guid: 1")?;
+
+        let mut config = WalkerConfig::default();
+        config.skip_extensions.push("sql".to_string());
+        let walker = FileWalker::new(root.to_str().unwrap(), config);
+        let result = walker.walk(None)?;
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["a.cs"]);
+        Ok(())
     }
 
     #[test]

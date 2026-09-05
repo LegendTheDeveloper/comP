@@ -69,6 +69,13 @@ impl Indexer {
         // .comp/config.json so comp.exclude settings take effect on every indexer
         // creation (initial index and forceReindex alike).
         config.extra_skip_names.extend(Self::load_exclude_patterns(workspace_root));
+        // Same for `skip_extensions`: configured extensions are added to the
+        // built-in Unity list, they never replace it.
+        config
+            .skip_extensions
+            .extend(Self::load_config_string_array(workspace_root, "skip_extensions")
+                .into_iter()
+                .map(|s| s.trim_start_matches('.').to_lowercase()));
 
         let walker = FileWalker::new(workspace_root, config);
         let parser = CodeParser::default();
@@ -165,10 +172,16 @@ impl Indexer {
     /// WHY: VS Code's `comp.exclude` setting is synced here by the extension.
     /// Daemon reads this at Indexer::new time so forceReindex also picks up changes.
     fn load_exclude_patterns(workspace_root: &str) -> Vec<String> {
+        Self::load_config_string_array(workspace_root, "exclude")
+    }
+
+    /// Read a string array key from `.comp/config.json` (empty when the file,
+    /// the key or the array is missing).
+    pub fn load_config_string_array(workspace_root: &str, key: &str) -> Vec<String> {
         let path = std::path::Path::new(workspace_root).join(".comp/config.json");
         let content = std::fs::read_to_string(path).unwrap_or_default();
         let json: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::Value::Null);
-        json["exclude"]
+        json[key]
             .as_array()
             .map(|arr| {
                 arr.iter()
@@ -302,12 +315,25 @@ impl Indexer {
         }
 
         // 3. Remove deleted file entries from the database (qualify back to the
-        //    "<alias>/<rel>" key under which they were stored).
-        for path in &walk_result.deleted_files {
-            if let Err(e) = db.delete_file(&self.qualify(path)) {
+        //    "<alias>/<rel>" key under which they were stored). One transaction:
+        //    the first pass of a daemon with stricter walker rules purges
+        //    thousands of rows at once (10k `.meta`/asset files on a Unity
+        //    workspace), which is minutes of autocommits if done one by one.
+        if !walk_result.deleted_files.is_empty() {
+            let qualified: Vec<String> =
+                walk_result.deleted_files.iter().map(|p| self.qualify(p)).collect();
+            match db.delete_files_batch(&qualified) {
+                Ok(removed) => log::info!(
+                    "Removed {} file(s) no longer indexable from [{}]",
+                    removed,
+                    self.alias
+                ),
                 // WHY: If deletion fails, entries persist in the database, leading to obsolete search results.
                 //      Log a warning to prompt retries during the next indexing run.
-                log::warn!("Failed to remove deleted file from index (stale entry may persist): {} — {}", path, e);
+                Err(e) => log::warn!(
+                    "Failed to remove deleted files from index (stale entries may persist): {}",
+                    e
+                ),
             }
         }
 
@@ -364,6 +390,15 @@ impl Indexer {
 
         // 1. Read file content based on type
         let full_path = Path::new(workspace_root).join(&file_entry.path);
+        let db_path = format!("{}/{}", alias, file_entry.path);
+
+        // The walker already refuses "unknown" files; this guards the other
+        // callers (single-file updates, tests) and evicts a row an older daemon
+        // may have stored for the same path.
+        if file_entry.language == "unknown" {
+            db.delete_file(&db_path)?;
+            return Ok((0, None));
+        }
 
         let is_binary = matches!(
             file_entry.language.as_str(),
@@ -409,7 +444,6 @@ impl Indexer {
         //      qualified key "<alias>/<rel>"; char_count drives the real-token
         //      baseline in run_pipeline.
         let char_count = content_str.len();
-        let db_path = format!("{}/{}", alias, file_entry.path);
         db.store_file_symbols(&db_path, &file_entry.hash, &file_entry.language, char_count, &symbols)?;
 
         // 5. Extract raw dependencies from source code.
@@ -527,41 +561,11 @@ impl Indexer {
         Ok(())
     }
 
-    // Helper: same language detection as walker
+    /// Language detection for the single-file path: the walker's table, not a
+    /// copy of it. The copy that lived here until v0.9.7 had drifted (no
+    /// `xaml`, so every `.axaml` saved in VS Code was re-indexed as "unknown").
     fn walker_detect_language(&self, path: &str) -> String {
-        if let Some(ext) = Path::new(path).extension() {
-            match ext.to_string_lossy().as_ref() {
-                "rs" => "rust",
-                "ts" | "tsx" => "typescript",
-                "js" | "jsx" => "javascript",
-                "py" => "python",
-                "go" => "go",
-                "java" => "java",
-                "c" | "h" => "c",
-                "cpp" | "cc" | "cxx" | "hpp" => "cpp",
-                "cs" => "csharp",
-                "rb" => "ruby",
-                "php" => "php",
-                "sh" | "bash" => "bash",
-                "sql" => "sql",
-                "html" | "htm" => "html",
-                "css" | "scss" | "less" => "css",
-                "json" => "json",
-                "jsonl" => "jsonl",
-                "yaml" | "yml" => "yaml",
-                "xml" => "xml",
-                "md" => "markdown",
-                "parquet" => "parquet",
-                "docx" => "docx",
-                "pptx" => "pptx",
-                "xlsx" => "xlsx",
-                "pdf" => "pdf",
-                _ => "unknown",
-            }
-        } else {
-            "unknown"
-        }
-        .to_string()
+        self.walker.detect_language(path)
     }
 }
 

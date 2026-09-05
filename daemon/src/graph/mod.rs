@@ -710,6 +710,40 @@ impl GraphDB {
         Ok(removed)
     }
 
+    /// Delete many files (edges -> nodes -> files, like `delete_file`) inside a
+    /// single transaction. Returns how many file rows went away.
+    ///
+    /// WHY: the walker reports every file it no longer returns as deleted, and a
+    /// version that tightens the indexable set (v0.9.7 dropped `.meta`, Unity
+    /// assets and NuGet doc XML) purges ~10k rows on its first pass. One
+    /// autocommit per row held the DB mutex for minutes.
+    pub fn delete_files_batch(&self, paths: &[String]) -> Result<usize> {
+        if paths.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.conn.lock().map_err(|e| anyhow::anyhow!("DB mutex poisoned: {}", e))?;
+        let tx = conn.unchecked_transaction()?;
+        let mut removed = 0usize;
+        {
+            let mut find = tx.prepare("SELECT id FROM files WHERE path = ?")?;
+            let mut del_edges = tx.prepare(
+                "DELETE FROM edges WHERE from_id IN (SELECT id FROM nodes WHERE file_id = ?1)
+                    OR to_id IN (SELECT id FROM nodes WHERE file_id = ?1)",
+            )?;
+            let mut del_nodes = tx.prepare("DELETE FROM nodes WHERE file_id = ?")?;
+            let mut del_file = tx.prepare("DELETE FROM files WHERE id = ?")?;
+            for path in paths {
+                let fid: Option<i64> = find.query_row([path], |row| row.get(0)).ok();
+                let Some(fid) = fid else { continue };
+                del_edges.execute([fid])?;
+                del_nodes.execute([fid])?;
+                removed += del_file.execute([fid])?;
+            }
+        }
+        tx.commit()?;
+        Ok(removed)
+    }
+
     /// Remove a registered repo and every file/node/edge indexed under its
     /// "<alias>/<rel>" prefix. Same manual edges -> nodes -> files cascade as
     /// `delete_file` (foreign_keys pragma is not enabled), applied in bulk to
